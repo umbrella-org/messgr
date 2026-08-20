@@ -38,6 +38,7 @@ Last updated: 2026-08-20
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
+| T-001 | Control database, tenant registry, and single-tenant provisioning | high | medium | L | [] |  |
 
 ## TO DO (impact order, per child)
 
@@ -45,7 +46,6 @@ Last updated: 2026-08-20
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
-| T-001 | Control database, tenant registry, and single-tenant provisioning | high | medium-high | L | [] |  |
 
 ## DONE
 
