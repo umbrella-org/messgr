@@ -352,6 +352,37 @@ honoured; **decision 8 was only partially honoured (F1)**.
 Acceptance test re-run in full after the fix (fresh Postgres 18 container, port 55432): `cargo fmt --all -- --check` clean, `cargo clippy --all-targets --all-features -- -D warnings` clean, `cargo build` clean, `migrate` → exit 0, `provision` (first run) → new id exit 0, `provision` (same inputs) → same id exit 0, `provision` (F1 regression probe: same slug, different region/database-name) → exit 101 with the new error message, tenant registry and `pg_database` both left consistent, `cargo test` → 7 passed / 0 failed.
 
 No other findings were touched — F5–F12 are unchanged from the first pass (F5/F6 live in T-002; F7–F10, F12 stand as noted; F11 was already fixed inline in the first review pass, commit `d56de3a`).
+
+### Scoped re-review, 2026-08-21 (verifying F1–F4 only)
+
+**Verdict: F1, F2, F4 verified fixed. F3 is only half fixed — its second half shipped a test that
+cannot fail.** One new blocking finding; back to `5-rework/`.
+
+Each fix was verified against behaviour, not against the rework note claiming it:
+
+| finding | method | result |
+|---|---|---|
+| F1 | Re-ran the original repro plus a second variant the first pass did not try (same slug + same `database_name`, *different region only*). | **Fixed.** Both mismatch variants exit 101 naming stored vs. requested values; identical-input re-run still returns the same id and exits 0; `pg_database` gains no orphan; the `tenant` row is unchanged (`acme\|eu\|active\|tenant_acme`). |
+| F2 | `grep` + `just -n provision acme eu tenant_acme`. | **Fixed.** Renders `--slug acme --region eu --database-name tenant_acme`. |
+| F3(a) cross-database write | **Mutation test**: repointed tenant B's pool at tenant A's database and re-ran. | **Fixed and sound.** The mutant fails with `left: Some("isolation_probe"), right: None` — the test genuinely detects broken isolation rather than passing vacuously. |
+| F3(b) checkout arm | Ran the new unit test with `CONTROL_DATABASE_URL` pointed at a dead port (`localhost:59999`). | **Not fixed — see F13.** It passes with no database at all. |
+| F4 | `just -n migrate`, `just -n migrate-revert`, `grep -c "sqlx migrate" justfile`. | **Fixed.** Both recipes gone, zero `sqlx-cli` references remain. |
+
+Full suite re-run against a live Postgres 18: `fmt` clean, `clippy -D warnings` clean, 7 passed /
+0 failed. That green result is exactly what F13 shows to be partly misleading.
+
+| id | severity | class | disposition | description | evidence | suggestion |
+|---|---|---|---|---|---|---|
+| F13 | blocking | test-gap | — | The unit test added to close F3's checkout arm, `assert_current_database_panics_on_the_mismatch_before_acquire_would_catch`, **cannot fail**. It puts `super::connect(&url, 2).await.expect(...)` and `pool.acquire().await.expect(...)` *inside* the `tokio::spawn`, then asserts only `result.is_err()` on the `JoinHandle`. Any panic in that task satisfies the assertion — including the connection itself failing — so the test is green whether or not `assert_current_database` is ever reached, and whether or not it panics for the right reason. It currently certifies "the whole isolation mechanism" (§14) while proving nothing about it. Note the contrast: all three tests in `tests/tenancy.rs` connect *outside* the spawn and so fail correctly under the same conditions — the defect was introduced by the rework, not inherited. | With `CONTROL_DATABASE_URL=postgres://…@localhost:59999/nonexistent`, `cargo test --lib assert_current_database_panics` reports `ok. 1 passed` after a 30s connect timeout. Under the same URL `cargo test --test tenancy` correctly reports `FAILED. 0 passed; 3 failed` (`PoolTimedOut`). `src/db.rs:118-140` | Move the pool connect and `acquire` *outside* `tokio::spawn` so an infrastructure failure fails the test instead of satisfying it, spawn only the `assert_current_database` call, and assert on the panic payload rather than its mere existence — downcast the `JoinError` to `&str`/`String` and require it to contain `tenant pool mis-routed`. The same tightening is worth applying to `a_mis_wired_pool_trips_the_current_database_assertion`, whose `result.is_err()` is sound today only because its connect happens outside the spawn. |
+| F14 | non-blocking | design | noted | The F3 fix makes `cargo test --lib` require a live Postgres for the first time — the three pre-existing unit tests are hermetic, and the database requirement used to be confined to `tests/tenancy.rs`. Consequence beyond tidiness: with no database reachable the new test spends 30s in a connect timeout before passing (see F13), so the hermetic-unit/integration split is what would have made the tautology obvious immediately. Keeping it in `src/db.rs` is defensible — it needs the private `assert_current_database` — but the split is now blurred. | `cargo test --lib` against a dead port: 30.01s, 1 passed. `src/db.rs:118-140` vs. `src/profile.rs:53-75`. | Either accept it and say so in the module doc, or expose the helper as `pub(crate)` plus a thin `#[doc(hidden)]` test seam so the check can live beside the other isolation tests in `tests/tenancy.rs`. Not worth scheduling on its own; revisit if more DB-backed unit tests accumulate. |
+
+**Disposition summary (scoped re-review):** 2 new findings — 1 blocking (F13, the rework scope), 1
+non-blocking → **noted** (F14). F1, F2, F4 and F3(a) confirmed fixed and closed. F5–F12 untouched
+and unchanged.
+
+```
+cost: estimated L, actual L
+```
 | F5 | non-blocking | correctness | new ticket (T-002) | `db::with_database_name` derives the tenant URL by string-splitting on the last `/`, which silently discards any query string. `postgres://…/control?sslmode=require` becomes `postgres://…/tenant_acme` — every tenant pool in any non-local deployment would quietly drop its TLS and connect options. Harmless today (local dev only), and exactly the kind of defect that survives to production unnoticed. | `src/db.rs:87-92`; its own doc comment concedes "local-dev URLs only", yet `provision_tenant` is the production provisioning path (§11.4). | Parse instead of split: `base_url.parse::<PgConnectOptions>()?.database(database_name)`, which is already the type `connect_with_expected_database` uses two functions away. |
 | F6 | non-blocking | design | new ticket (T-002) | Nothing writes `platform_audit`, though §4.11 names provisioning as its first purpose ("provisioning, suspension, break-glass") and §11.4 lists the audit trail as a platform-console surface. Provisioning is currently the only auditable platform action that exists, and it goes unrecorded. | `migrations/control/0001_control_schema.sql:43-50` creates the table; `grep -r platform_audit src/` returns nothing. | Write one `platform_audit` row per provisioning run (actor from the invoking operator, action `tenant.provision`, `detail` carrying slug/region/database_name and whether the database was created or already existed). |
 | F7 | non-blocking | design | noted | `Config::from_env()` runs before `Cli::parse()`, so `messgr-control --help` and a bare invocation panic on a missing `CONTROL_DATABASE_URL` instead of printing usage. Masked in the repo because `dotenvy` finds `.env` in the cwd; it reproduces from anywhere else. | From `/tmp`: `env -u CONTROL_DATABASE_URL …/messgr-control --help` → `panicked at src/config.rs:21: CONTROL_DATABASE_URL must be set`. `src/bin/control.rs:37-38` | Swap the two lines — parse argv first, load config after. Left as a finding rather than a rework item because it changes behaviour and so fails the `fixed inline` bar. |
@@ -389,3 +420,4 @@ cost: estimated L, actual L
 - 2026-08-21 — IN DEVELOPMENT → IN REVIEW: acceptance test green
 - 2026-08-21 — IN REVIEW → REWORK: review: 4 blocking findings (F1 registry divergence on mismatched re-provision, F2 README just-provision invocation wrong, F3 two-tenant suite missing the §14 cross-database and checkout assertions, F4 broken duplicate justfile migrate recipes); 8 non-blocking dispositioned — 2 -> T-002, 1 fixed inline, 5 noted
 - 2026-08-21 — REWORK → IN REVIEW: findings F1-F4 fixed; 7/7 tests green
+- 2026-08-21 — IN REVIEW → REWORK: scoped re-review: F1, F2, F4 and F3(a) verified fixed; F13 blocking — the F3 checkout-arm unit test is tautological (passes with no database); F14 noted
