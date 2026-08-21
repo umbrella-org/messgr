@@ -20,10 +20,11 @@ Last updated: 2026-08-21
 
 ## IN REVIEW
 
-### messgr (0/1)
+### messgr (1/1)
 
 | id | title | depends-on |
 |---|---|---|
+| T-001 | Control database, tenant registry, and single-tenant provisioning | [] |
 
 ## REWORK
 
@@ -31,7 +32,6 @@ Last updated: 2026-08-21
 
 | id | title | open findings |
 |---|---|---|
-| T-001 | Control database, tenant registry, and single-tenant provisioning | scoped re-review: F1, F2, F4 and F3(a) verified fixed; F13 blocking — the F3 checkout-arm unit test is tautological (pa… |
 
 ## READY (impact order, per child)
 

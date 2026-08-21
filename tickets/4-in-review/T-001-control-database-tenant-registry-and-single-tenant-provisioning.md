@@ -383,6 +383,20 @@ and unchanged.
 ```
 cost: estimated L, actual L
 ```
+
+### Rework #2 (commit `0210c18`)
+
+| id | fix |
+|---|---|
+| F13 | `assert_current_database_panics_on_the_mismatch_before_acquire_would_catch` (`src/db.rs`) now connects and acquires the connection *outside* `tokio::spawn`, so an infrastructure failure fails the test via `expect()` instead of satisfying the assertion under test — spawn wraps only the `assert_current_database` call itself. The assertion was tightened from `result.is_err()` to extracting the panic payload via `JoinError::into_panic()` and requiring the message contain `tenant pool mis-routed`, so a panic for an unrelated reason no longer passes either. |
+
+Verified in both directions rather than trusting the description:
+
+- **Dead port** (`CONTROL_DATABASE_URL` pointed at `localhost:59999`, nothing listening): `cargo test --lib assert_current_database_panics` now reports `FAILED. 0 passed; 1 failed`, panicking at the `expect` on the pool connect — this is the exact case F13 showed passing incorrectly before the fix.
+- **Mutation** (expectation string temporarily changed from `"not_the_real_database"` to the pool's real database name, `"control"`, then reverted): no panic occurs inside the spawn, so the test correctly fails with `assert_current_database must panic on a mismatched expectation ...: Ok(())` — proves the test also fails when the code path it exists to catch produces no defect.
+- **Live database, unmutated**: `cargo fmt --all -- --check` clean, `cargo clippy --all-targets --all-features -- -D warnings` clean, full suite 7 passed / 0 failed.
+
+F14 and F5–F12 untouched, as scoped — F13 was the entire rework.
 | F5 | non-blocking | correctness | new ticket (T-002) | `db::with_database_name` derives the tenant URL by string-splitting on the last `/`, which silently discards any query string. `postgres://…/control?sslmode=require` becomes `postgres://…/tenant_acme` — every tenant pool in any non-local deployment would quietly drop its TLS and connect options. Harmless today (local dev only), and exactly the kind of defect that survives to production unnoticed. | `src/db.rs:87-92`; its own doc comment concedes "local-dev URLs only", yet `provision_tenant` is the production provisioning path (§11.4). | Parse instead of split: `base_url.parse::<PgConnectOptions>()?.database(database_name)`, which is already the type `connect_with_expected_database` uses two functions away. |
 | F6 | non-blocking | design | new ticket (T-002) | Nothing writes `platform_audit`, though §4.11 names provisioning as its first purpose ("provisioning, suspension, break-glass") and §11.4 lists the audit trail as a platform-console surface. Provisioning is currently the only auditable platform action that exists, and it goes unrecorded. | `migrations/control/0001_control_schema.sql:43-50` creates the table; `grep -r platform_audit src/` returns nothing. | Write one `platform_audit` row per provisioning run (actor from the invoking operator, action `tenant.provision`, `detail` carrying slug/region/database_name and whether the database was created or already existed). |
 | F7 | non-blocking | design | noted | `Config::from_env()` runs before `Cli::parse()`, so `messgr-control --help` and a bare invocation panic on a missing `CONTROL_DATABASE_URL` instead of printing usage. Masked in the repo because `dotenvy` finds `.env` in the cwd; it reproduces from anywhere else. | From `/tmp`: `env -u CONTROL_DATABASE_URL …/messgr-control --help` → `panicked at src/config.rs:21: CONTROL_DATABASE_URL must be set`. `src/bin/control.rs:37-38` | Swap the two lines — parse argv first, load config after. Left as a finding rather than a rework item because it changes behaviour and so fails the `fixed inline` bar. |
@@ -421,3 +435,4 @@ cost: estimated L, actual L
 - 2026-08-21 — IN REVIEW → REWORK: review: 4 blocking findings (F1 registry divergence on mismatched re-provision, F2 README just-provision invocation wrong, F3 two-tenant suite missing the §14 cross-database and checkout assertions, F4 broken duplicate justfile migrate recipes); 8 non-blocking dispositioned — 2 -> T-002, 1 fixed inline, 5 noted
 - 2026-08-21 — REWORK → IN REVIEW: findings F1-F4 fixed; 7/7 tests green
 - 2026-08-21 — IN REVIEW → REWORK: scoped re-review: F1, F2, F4 and F3(a) verified fixed; F13 blocking — the F3 checkout-arm unit test is tautological (passes with no database); F14 noted
+- 2026-08-21 — REWORK → IN REVIEW: F13 fixed: checkout-arm test now fails without a database and fails under mutation; verified both directions
