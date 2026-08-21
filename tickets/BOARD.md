@@ -20,11 +20,10 @@ Last updated: 2026-08-21
 
 ## IN REVIEW
 
-### messgr (1/1)
+### messgr (0/1)
 
 | id | title | depends-on |
 |---|---|---|
-| T-001 | Control database, tenant registry, and single-tenant provisioning | [] |
 
 ## REWORK
 
@@ -54,6 +53,7 @@ Last updated: 2026-08-21
 
 | id | title | merged |
 |---|---|---|
+| T-001 | Control database, tenant registry, and single-tenant provisioning | no — publish-gated |
 
 ## DROPPED
 

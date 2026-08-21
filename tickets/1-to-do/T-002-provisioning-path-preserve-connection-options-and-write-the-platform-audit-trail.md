@@ -46,6 +46,15 @@ and a `detail` payload carrying slug, region, database_name, and whether the dat
 created or already existed. The row belongs on the idempotent re-run path too — a second
 provision of the same tenant is an operator action worth seeing.
 
+**Third path to audit, added after T-001's rework.** T-001 shipped with a guard (its review
+finding F1) that *rejects* a re-provision of an existing slug carrying a different `region`
+or `database_name`, returning an error instead of silently creating an orphan database. So
+`provision_tenant` now has three outcomes, not two: created, idempotent no-op, and rejected.
+A rejected provisioning attempt is an operator error against the tenant registry and is
+arguably the most audit-worthy of the three — decide explicitly whether it writes a
+`platform_audit` row, and note that it currently returns early *before* any audit write would
+naturally sit. Do not simply wrap the happy path and leave the rejection silent.
+
 Soft coupling, no hard dependency: this edits code T-001 introduced, so it wants T-001 merged
 first to avoid a conflict, but it encodes no assumption T-001 could invalidate. Note that
 T-001's rework pass (blocking findings F1–F4) also touches `src/tenant/provision.rs`.
@@ -61,3 +70,4 @@ T-001's rework pass (blocking findings F1–F4) also touches `src/tenant/provisi
 ## History
 
 - 2026-08-21 — created (TO DO). source: review: T-001 review findings F5 (tenant URLs silently drop query-string connection options, e.g. `sslmode`) and F6 (`platform_audit` created but never written), batched by theme — both are provisioning-path completeness in `src/db.rs` / `src/tenant/provision.rs`.
+- 2026-08-21 — description amended by T-001's review impact sweep: T-001's F1 fix added a *rejection* path to `provision_tenant` (mismatched re-provision of an existing slug now errors instead of proceeding), so the `platform_audit` work has three outcomes to cover rather than two. `db::with_database_name` (F5) was not touched by that rework and this ticket's plan for it stands unchanged.

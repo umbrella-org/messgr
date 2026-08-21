@@ -397,6 +397,44 @@ Verified in both directions rather than trusting the description:
 - **Live database, unmutated**: `cargo fmt --all -- --check` clean, `cargo clippy --all-targets --all-features -- -D warnings` clean, full suite 7 passed / 0 failed.
 
 F14 and F5–F12 untouched, as scoped — F13 was the entire rework.
+
+### Scoped re-review #2, 2026-08-21 (verifying F13 only)
+
+**Verdict: F13 fixed. Ticket proceeds to `6-done/`.** One new non-blocking finding (F15), noted.
+
+The fix was verified by trying to kill the test five ways rather than by reading it. A test whose
+whole defect was "it passes when it shouldn't" earns nothing less:
+
+| mutation | expected | observed |
+|---|---|---|
+| M1 — no database reachable (`localhost:59999`) | fail | **FAILED**, panics on the pool-connect `expect` (this is the exact case that passed before the fix) |
+| M2 — expectation changed to the pool's real database (`"control"`), so no mismatch occurs | fail | **FAILED**: `must panic on a mismatched expectation …: Ok(())` |
+| M3 — production panic message changed to `"wrong db"` | fail | **FAILED** — confirms the substring check is load-bearing, not decorative |
+| M4 — production `assert_eq!` in `assert_current_database` replaced with a no-op | fail | **FAILED** — confirms the test detects the isolation check being disabled |
+| honest, unmutated, live database | pass | **ok. 1 passed** |
+
+Also re-ran the full acceptance test: `fmt` clean, `clippy -D warnings` clean, `migrate` exit 0,
+`provision` fresh + idempotent both exit 0 returning the same id, one `active` tenant row, one
+`tenant_schema_version` row, `cargo test` 7 passed / 0 failed. The diff is confined to `src/db.rs`,
+so F1/F2/F4/F3(a) are untouched and remain closed.
+
+| id | severity | class | disposition | description | evidence | suggestion |
+|---|---|---|---|---|---|---|
+| F15 | non-blocking | test-gap | noted | The checkout arm's **wiring** is still unverified, as distinct from its **logic**, which F13 closed. Deleting the entire `.before_acquire(…)` registration from `connect_with_expected_database` leaves all seven tests green — only a compiler warning about an unused `profile` betrays it. So nothing would catch an accidental removal of the per-checkout half of §2.1's assertion, or a mis-wiring of its `profile.checks_pool_identity()` gate. Deliberately **not** blocking: the shipped wiring was read and is correct, `Profile::checks_pool_identity()` is unit-tested, and the helper it calls is now properly tested — this is missing coverage of correct code, not wrong behaviour. It is also genuinely awkward to test, because `after_connect` catches any mismatch before a checkout can observe one (the structural limitation the test's own doc comment already explains), so the honest fix is a refactor rather than another assertion. Recorded permanently so a later reviewer can promote it by citing this row. | M5: removing the `.before_acquire(…)` block and its two closure variables from `src/db.rs` → `cargo test` still reports 4 passed + 3 passed, 0 failed. | Extract hook construction into a small named factory returning the closure (or `None` when `!profile.checks_pool_identity()`) and unit-test the factory's shape per profile. Worth doing when this code is next opened, not on its own. |
+
+**Disposition summary (scoped re-review #2):** 1 new finding — 0 blocking, 1 non-blocking →
+**noted** (F15). F13 verified fixed and closed. All prior findings unchanged: F1–F4 and F3(a)
+closed, F5/F6 carried by T-002, F11 fixed inline, F7–F10/F12/F14 standing as noted.
+
+```
+cost: estimated L, actual L
+```
+
+**Final tally across three passes:** 15 findings — 5 blocking (F1, F2, F3, F4, F13), all fixed and
+verified; 10 non-blocking (2 → T-002, 1 fixed inline, 7 noted). Two of the five blocking findings
+(F3, F13) were defects in test *credibility* rather than in shipped behaviour, and F13 was a defect
+introduced by the rework of F3 — which is the argument for verifying a fix by breaking it rather
+than by re-reading it.
 | F5 | non-blocking | correctness | new ticket (T-002) | `db::with_database_name` derives the tenant URL by string-splitting on the last `/`, which silently discards any query string. `postgres://…/control?sslmode=require` becomes `postgres://…/tenant_acme` — every tenant pool in any non-local deployment would quietly drop its TLS and connect options. Harmless today (local dev only), and exactly the kind of defect that survives to production unnoticed. | `src/db.rs:87-92`; its own doc comment concedes "local-dev URLs only", yet `provision_tenant` is the production provisioning path (§11.4). | Parse instead of split: `base_url.parse::<PgConnectOptions>()?.database(database_name)`, which is already the type `connect_with_expected_database` uses two functions away. |
 | F6 | non-blocking | design | new ticket (T-002) | Nothing writes `platform_audit`, though §4.11 names provisioning as its first purpose ("provisioning, suspension, break-glass") and §11.4 lists the audit trail as a platform-console surface. Provisioning is currently the only auditable platform action that exists, and it goes unrecorded. | `migrations/control/0001_control_schema.sql:43-50` creates the table; `grep -r platform_audit src/` returns nothing. | Write one `platform_audit` row per provisioning run (actor from the invoking operator, action `tenant.provision`, `detail` carrying slug/region/database_name and whether the database was created or already existed). |
 | F7 | non-blocking | design | noted | `Config::from_env()` runs before `Cli::parse()`, so `messgr-control --help` and a bare invocation panic on a missing `CONTROL_DATABASE_URL` instead of printing usage. Masked in the repo because `dotenvy` finds `.env` in the cwd; it reproduces from anywhere else. | From `/tmp`: `env -u CONTROL_DATABASE_URL …/messgr-control --help` → `panicked at src/config.rs:21: CONTROL_DATABASE_URL must be set`. `src/bin/control.rs:37-38` | Swap the two lines — parse argv first, load config after. Left as a finding rather than a rework item because it changes behaviour and so fails the `fixed inline` bar. |
@@ -436,3 +474,4 @@ cost: estimated L, actual L
 - 2026-08-21 — REWORK → IN REVIEW: findings F1-F4 fixed; 7/7 tests green
 - 2026-08-21 — IN REVIEW → REWORK: scoped re-review: F1, F2, F4 and F3(a) verified fixed; F13 blocking — the F3 checkout-arm unit test is tautological (passes with no database); F14 noted
 - 2026-08-21 — REWORK → IN REVIEW: F13 fixed: checkout-arm test now fails without a database and fails under mutation; verified both directions
+- 2026-08-21 — IN REVIEW → DONE: scoped re-review #2: F13 verified fixed by 5 mutations; F15 noted; all 5 blocking findings across 3 passes closed
