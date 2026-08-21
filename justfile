@@ -37,5 +37,5 @@ db-shell:
 control-migrate:
     cargo run --bin messgr-control -- migrate
 
-provision slug region db:
-    cargo run --bin messgr-control -- provision --slug {{slug}} --region {{region}} --database-name {{db}}
+provision slug region db actor:
+    cargo run --bin messgr-control -- provision --slug {{slug}} --region {{region}} --database-name {{db}} --actor {{actor}}

@@ -30,7 +30,7 @@ pub async fn connect(
 /// returning a swallowable error: a mis-wired tenant pool is exactly the bug
 /// this check exists to make impossible to ignore.
 pub async fn connect_with_expected_database(
-    database_url: &str,
+    options: PgConnectOptions,
     max_connections: u32,
     expected_db: &str,
     profile: Profile,
@@ -38,8 +38,6 @@ pub async fn connect_with_expected_database(
     let expected_for_connect = expected_db.to_string();
     let expected_for_acquire = expected_db.to_string();
     let checks_on_acquire = profile.checks_pool_identity();
-
-    let options: PgConnectOptions = database_url.parse()?;
 
     let pool = PgPoolOptions::new()
         .max_connections(max_connections)
@@ -80,15 +78,17 @@ async fn assert_current_database(
     Ok(())
 }
 
-/// Swaps the database-name path component of a Postgres connection URL.
-/// Local-dev URLs only (no query-string-sensitive edge cases) — the whole
-/// cluster shares host/port/credentials, only the database name varies per
-/// tenant.
-pub fn with_database_name(base_url: &str, database_name: &str) -> String {
-    let (prefix, _current_db) = base_url
-        .rsplit_once('/')
-        .expect("connection URL must contain a '/' before the database name");
-    format!("{prefix}/{database_name}")
+/// Swaps in a tenant's database name on a base connection URL, preserving
+/// every other connection option (TLS mode, application name, etc.) —
+/// review finding T-001/F5. Parsing into `PgConnectOptions` and back out
+/// through its own builder means nothing carried in the URL, including a
+/// query string, is lost the way a naive string split would lose it.
+pub fn with_database_name(
+    base_url: &str,
+    database_name: &str,
+) -> Result<PgConnectOptions, sqlx::Error> {
+    let options: PgConnectOptions = base_url.parse()?;
+    Ok(options.database(database_name))
 }
 
 #[cfg(test)]
@@ -96,13 +96,35 @@ mod tests {
     use super::*;
 
     #[test]
-    fn with_database_name_swaps_the_final_segment() {
+    fn with_database_name_swaps_the_database_and_keeps_everything_else() {
+        let options = with_database_name(
+            "postgres://messgr:messgr@localhost:5432/control",
+            "tenant_acme",
+        )
+        .expect("parsing a well-formed URL must not fail");
+
+        assert_eq!(options.get_database(), Some("tenant_acme"));
+        assert_eq!(options.get_host(), "localhost");
+        assert_eq!(options.get_port(), 5432);
+        assert_eq!(options.get_username(), "messgr");
+    }
+
+    /// Review finding T-001/F5: the previous string-split implementation
+    /// silently dropped every connection option carried in the query
+    /// string. `sslmode=require` is the one that would have gone unnoticed
+    /// in production — proven here by parsing it back out after the swap.
+    #[test]
+    fn with_database_name_preserves_query_string_options() {
+        let options = with_database_name(
+            "postgres://messgr:messgr@localhost:5432/control?sslmode=require",
+            "tenant_acme",
+        )
+        .expect("parsing a well-formed URL must not fail");
+
+        assert_eq!(options.get_database(), Some("tenant_acme"));
         assert_eq!(
-            with_database_name(
-                "postgres://messgr:messgr@localhost:5432/control",
-                "tenant_acme"
-            ),
-            "postgres://messgr:messgr@localhost:5432/tenant_acme"
+            format!("{:?}", options.get_ssl_mode()),
+            format!("{:?}", sqlx::postgres::PgSslMode::Require)
         );
     }
 

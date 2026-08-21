@@ -10,7 +10,7 @@ tracked as tickets under [`tickets/`](tickets/BOARD.md).
 cp .env.example .env
 docker compose up -d          # Postgres, database `control`
 just control-migrate          # apply control-database migrations
-just provision acme eu tenant_acme
+just provision acme eu tenant_acme operator@example.com
 ```
 
 `messgr-control provision` creates the tenant's database, applies its (currently empty)

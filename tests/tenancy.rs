@@ -54,6 +54,14 @@ async fn drop_test_tenant(control_pool: &PgPool, database_name: &str, slug: &str
         eprintln!("cleanup: failed to delete tenant_schema_version for {slug}: {err}");
     }
 
+    if let Err(err) = sqlx::query("DELETE FROM platform_audit WHERE tenant_id = (SELECT id FROM tenant WHERE slug = $1)")
+        .bind(slug)
+        .execute(control_pool)
+        .await
+    {
+        eprintln!("cleanup: failed to delete platform_audit rows for {slug}: {err}");
+    }
+
     if let Err(err) = sqlx::query("DELETE FROM tenant WHERE slug = $1")
         .bind(slug)
         .execute(control_pool)
@@ -82,6 +90,7 @@ async fn two_tenants_are_isolated_by_database() {
         "eu",
         &db_a,
         Profile::Dev,
+        "test-actor",
     )
     .await
     .expect("provisioning tenant A failed");
@@ -92,6 +101,7 @@ async fn two_tenants_are_isolated_by_database() {
         "eu",
         &db_b,
         Profile::Dev,
+        "test-actor",
     )
     .await
     .expect("provisioning tenant B failed");
@@ -161,6 +171,7 @@ async fn work_on_tenant_as_pool_never_reads_or_writes_tenant_bs_database() {
         "eu",
         &db_a,
         Profile::Dev,
+        "test-actor",
     )
     .await
     .expect("provisioning tenant A failed");
@@ -171,6 +182,7 @@ async fn work_on_tenant_as_pool_never_reads_or_writes_tenant_bs_database() {
         "eu",
         &db_b,
         Profile::Dev,
+        "test-actor",
     )
     .await
     .expect("provisioning tenant B failed");
@@ -228,6 +240,7 @@ async fn a_mis_wired_pool_trips_the_current_database_assertion() {
         "eu",
         &db_name,
         Profile::Dev,
+        "test-actor",
     )
     .await
     .expect("provisioning failed");
@@ -235,11 +248,12 @@ async fn a_mis_wired_pool_trips_the_current_database_assertion() {
     // Connect to the real tenant database, but tell the assertion to expect
     // a different name. This is the exact mis-wiring §2.1's assertion exists
     // to catch: code reaching for the wrong tenant's identity.
-    let tenant_url = db::with_database_name(&control_url, &db_name);
+    let options = db::with_database_name(&control_url, &db_name)
+        .expect("parsing the control URL failed");
     let wrong_expected = "not_the_real_database";
 
     let result = tokio::spawn(async move {
-        db::connect_with_expected_database(&tenant_url, 2, wrong_expected, Profile::Dev)
+        db::connect_with_expected_database(options, 2, wrong_expected, Profile::Dev)
             .await
     })
     .await;
@@ -247,6 +261,162 @@ async fn a_mis_wired_pool_trips_the_current_database_assertion() {
     assert!(
         result.is_err(),
         "connecting with a deliberately wrong expected database must panic, not succeed"
+    );
+
+    drop_test_tenant(&control_pool, &db_name, &slug).await;
+}
+
+#[tokio::test]
+async fn provisioning_writes_a_platform_audit_row() {
+    let control_url = control_database_url();
+    let control_pool = db::connect(&control_url, 5)
+        .await
+        .expect("failed to connect to control database");
+
+    let slug = unique_name("test_tenant_audit_created");
+    let db_name = unique_name("test_db_audit_created");
+
+    let tenant_id = provision_tenant(
+        &control_pool,
+        &control_url,
+        &slug,
+        "eu",
+        &db_name,
+        Profile::Dev,
+        "test-actor",
+    )
+    .await
+    .expect("provisioning failed");
+
+    let rows: Vec<(String, Option<String>)> = sqlx::query_as(
+        "SELECT action, detail->>'outcome' FROM platform_audit WHERE tenant_id = $1 ORDER BY at",
+    )
+    .bind(tenant_id)
+    .fetch_all(&control_pool)
+    .await
+    .expect("querying platform_audit failed");
+
+    assert_eq!(
+        rows,
+        vec![("tenant.provision".to_string(), Some("created".to_string()))],
+        "provisioning a new tenant must write exactly one tenant.provision/created row"
+    );
+
+    drop_test_tenant(&control_pool, &db_name, &slug).await;
+}
+
+#[tokio::test]
+async fn idempotent_reprovision_writes_a_second_platform_audit_row() {
+    let control_url = control_database_url();
+    let control_pool = db::connect(&control_url, 5)
+        .await
+        .expect("failed to connect to control database");
+
+    let slug = unique_name("test_tenant_audit_idempotent");
+    let db_name = unique_name("test_db_audit_idempotent");
+
+    let tenant_id = provision_tenant(
+        &control_pool,
+        &control_url,
+        &slug,
+        "eu",
+        &db_name,
+        Profile::Dev,
+        "test-actor",
+    )
+    .await
+    .expect("first provisioning failed");
+
+    provision_tenant(
+        &control_pool,
+        &control_url,
+        &slug,
+        "eu",
+        &db_name,
+        Profile::Dev,
+        "test-actor",
+    )
+    .await
+    .expect("idempotent re-provisioning failed");
+
+    let rows: Vec<(String, Option<String>)> = sqlx::query_as(
+        "SELECT action, detail->>'outcome' FROM platform_audit WHERE tenant_id = $1 ORDER BY at",
+    )
+    .bind(tenant_id)
+    .fetch_all(&control_pool)
+    .await
+    .expect("querying platform_audit failed");
+
+    assert_eq!(
+        rows,
+        vec![
+            ("tenant.provision".to_string(), Some("created".to_string())),
+            (
+                "tenant.provision".to_string(),
+                Some("idempotent".to_string())
+            ),
+        ],
+        "a repeat provisioning with identical inputs must write a second row with outcome=idempotent"
+    );
+
+    drop_test_tenant(&control_pool, &db_name, &slug).await;
+}
+
+#[tokio::test]
+async fn rejected_reprovision_writes_a_platform_audit_row() {
+    let control_url = control_database_url();
+    let control_pool = db::connect(&control_url, 5)
+        .await
+        .expect("failed to connect to control database");
+
+    let slug = unique_name("test_tenant_audit_rejected");
+    let db_name = unique_name("test_db_audit_rejected");
+    let conflicting_db_name = unique_name("test_db_audit_rejected_conflict");
+
+    let tenant_id = provision_tenant(
+        &control_pool,
+        &control_url,
+        &slug,
+        "eu",
+        &db_name,
+        Profile::Dev,
+        "test-actor",
+    )
+    .await
+    .expect("first provisioning failed");
+
+    let result = provision_tenant(
+        &control_pool,
+        &control_url,
+        &slug,
+        "eu",
+        &conflicting_db_name,
+        Profile::Dev,
+        "test-actor",
+    )
+    .await;
+
+    assert!(
+        result.is_err(),
+        "re-provisioning the same slug with a different database_name must be rejected"
+    );
+
+    let rows: Vec<(String, Option<String>)> = sqlx::query_as(
+        "SELECT action, detail->>'attempted_database_name' FROM platform_audit \
+         WHERE tenant_id = $1 AND action = 'tenant.provision_rejected'",
+    )
+    .bind(tenant_id)
+    .fetch_all(&control_pool)
+    .await
+    .expect("querying platform_audit failed");
+
+    assert_eq!(
+        rows,
+        vec![(
+            "tenant.provision_rejected".to_string(),
+            Some(conflicting_db_name.clone())
+        )],
+        "a rejected re-provision must write exactly one tenant.provision_rejected row naming the attempted database_name"
     );
 
     drop_test_tenant(&control_pool, &db_name, &slug).await;

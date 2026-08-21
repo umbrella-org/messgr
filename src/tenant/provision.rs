@@ -20,6 +20,12 @@ use super::{pool::connect_tenant_pool, repo};
 /// idempotence means repeating the same operation, not overwriting it with a
 /// different one.
 ///
+/// Every one of the three outcomes (created, idempotent no-op, rejected)
+/// writes exactly one `platform_audit` row (DESIGN.md §4.11, review finding
+/// T-001/F6) via `platform_audit::record`, tagged with `actor` — the
+/// operator identity supplied by the caller, since `messgr-control` has no
+/// auth realm to infer it from yet.
+///
 /// Out of scope, deliberately: creating the tenant's Vault Transit mount and
 /// AppRole, and starting its dispatcher pair. Those subsystems don't exist
 /// yet (§7.6 lands with encryption, §9 with the dispatcher); `vault_mount` is
@@ -31,14 +37,30 @@ pub async fn provision_tenant(
     region: &str,
     database_name: &str,
     profile: Profile,
+    actor: &str,
 ) -> Result<Uuid, sqlx::Error> {
-    let tenant_id = match repo::find_by_slug(control_pool, slug).await? {
+    let (tenant_id, outcome) = match repo::find_by_slug(control_pool, slug).await? {
         Some(tenant)
             if tenant.region == region && tenant.database_name == database_name =>
         {
-            tenant.id
+            (tenant.id, "idempotent")
         }
         Some(tenant) => {
+            crate::platform_audit::record(
+                control_pool,
+                actor,
+                "tenant.provision_rejected",
+                Some(tenant.id),
+                serde_json::json!({
+                    "slug": slug,
+                    "attempted_region": region,
+                    "attempted_database_name": database_name,
+                    "existing_region": tenant.region,
+                    "existing_database_name": tenant.database_name,
+                }),
+            )
+            .await?;
+
             return Err(sqlx::Error::Configuration(
                 format!(
                     "tenant {slug:?} is already registered with region={:?} database_name={:?}; \
@@ -65,7 +87,7 @@ pub async fn provision_tenant(
             )
             .await?;
 
-            id
+            (id, "created")
         }
     };
 
@@ -85,6 +107,20 @@ pub async fn provision_tenant(
     tenant_pool.close().await;
 
     repo::mark_active(control_pool, tenant_id).await?;
+
+    crate::platform_audit::record(
+        control_pool,
+        actor,
+        "tenant.provision",
+        Some(tenant_id),
+        serde_json::json!({
+            "slug": slug,
+            "region": region,
+            "database_name": database_name,
+            "outcome": outcome,
+        }),
+    )
+    .await?;
 
     Ok(tenant_id)
 }
