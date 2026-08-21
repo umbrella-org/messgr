@@ -27,3 +27,34 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@v2
       - run: cargo clippy --all-targets --all-features -- -D warnings
+
+  test:
+    runs-on: ubuntu-latest
+    env:
+      CONTROL_DATABASE_URL: postgres://messgr:messgr@localhost:5432/control
+      DATABASE_MAX_CONNECTIONS: 20
+      MESSGR_PROFILE: dev
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: messgr
+          POSTGRES_PASSWORD: messgr
+          POSTGRES_DB: control
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U messgr -d control"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build
+      - run: cargo run --bin messgr-control -- migrate
+      # The two-tenant isolation suite this build step is required to have
+      # (DESIGN.md §14: "From step 0b onward, CI runs a two-tenant
+      # integration suite").
+      - run: cargo test
