@@ -38,6 +38,7 @@ Last updated: 2026-08-21
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
+| T-002 | Provisioning path: preserve connection options and write the platform_audit trail | medium | low | S | [] |  |
 
 ## TO DO (impact order, per child)
 
@@ -45,7 +46,6 @@ Last updated: 2026-08-21
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
-| T-002 | Provisioning path: preserve connection options and write the platform_audit trail | medium | low | S | [] |  |
 
 ## DONE
 
