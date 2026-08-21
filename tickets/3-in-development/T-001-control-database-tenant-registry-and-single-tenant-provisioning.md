@@ -193,18 +193,25 @@ Must be safe to call twice for the same slug (decision 8).
 `src/bin/control.rs`: clap subcommands `migrate` (run `sqlx::migrate!("./migrations/control")`
 against the control pool and exit) and `provision --slug <slug> --region <region>
 --database-name <name>` (call Task 7, print the resulting tenant id). `main()` loads
-`Config::from_env()`, connects the control pool (self-migrating first, mirroring the
-removed `main.rs`'s pattern), then dispatches the subcommand.
+`Config::from_env()` and connects the control pool — **it does not migrate**. Only the
+`migrate` subcommand runs `sqlx::migrate!`; `provision` assumes the control schema is
+already applied and fails with a clear error (not a silent auto-migration) if the `tenant`
+table doesn't exist. Per §13, migrations are never automatic on process start — the
+deleted prototype's self-migrating `main()` is exactly the pattern this must not repeat.
 
 #### Task 9 — Remove the pre-design prototype
 Delete `src/main.rs`, `src/state.rs`, `src/sms/`, `src/web/`,
 `migrations/0001_create_sms_messages.sql`, `tests/api/`, `tests/performance/sms.js`,
 `.github/workflows/api-tests.yml`. Update `justfile`: drop `seed`, `list`, `test-api`,
 `test-perf`, `run`, `watch` (all tied to the removed HTTP server); repoint `migrate` /
-`migrate-revert` / `db-shell` at the control database; add `provision` and
-`control-migrate` recipes wrapping the new binary. Update `compose.yml`
-(`POSTGRES_DB: control`, container/volume names may stay). Update `.env` /
-`.env.example`: replace `DATABASE_URL` / `SERVER_ADDR` / `SMS_QUEUE_CAPACITY` with
+`migrate-revert` at the control database with an explicit source
+(`sqlx migrate run --source migrations/control`, since sqlx-cli defaults to `./migrations`
+which is now just a parent directory with no loose files) and `db-shell` at `.../control`;
+add `provision` and `control-migrate` recipes wrapping the new binary. Update
+`compose.yml`: `POSTGRES_DB: control` **and** the healthcheck's `pg_isready -U messgr -d
+control` (both must change together, or the container reports unhealthy against a database
+that no longer exists). Update `.env` / `.env.example`: replace `DATABASE_URL` /
+`SERVER_ADDR` / `SMS_QUEUE_CAPACITY` with
 `CONTROL_DATABASE_URL=postgres://messgr:messgr@localhost:5432/control`,
 `DATABASE_MAX_CONNECTIONS=20`, `MESSGR_PROFILE=dev`.
 
@@ -290,3 +297,5 @@ justfile itself.
 
 - 2026-08-20 — created (TO DO). source: chat: build order step 0b (DESIGN.md §14) — first ticket of the from-scratch rebuild against the current design, replacing the pre-design SMS prototype.
 - 2026-08-20 — TO DO → READY: implementation plan complete
+- 2026-08-20 — plan amended inline: applicability-gate audit (fresh sub-agent) found Task 8 had `messgr-control` self-migrate the control DB on every invocation, contradicting §13's "never automatic on process start" — changed so only the `migrate` subcommand runs `sqlx::migrate!`, `provision` fails loudly if the schema isn't applied yet. Also fixed two smaller plan-text bugs in Task 9: `compose.yml`'s healthcheck wasn't updated alongside `POSTGRES_DB: control`, and the `justfile` `migrate`/`migrate-revert` recipes were missing `--source migrations/control`. Remaining audit notes (sqlx empty-migrations-dir behavior, `after_connect`/`before_acquire` signatures, `CREATE DATABASE` from a non-`postgres` connection, delete-list completeness) confirmed true as written — noted, no plan change needed.
+- 2026-08-21 — READY → IN DEVELOPMENT: picked up
