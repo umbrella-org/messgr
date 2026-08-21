@@ -1,4 +1,18 @@
-use sqlx::postgres::{PgPool, PgPoolOptions};
+//! Pool connection helpers.
+//!
+//! `connect` is used for the control pool, which has no "expected tenant" to
+//! check against. `connect_with_expected_database` is used for every tenant
+//! pool and carries DESIGN.md §2.1's `current_database()` assertion — the
+//! only isolation mechanism this design uses, since there is no RLS and no
+//! shared schema to filter. A pool is bound to a connection string at
+//! creation, so the realistic failure mode is code reaching for the wrong
+//! pool entirely, not a pool somehow changing databases underneath it; this
+//! assertion catches exactly that.
+
+use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
+use sqlx::{Executor, PgPool, Row};
+
+use crate::profile::Profile;
 
 pub async fn connect(
     database_url: &str,
@@ -8,4 +22,142 @@ pub async fn connect(
         .max_connections(max_connections)
         .connect(database_url)
         .await
+}
+
+/// Connects a pool and asserts, on every new physical connection and — when
+/// `profile.checks_pool_identity()` — on every checkout, that
+/// `current_database()` equals `expected_db`. A mismatch panics rather than
+/// returning a swallowable error: a mis-wired tenant pool is exactly the bug
+/// this check exists to make impossible to ignore.
+pub async fn connect_with_expected_database(
+    database_url: &str,
+    max_connections: u32,
+    expected_db: &str,
+    profile: Profile,
+) -> Result<PgPool, sqlx::Error> {
+    let expected_for_connect = expected_db.to_string();
+    let expected_for_acquire = expected_db.to_string();
+    let checks_on_acquire = profile.checks_pool_identity();
+
+    let options: PgConnectOptions = database_url.parse()?;
+
+    let pool = PgPoolOptions::new()
+        .max_connections(max_connections)
+        .after_connect(move |conn, _meta| {
+            let expected = expected_for_connect.clone();
+            Box::pin(async move {
+                assert_current_database(conn, &expected).await?;
+                Ok(())
+            })
+        })
+        .before_acquire(move |conn, _meta| {
+            let expected = expected_for_acquire.clone();
+            Box::pin(async move {
+                if checks_on_acquire {
+                    assert_current_database(conn, &expected).await?;
+                }
+                Ok(true)
+            })
+        })
+        .connect_with(options)
+        .await?;
+
+    Ok(pool)
+}
+
+async fn assert_current_database(
+    conn: &mut sqlx::PgConnection,
+    expected: &str,
+) -> Result<(), sqlx::Error> {
+    let row = conn.fetch_one("SELECT current_database()").await?;
+    let actual: String = row.get(0);
+
+    assert_eq!(
+        actual, expected,
+        "tenant pool mis-routed: connected to database {actual:?}, expected {expected:?}"
+    );
+
+    Ok(())
+}
+
+/// Swaps the database-name path component of a Postgres connection URL.
+/// Local-dev URLs only (no query-string-sensitive edge cases) — the whole
+/// cluster shares host/port/credentials, only the database name varies per
+/// tenant.
+pub fn with_database_name(base_url: &str, database_name: &str) -> String {
+    let (prefix, _current_db) = base_url
+        .rsplit_once('/')
+        .expect("connection URL must contain a '/' before the database name");
+    format!("{prefix}/{database_name}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn with_database_name_swaps_the_final_segment() {
+        assert_eq!(
+            with_database_name(
+                "postgres://messgr:messgr@localhost:5432/control",
+                "tenant_acme"
+            ),
+            "postgres://messgr:messgr@localhost:5432/tenant_acme"
+        );
+    }
+
+    /// DESIGN.md §14 requires the `current_database()` assertion to fire "at
+    /// pool creation *and* at checkout" (review finding T-001/F3). The
+    /// creation arm (`after_connect`) is exercised end to end in
+    /// `tests/tenancy.rs`'s mis-wired-pool test; a live Postgres connection
+    /// can never actually change which database it is bound to mid-life, so
+    /// there is no way to make a *real* pool checkout observe a mismatch
+    /// `after_connect` did not already catch. What this proves instead is
+    /// that `assert_current_database` — the exact function
+    /// `before_acquire` calls on every checkout when
+    /// `profile.checks_pool_identity()` — panics on a mismatch, using a
+    /// connection acquired the normal way from an honestly-connected pool.
+    ///
+    /// Review finding T-001/F13: an earlier version of this test connected
+    /// and acquired *inside* the spawned task, then asserted only
+    /// `result.is_err()` — so an unrelated infrastructure failure (no
+    /// database reachable at all) satisfied the assertion just as well as
+    /// the assertion under test firing, and the test passed for the wrong
+    /// reason with no database present. Fixed by connecting and acquiring
+    /// *outside* the spawn (an infrastructure failure now fails the test via
+    /// `expect`, the same way the honest integration tests in
+    /// `tests/tenancy.rs` already do) and by asserting on the panic's actual
+    /// message rather than merely its existence.
+    #[tokio::test]
+    async fn assert_current_database_panics_on_the_mismatch_before_acquire_would_catch()
+    {
+        dotenvy::dotenv().ok();
+        let url = std::env::var("CONTROL_DATABASE_URL")
+            .expect("CONTROL_DATABASE_URL must be set for tests");
+
+        let pool = super::connect(&url, 2)
+            .await
+            .expect("connecting the control pool failed");
+        let mut conn = pool.acquire().await.expect("acquiring a connection failed");
+
+        let result = tokio::spawn(async move {
+            assert_current_database(&mut conn, "not_the_real_database").await
+        })
+        .await;
+
+        let join_error = result.expect_err(
+            "assert_current_database must panic on a mismatched expectation, the same way \
+             before_acquire would on a real checkout",
+        );
+        let panic_payload = join_error.into_panic();
+        let message = panic_payload
+            .downcast_ref::<String>()
+            .cloned()
+            .or_else(|| panic_payload.downcast_ref::<&str>().map(|s| s.to_string()))
+            .expect("panic payload was not a string message");
+        assert!(
+            message.contains("tenant pool mis-routed"),
+            "panicked, but not with the current_database mismatch assertion's message: {message:?}"
+        );
+    }
 }
