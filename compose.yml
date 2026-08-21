@@ -6,13 +6,13 @@ services:
     environment:
       POSTGRES_USER: messgr
       POSTGRES_PASSWORD: messgr
-      POSTGRES_DB: messgr
+      POSTGRES_DB: control
     ports:
       - "5432:5432"
     volumes:
       - messgr-pgdata:/var/lib/postgresql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U messgr -d messgr"]
+      test: ["CMD-SHELL", "pg_isready -U messgr -d control"]
       interval: 5s
       timeout: 5s
       retries: 5
