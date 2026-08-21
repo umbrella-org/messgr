@@ -441,3 +441,4 @@ platform console (§11.4) that will eventually display this trail is not built.
 - 2026-08-21 — created (TO DO). source: review: T-001 review findings F5 (tenant URLs silently drop query-string connection options, e.g. `sslmode`) and F6 (`platform_audit` created but never written), batched by theme — both are provisioning-path completeness in `src/db.rs` / `src/tenant/provision.rs`.
 - 2026-08-21 — description amended by T-001's review impact sweep: T-001's F1 fix added a *rejection* path to `provision_tenant` (mismatched re-provision of an existing slug now errors instead of proceeding), so the `platform_audit` work has three outcomes to cover rather than two. `db::with_database_name` (F5) was not touched by that rework and this ticket's plan for it stands unchanged.
 - 2026-08-21 — TO DO → READY: plan complete
+- 2026-08-21 — READY → IN DEVELOPMENT: picked up

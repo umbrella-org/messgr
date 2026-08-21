@@ -13,10 +13,11 @@ Last updated: 2026-08-21
 
 ## IN DEVELOPMENT
 
-### messgr (0/1)
+### messgr (1/1)
 
 | id | title | depends-on |
 |---|---|---|
+| T-002 | Provisioning path: preserve connection options and write the platform_audit trail | [] |
 
 ## IN REVIEW
 
@@ -38,7 +39,6 @@ Last updated: 2026-08-21
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
-| T-002 | Provisioning path: preserve connection options and write the platform_audit trail | medium | low | S | [] |  |
 
 ## TO DO (impact order, per child)
 
