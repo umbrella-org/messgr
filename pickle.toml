@@ -1,0 +1,21 @@
+# pickle configuration for this overarching project.
+# Hand-edits are preserved on load. `pickle upgrade` rewrites only the
+# payload_version line: comments and every other line survive, while that one
+# line comes back as payload_version = "value" (any inline comment kept), so
+# its own alignment and quoting style do not. `pickle project add|remove`
+# re-render this file to the canonical layout below and drop comments entirely.
+
+payload_version = "0.10.0"
+layout = "in-tree"
+
+[commit]
+overarching_auto = true
+child_publish_gated = true
+
+[[project]]
+name = "messgr"
+path = "."
+ticket_prefix = "T"
+branch_prefix = "feat/"
+wip_in_development = 1
+wip_in_review = 1
