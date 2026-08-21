@@ -13,18 +13,18 @@ Last updated: 2026-08-21
 
 ## IN DEVELOPMENT
 
+### messgr (0/1)
+
+| id | title | depends-on |
+|---|---|---|
+
+## IN REVIEW
+
 ### messgr (1/1)
 
 | id | title | depends-on |
 |---|---|---|
 | T-002 | Provisioning path: preserve connection options and write the platform_audit trail | [] |
-
-## IN REVIEW
-
-### messgr (0/1)
-
-| id | title | depends-on |
-|---|---|---|
 
 ## REWORK
 
