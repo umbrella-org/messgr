@@ -53,7 +53,7 @@ Last updated: 2026-08-21
 
 | id | title | merged |
 |---|---|---|
-| T-001 | Control database, tenant registry, and single-tenant provisioning | no — publish-gated |
+| T-001 | Control database, tenant registry, and single-tenant provisioning | yes — MERGED: `feat/T-001-control-database-tenant-registry-and-single-tenant-provisioning` (tidied to 5 atomic commits:… |
 
 ## DROPPED
 

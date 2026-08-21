@@ -475,3 +475,4 @@ cost: estimated L, actual L
 - 2026-08-21 — IN REVIEW → REWORK: scoped re-review: F1, F2, F4 and F3(a) verified fixed; F13 blocking — the F3 checkout-arm unit test is tautological (passes with no database); F14 noted
 - 2026-08-21 — REWORK → IN REVIEW: F13 fixed: checkout-arm test now fails without a database and fails under mutation; verified both directions
 - 2026-08-21 — IN REVIEW → DONE: scoped re-review #2: F13 verified fixed by 5 mutations; F15 noted; all 5 blocking findings across 3 passes closed
+- 2026-08-21 — MERGED: `feat/T-001-control-database-tenant-registry-and-single-tenant-provisioning` (tidied to 5 atomic commits: `f0d2f8c`, `af32acf`, `93a0d05`, `dd87701`, `d740537`) merged into `main` via `--no-ff` (merge commit; no remote configured, local repo only). Post-merge on `main`: `cargo fmt`/`clippy -D warnings`/`build` clean, `messgr-control migrate`/`provision` both exit 0, `cargo test` 7/7 green.
