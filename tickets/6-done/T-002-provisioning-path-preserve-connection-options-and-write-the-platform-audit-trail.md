@@ -554,3 +554,4 @@ cost: estimated S, actual S
 - 2026-08-21 — READY → IN DEVELOPMENT: picked up
 - 2026-08-21 — IN DEVELOPMENT → IN REVIEW: acceptance green
 - 2026-08-22 — IN REVIEW → DONE: review clean; 1 non-blocking noted
+- 2026-08-22 — MERGED: `feat/T-002-provisioning-path-preserve-connection-options-and-write-the-platform-audit-trail` (1 commit: `e5a33e7`) merged into `main` via `--no-ff` (merge commit `1e7fb53`; no remote configured, local repo only). Post-merge on `main`: `cargo fmt`/`clippy --all-targets -D warnings`/`build` clean, `messgr-control migrate` + `cargo test` 11/11 green.

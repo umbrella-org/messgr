@@ -53,7 +53,7 @@ Last updated: 2026-08-22
 | id | title | merged |
 |---|---|---|
 | T-001 | Control database, tenant registry, and single-tenant provisioning | yes — MERGED: `feat/T-001-control-database-tenant-registry-and-single-tenant-provisioning` (tidied to 5 atomic commits:… |
-| T-002 | Provisioning path: preserve connection options and write the platform_audit trail | no — publish-gated |
+| T-002 | Provisioning path: preserve connection options and write the platform_audit trail | yes — MERGED: `feat/T-002-provisioning-path-preserve-connection-options-and-write-the-platform-audit-trail` (1 commit: … |
 
 ## DROPPED
 
