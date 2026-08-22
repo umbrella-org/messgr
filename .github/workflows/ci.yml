@@ -34,6 +34,8 @@ jobs:
       CONTROL_DATABASE_URL: postgres://messgr:messgr@localhost:5432/control
       DATABASE_MAX_CONNECTIONS: 20
       MESSGR_PROFILE: dev
+      VAULT_ADDR: http://localhost:8200
+      VAULT_TOKEN: messgr-dev-root-token
     services:
       postgres:
         image: postgres:18-alpine
@@ -48,12 +50,30 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 5
+      vault:
+        image: hashicorp/vault:latest
+        env:
+          VAULT_DEV_ROOT_TOKEN_ID: messgr-dev-root-token
+          VAULT_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
+        ports:
+          - 8200:8200
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo build
       - run: cargo run --bin messgr-control -- migrate
+      - name: Bootstrap Vault Transit mount + key (dev fixture, matches `just vault-dev-init`)
+        run: |
+          for i in $(seq 1 30); do curl -sf "$VAULT_ADDR/v1/sys/health" && break; sleep 1; done
+          curl -sf --header "X-Vault-Token: $VAULT_TOKEN" --request POST \
+            --data '{"type":"transit"}' "$VAULT_ADDR/v1/sys/mounts/transit"
+          curl -sf --header "X-Vault-Token: $VAULT_TOKEN" --request POST \
+            "$VAULT_ADDR/v1/transit/keys/messgr-dek"
+          curl -sf --header "X-Vault-Token: $VAULT_TOKEN" --request POST \
+            --data '{"type":"transit"}' "$VAULT_ADDR/v1/sys/mounts/transit-other"
+          curl -sf --header "X-Vault-Token: $VAULT_TOKEN" --request POST \
+            "$VAULT_ADDR/v1/transit-other/keys/messgr-dek"
       # The two-tenant isolation suite this build step is required to have
       # (DESIGN.md §14: "From step 0b onward, CI runs a two-tenant
       # integration suite").
