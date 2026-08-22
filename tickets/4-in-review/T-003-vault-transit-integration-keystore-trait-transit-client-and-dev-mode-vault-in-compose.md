@@ -670,6 +670,40 @@ warnings` clean, `cargo build` clean, `cargo test` → 17 passed, 0 failed (8 li
 
 F2 and F3 untouched, as scoped — F1 was the entire rework.
 
+### Scoped re-review, 2026-08-22 (verifying F1 only)
+
+**Verdict: F1 fixed. Ticket proceeds to `6-done/`.** No new findings.
+
+Diffed `git log --oneline main..feat/T-003-...` — exactly two commits on top of `main`
+(`58b8f09` feat, `a9c1308` fix). `git show a9c1308 --stat` confirms the fix touches only
+`tests/keystore.rs` (+31/-3) — scoped to F1 alone, nothing else in the rework's reach. The diff
+matches the rework note's description exactly: (1) a round-trip of a DEK through
+`transit-other`'s own key before the cross-mount attempt, with an `.expect(...)` naming the
+fixture as broken if it fails; (2) the final assertion now inspects `format!("{error:?}")` on
+the returned `KeyStoreError` for `"cipher"` or `"authentication"`, replacing the old bare
+`result.is_err()`.
+
+Verified by mutation, not by reading the diff and trusting the commit message — the same
+standard T-001/F13 established for this exact failure shape:
+
+| step | action | expected | observed |
+|---|---|---|---|
+| 1 | fresh Postgres 18 + dev-mode Vault (`docker compose up -d`, temporary local port remap for Postgres only — port 5432 held locally by an unrelated `langfuse-postgres` container; `compose.yml`/`.env` reverted after, `git status` clean of the tinkering), `just vault-dev-init`, control migrations run | both mounts (`transit`, `transit-other`) present | confirmed via `vault-dev-init` output |
+| 2 | `cargo test --test keystore unwrap_dek_rejects_a_ciphertext_from_a_different_mount` | pass | **ok. 1 passed** |
+| 3 (the mutation) | `curl -X DELETE .../sys/mounts/transit-other` (HTTP 204, mount absent from `sys/mounts` afterward), re-run the same test | **fail**, and fail pointing at the fixture, not the property | **FAILED** — panics at `tests/keystore.rs:93` with `"transit-other's own create_dek failed — the cross-mount fixture is broken, not the property this test exists to check: KeyStoreError(APIError { code: 404, errors: [\"no handler for route \\"transit-other/datakey/plaintext/messgr-dek\\". route entry not found.\"] })"` — the exact case the original F1 finding showed passing silently, now failing loudly with an unambiguous diagnostic |
+| 4 | `just vault-dev-init` again (recreates both mounts) | mount restored | confirmed |
+| 5 | same test again | pass | **ok. 1 passed** |
+| 6 | full acceptance test on the restored environment | all green | `cargo fmt --check` clean, `cargo clippy --all-targets --all-features -- -D warnings` clean, `cargo build` clean, `cargo test` → **17 passed, 0 failed** (8 lib + 3 keystore + 6 tenancy) |
+
+F2 and F3 stand as recorded from the first pass (`noted`) — nothing in this rework or its
+verification gave reason to reopen either; both are scoped outside F1 and this pass did not
+touch the files they concern (`src/keystore.rs` production code, `README.md`).
+
+**Disposition summary (scoped re-review):** 0 new findings. F1 verified fixed and closed. F2, F3
+unchanged, standing as `noted` from the first pass.
+
+cost: estimated M, actual M
+
 ## History
 
 - 2026-08-22 — created (TO DO). source: chat: PLAN.md's build-order decomposition of DESIGN.md §14 step 0 (Vault, code half) — the next unblocked ticket after T-001/T-002, foundational for the per-customer-DEK invariant (§7.6, AGENTS.md #7). Renumbered from the plan's original provisional `T-002` after that id was consumed by an unplanned ticket (T-002, spawned from T-001's review).
@@ -681,3 +715,4 @@ F2 and F3 untouched, as scoped — F1 was the entire rework.
 - 2026-08-22 — IN REVIEW → REWORK: 1 blocking finding, F1 — `unwrap_dek_rejects_a_ciphertext_from_a_different_mount` is not falsifiable against the property it claims to test (passes with the `transit-other` fixture deleted entirely); 2 non-blocking findings noted (F2, F3)
 - 2026-08-22 — IN REVIEW → REWORK: review: F1 blocking (unwrap_dek_rejects_a_ciphertext_from_a_different_mount asserts only is_err(), passes with the fixture mount deleted); F2, F3 noted
 - 2026-08-22 — REWORK → IN REVIEW: findings fixed
+- 2026-08-22 — scoped re-review: F1 verified fixed (mutation-tested by deleting and restoring the `transit-other` mount); F2, F3 stand as noted from the first pass. 0 blocking, 0 new findings.
