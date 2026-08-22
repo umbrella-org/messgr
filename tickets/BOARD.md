@@ -9,7 +9,7 @@ hand — edit the tickets. Hand-written planning notes live in [`NOTES.md`](NOTE
 **WIP limits (per child-project):**
 - `messgr`: `3-in-development/` ≤ 1 · `4-in-review/` ≤ 1
 
-Last updated: 2026-08-21
+Last updated: 2026-08-22
 
 ## IN DEVELOPMENT
 
@@ -20,11 +20,10 @@ Last updated: 2026-08-21
 
 ## IN REVIEW
 
-### messgr (1/1)
+### messgr (0/1)
 
 | id | title | depends-on |
 |---|---|---|
-| T-002 | Provisioning path: preserve connection options and write the platform_audit trail | [] |
 
 ## REWORK
 
@@ -54,6 +53,7 @@ Last updated: 2026-08-21
 | id | title | merged |
 |---|---|---|
 | T-001 | Control database, tenant registry, and single-tenant provisioning | yes — MERGED: `feat/T-001-control-database-tenant-registry-and-single-tenant-provisioning` (tidied to 5 atomic commits:… |
+| T-002 | Provisioning path: preserve connection options and write the platform_audit trail | no — publish-gated |
 
 ## DROPPED
 
