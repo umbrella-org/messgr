@@ -69,6 +69,20 @@ async fn unwrap_dek_rejects_a_ciphertext_from_a_different_mount() {
     // *different* key (a second mount, same fixed "messgr-dek" name inside
     // it — see `just vault-dev-init`) to decrypt it must fail, not silently
     // return garbage.
+    //
+    // Review finding T-003/F1: an earlier version of this test asserted only
+    // `result.is_err()`, which is satisfied by *any* Vault-side error —
+    // including "transit-other's fixture is missing or broken", which would
+    // make this test pass for the wrong reason (the same T-001/F13 failure
+    // shape). Confirmed by mutation: deleting the `transit-other` mount
+    // outright left this test green. Fixed two ways: (1) prove
+    // `transit-other` genuinely has its own working key by round-tripping a
+    // DEK through it before the cross-mount attempt, so a broken fixture
+    // fails loudly and separately from the property under test; (2) assert
+    // on the actual error content (`KeyStoreError`'s `Debug`, which surfaces
+    // `vaultrs::error::ClientError::APIError`'s `errors` field) rather than
+    // merely its existence, requiring it name a cipher/authentication
+    // failure specifically.
     let store = store();
 
     let dek = store
@@ -76,9 +90,23 @@ async fn unwrap_dek_rejects_a_ciphertext_from_a_different_mount() {
         .await
         .expect("create_dek failed");
 
-    let result = store.unwrap_dek("transit-other", &dek.wrapped).await;
+    let other_dek = store.create_dek("transit-other").await.expect(
+        "transit-other's own create_dek failed — the cross-mount fixture is broken, \
+         not the property this test exists to check",
+    );
+    store
+        .unwrap_dek("transit-other", &other_dek.wrapped)
+        .await
+        .expect("transit-other must be able to decrypt its own ciphertext");
+
+    let error = store
+        .unwrap_dek("transit-other", &dek.wrapped)
+        .await
+        .expect_err("decrypting under the wrong mount's key must fail, not succeed");
+    let message = format!("{error:?}");
     assert!(
-        result.is_err(),
-        "decrypting under the wrong mount's key must fail, not succeed"
+        message.contains("cipher") || message.contains("authentication"),
+        "must fail specifically because Transit rejected the ciphertext under the wrong key, \
+         not for an unrelated reason (e.g. a broken/missing transit-other fixture): {message:?}"
     );
 }
