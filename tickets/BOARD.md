@@ -45,6 +45,7 @@ Last updated: 2026-08-22
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
+| T-003 | Vault Transit integration: KeyStore trait, Transit client, and dev-mode Vault in compose | high | medium | M | [T-001] |  |
 
 ## DONE
 
