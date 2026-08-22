@@ -152,6 +152,7 @@ vaultrs = "0.8"
 async-trait = "0.1"
 zeroize = "1"
 base64 = "0.22"
+url = "2"
 ```
 
 #### Task 2 — `KeyStore` trait and Vault implementation, `src/keystore.rs` (new file)
@@ -578,4 +579,5 @@ T-004/T-009/T-012.
 - 2026-08-22 — created (TO DO). source: chat: PLAN.md's build-order decomposition of DESIGN.md §14 step 0 (Vault, code half) — the next unblocked ticket after T-001/T-002, foundational for the per-customer-DEK invariant (§7.6, AGENTS.md #7). Renumbered from the plan's original provisional `T-002` after that id was consumed by an unplanned ticket (T-002, spawned from T-001's review).
 - 2026-08-22 — TO DO → READY: plan complete
 - 2026-08-22 — plan amended inline: applicability-gate audit (fresh sub-agent) found Task 5's `justfile` recipe doubled the JSON body's braces (`{{{{...}}}}`), which `just` does not un-escape symmetrically — `{{{{` becomes a literal `{{`, but the unmatched `}}}}` passes through unmodified, producing malformed JSON that Vault would 400 on while `|| true` hid the failure. Fixed to single braces (verified with `just --dry-run`); folded Task 7's `transit-other` second-mount fixture directly into Task 5's recipe and Task 6's CI step instead of leaving it as a separate to-do note. No other finding; dependency resolution (`vaultrs` 0.8.0, `async-trait` 0.1.92, `base64` 0.22.1, `zeroize` 1.9.0, none yanked) and every file the plan touches re-verified unchanged since refinement.
+- 2026-08-22 — plan amended inline: Task 1's dependency list omitted `url`, which Task 2's `src/keystore.rs` code imports directly (`use url::Url;`) for the guard function's signature. `url` is only a transitive dependency of `vaultrs` and is not re-exported by it, so a direct `use url::Url` does not compile without declaring it in `Cargo.toml`. Added `url = "2"` to Task 1; caught while executing Task 1, before any code was written.
 - 2026-08-22 — READY → IN DEVELOPMENT: picked up
