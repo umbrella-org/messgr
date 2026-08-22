@@ -680,3 +680,4 @@ F2 and F3 untouched, as scoped — F1 was the entire rework.
 - 2026-08-22 — IN DEVELOPMENT → IN REVIEW: acceptance green
 - 2026-08-22 — IN REVIEW → REWORK: 1 blocking finding, F1 — `unwrap_dek_rejects_a_ciphertext_from_a_different_mount` is not falsifiable against the property it claims to test (passes with the `transit-other` fixture deleted entirely); 2 non-blocking findings noted (F2, F3)
 - 2026-08-22 — IN REVIEW → REWORK: review: F1 blocking (unwrap_dek_rejects_a_ciphertext_from_a_different_mount asserts only is_err(), passes with the fixture mount deleted); F2, F3 noted
+- 2026-08-22 — REWORK → IN REVIEW: findings fixed

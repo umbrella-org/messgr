@@ -20,10 +20,11 @@ Last updated: 2026-08-22
 
 ## IN REVIEW
 
-### messgr (0/1)
+### messgr (1/1)
 
 | id | title | depends-on |
 |---|---|---|
+| T-003 | Vault Transit integration: KeyStore trait, Transit client, and dev-mode Vault in compose | [T-001] |
 
 ## REWORK
 
@@ -31,7 +32,6 @@ Last updated: 2026-08-22
 
 | id | title | open findings |
 |---|---|---|
-| T-003 | Vault Transit integration: KeyStore trait, Transit client, and dev-mode Vault in compose | review: F1 blocking (unwrap_dek_rejects_a_ciphertext_from_a_different_mount asserts only is_err(), passes with the fixt… |
 
 ## READY (impact order, per child)
 
