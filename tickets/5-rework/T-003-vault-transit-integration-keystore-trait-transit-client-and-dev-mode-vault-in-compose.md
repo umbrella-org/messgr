@@ -658,6 +658,18 @@ a scoped re-review then verifies F1 alone.
 `depends-on:` (T-004/T-009/T-012, the tickets this one unblocks per its own Description, are not yet filed).
 Nothing to patch.
 
+### Rework (commit `a9c1308`)
+
+| id | fix |
+|---|---|
+| F1 | `unwrap_dek_rejects_a_ciphertext_from_a_different_mount` (`tests/keystore.rs`) now does two things the original didn't: (1) round-trips a DEK through `transit-other`'s own key first (`create_dek` + `unwrap_dek` on `transit-other` itself), so a broken/missing fixture fails loudly on that assertion with a diagnostic naming the fixture, before the property under test is even attempted; (2) asserts on the actual error content — `format!("{error:?}")` on the returned `KeyStoreError` (its derived `Debug` surfaces `vaultrs::error::ClientError::APIError`'s `errors` field even though the field itself is private) — requiring it contain `"cipher"` or `"authentication"`, not merely that *some* error occurred. Verified by re-running the exact mutation the review used: deleting the `transit-other` mount now fails the test with `"transit-other's own create_dek failed — the cross-mount fixture is broken, not the property this test exists to check: KeyStoreError(APIError { code: 404, errors: [\"no handler for route \\"transit-other/datakey/plaintext/messgr-dek\\". route entry not found.\"] })"` — the exact case that previously passed silently. Restoring the mount returns the suite to green. |
+
+Acceptance test re-run in full after the fix (fresh Postgres 18 + dev-mode Vault, temporary local port
+remap for Postgres only): `cargo fmt --check` clean, `cargo clippy --all-targets --all-features -- -D
+warnings` clean, `cargo build` clean, `cargo test` → 17 passed, 0 failed (8 lib + 3 keystore + 6 tenancy).
+
+F2 and F3 untouched, as scoped — F1 was the entire rework.
+
 ## History
 
 - 2026-08-22 — created (TO DO). source: chat: PLAN.md's build-order decomposition of DESIGN.md §14 step 0 (Vault, code half) — the next unblocked ticket after T-001/T-002, foundational for the per-customer-DEK invariant (§7.6, AGENTS.md #7). Renumbered from the plan's original provisional `T-002` after that id was consumed by an unplanned ticket (T-002, spawned from T-001's review).
