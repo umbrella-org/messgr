@@ -572,7 +572,91 @@ T-004/T-009/T-012.
 
 ## Review
 
-<!-- empty until IN REVIEW -->
+- [x] Implementation audit — acceptance test re-run, tasks & criteria verified (step 2)
+- [x] Quality audit (step 3)
+- [x] Consistency audit (step 4)
+- [x] Documentation audit — coverage, whole-tree sweep, docs build clean (step 4a, if the project ships docs)
+- [x] Docs-readability pass on the ticket's changed `.adoc`/`.md` files, or a conscious skip recorded (step 4b, optional) — skipped: no docs-readability reviewer configured in this session; the one prose change (`README.md`) is short and unambiguous
+- [x] Findings recorded in the ticket's `## Review` with severity, **class**, **and** disposition per the rules §5; disposition summary line present, and a `cost: estimated …, actual …` line beneath it (step 5)
+- [x] Remaining-tickets impact sweep done (step 8)
+
+**Diffed** `main..feat/T-003-vault-transit-integration-keystore-trait-transit-client-and-dev-mode-vault-in-compose`
+(commit `58b8f09`). Every file the plan named was touched, and nothing unexpected was: `Cargo.toml`/`Cargo.lock`
+(Task 1), `src/keystore.rs`/`src/lib.rs` (Task 2), `compose.yml` (Task 3), `.env.example` (Task 4), `justfile`
+(Task 5), `.github/workflows/ci.yml` (Task 6), `tests/keystore.rs` (Task 7), `README.md` (docs). The ticket file
+and `tickets/BOARD.md` also show a 3-line diff across the two branches — that is the documented in-tree
+stale-worktree artifact (the feature branch forked at pickup, before the two later `board:` bookkeeping
+commits landed on `main`), not a real change; confirmed by reading the ticket from `main` throughout this
+review rather than from the feature-branch worktree copy.
+
+**Implementation audit.** All 8 tasks present in the files they name, matching the plan's code almost
+verbatim (only line-wrap differences from `cargo fmt`). Both confirmed-decision-affecting "plan amended
+inline" History lines were actually applied: the `justfile` recipe (`justfile:44-51`) uses single braces
+throughout (`{"type":"transit"}`, not `{{{{...}}}}`), and `url = "2"` is present in `Cargo.toml` and used
+directly (`use url::Url;`, `src/keystore.rs:9`). All 8 confirmed design decisions honoured in the code:
+rustls-only dependency tree (`cargo tree` shows no openssl/native-tls), `#[async_trait]` used on `KeyStore`
+(avoids the `async_fn_in_trait` clippy-as-error lint), no `VaultConfig` struct (`VaultClientSettingsBuilder::default()`
+reads `VAULT_ADDR`/`VAULT_TOKEN` from the environment — confirmed by reading `vaultrs` 0.8.0's own
+`src/client.rs:242-266`), the guard is a pure free function taking a parsed `Url` (`src/keystore.rs:76`),
+`KEY_NAME` is a fixed constant, `base64` pinned to `0.22` resolves to a single tree-wide copy at `0.22.1`
+(shared with `sqlx-postgres`/`hyper-util`/`reqwest` — `cargo tree -i base64` / `cargo tree --duplicates`
+show no second version), every plaintext DEK is `Zeroizing<Vec<u8>>`, and the dev bootstrap is a manual
+`curl`-based `justfile`/CI step, not code.
+
+**Acceptance test re-run, verbatim**, with a temporary port remap for `docker compose up -d` (port 5432
+occupied locally by an unrelated `langfuse-postgres` container — `compose.yml`'s `postgres` port remapped
+to `55432:5432` and `.env`'s `CONTROL_DATABASE_URL` updated to match, both reverted after; `git status` is
+clean of the tinkering):
+
+```
+docker compose up -d                                    # postgres + vault, both healthy
+just vault-dev-init                                     # both transit/messgr-dek and transit-other/messgr-dek created
+cargo run --bin messgr-control -- migrate               # ok
+cargo fmt --check                                       # clean
+cargo clippy --all-targets --all-features -- -D warnings  # clean
+cargo build                                              # clean
+cargo test                                               # 8 lib + 3 keystore + 6 tenancy = 17 passed, 0 failed
+```
+
+All green, including specifically the 3 new keystore unit tests, the 3 new integration tests, and every
+pre-existing test in `tests/tenancy.rs` / `src/db.rs` / `src/profile.rs` unaffected, exactly as the plan's
+acceptance test lists.
+
+**Quality/consistency audit.** `KeyStore` trait design is narrow and matches the stated seam rationale
+(two data-plane methods, `mount: &str` parameter, fixed key name). `KeyStoreError` correctly wraps
+`vaultrs::error::ClientError` (`From` impl, `Display`/`Error::source` delegate). Token/port/address are
+consistent across `compose.yml`, `.github/workflows/ci.yml`, `justfile`, and `.env.example`
+(`messgr-dev-root-token`, `8200`). `cargo tree`/`cargo tree --duplicates` confirm both version claims in
+Decision 2 (`async-trait` transitive via `vaultrs`→`rustify`, one copy at `0.1.92`) and Decision 6
+(`base64` transitive via `reqwest`/`sqlx-postgres`, one copy at `0.22.1`) are true, not merely asserted.
+DESIGN.md §7.6/§4.11 cross-checked against the code: `messgr-dek` constant, `vault:v1:` prefix assertion,
+and `wrapped_dek` opacity are all honoured; no other doc in the tree references `KeyStore`/`vault-dev-init`
+in a way this ticket makes stale.
+
+| id | severity | class | disposition | description | evidence | suggestion |
+|---|---|---|---|---|---|---|
+| F1 | blocking | test-gap | — | `unwrap_dek_rejects_a_ciphertext_from_a_different_mount` (`tests/keystore.rs:66-83`) asserts only `result.is_err()`. That is satisfied by *any* Vault-side failure, not specifically by the cross-mount decryption rejection the test's name and comment claim to prove — the same failure shape as T-001/F13 (an assertion too permissive to certify the mechanism under test). Concretely: if the `transit-other` mount's bootstrap silently failed (its own `curl` calls are wrapped in `\|\| true` in the `justfile`, precisely to tolerate a failure), this test would still report green while proving nothing about DEK cross-mount isolation — the property this ticket exists to establish (DESIGN.md §7.6/§4.11, "a compromised tenant credential cannot decrypt another tenant's data"). | Deleted the `transit-other` mount (`curl -X DELETE http://localhost:8200/v1/sys/mounts/transit-other`, no key present at all afterward) and re-ran `cargo test --test keystore unwrap_dek_rejects_a_ciphertext_from_a_different_mount`: **still reports `ok. 1 passed; 0 failed`.** Restored the mount afterward and confirmed the full suite still passes with it present. | Assert on the specific Vault error rather than `is_err()` alone — e.g. downcast/inspect `KeyStoreError`'s inner `vaultrs::error::ClientError` variant (or its HTTP status) and require it indicate a decrypt/ciphertext failure, not a missing-path/mount error; or, cheaper, add a preceding assertion in the same test that `transit-other` actually has its own working `messgr-dek` (e.g. a successful `create_dek("transit-other")` round-trip) before attempting the cross-mount decrypt, so a broken fixture fails loudly and separately from the property under test. |
+| F2 | non-blocking | design | noted | `create_dek`/`unwrap_dek` (`src/keystore.rs:104-108, 121-124`) and `VaultKeyStore::connect`'s settings-build path (`src/keystore.rs:91-96`) use `.expect(...)`/`.unwrap_or_else(|err| panic!(...))` for base64-decode and Vault-protocol-shape failures, even though every one of these functions returns `Result<_, KeyStoreError>`. A malformed base64 payload or an unparseable `VAULT_ADDR` therefore crashes the process instead of surfacing as an `Err` the caller could log/handle, despite `KeyStoreError` existing specifically to carry Vault failures. Defensible as "this should never happen against a real Vault" (same fail-loud spirit as `assert_tls_outside_dev`), but inconsistent with the trait's own Result-based contract. | `src/keystore.rs:91-96` (settings build), `:104-108` (`create_dek` decode), `:121-124` (`unwrap_dek` decode). | Worth reconsidering once a real caller (T-009's DEK cache, T-012's ingest path) has to decide how to react to a Vault hiccup in production — not worth a dedicated ticket on its own. |
+| F3 | non-blocking | docs-gap | noted | `README.md`'s new Local development paragraph documents `just vault-dev-init` as "enable Transit + create the `messgr-dek` key" (singular) but doesn't mention that it also creates a second `transit-other` mount + key, which exists solely as `tests/keystore.rs`'s cross-mount fixture. A reader following the README alone would not know why a second mount appears in their local Vault. | `README.md:12,21-28` vs. `justfile:44-51`. | Not worth a dedicated ticket; fold into the same README paragraph the next time this section is touched (e.g. alongside T-004's per-tenant mounts, which will make the mount story more complex anyway). |
+
+**Disposition summary:** 1 blocking (F1), 2 non-blocking both `noted` (F2, F3). No `folded`/`new ticket` dispositions — nothing here passes the promotion test on its own.
+
+cost: estimated M, actual M
+
+**Verdict: rework required.** F1 is the acceptance test's own required cross-mount-rejection case, sitting
+exactly in the failure class (T-001/F13) this review was explicitly asked to check for, and it fails the
+same mutation test (delete the fixture the assertion depends on; the test still passes). The shipped
+`KeyStore`/`VaultKeyStore` implementation itself is correct — behavior was verified directly (the
+round-trip and distinct-key tests are real, and manually confirmed the wrong-mount decrypt does fail with
+the fixture present) — this is a test-credibility defect, not a shipped-behavior defect, but per §5 it is
+still blocking: an acceptance-required test that cannot fail for the reason it claims to test is a broken
+acceptance gate, and a later regression in real cross-mount isolation would ship silently green. Ticket
+moves to `tickets/5-rework/` for a scoped fix to F1 only (F2/F3 stand as recorded, non-blocking, `noted`);
+a scoped re-review then verifies F1 alone.
+
+**Impact sweep (step 8).** No ticket in `tickets/1-to-do/` or `tickets/2-ready/` currently lists T-003 in
+`depends-on:` (T-004/T-009/T-012, the tickets this one unblocks per its own Description, are not yet filed).
+Nothing to patch.
 
 ## History
 
@@ -582,3 +666,5 @@ T-004/T-009/T-012.
 - 2026-08-22 — plan amended inline: Task 1's dependency list omitted `url`, which Task 2's `src/keystore.rs` code imports directly (`use url::Url;`) for the guard function's signature. `url` is only a transitive dependency of `vaultrs` and is not re-exported by it, so a direct `use url::Url` does not compile without declaring it in `Cargo.toml`. Added `url = "2"` to Task 1; caught while executing Task 1, before any code was written.
 - 2026-08-22 — READY → IN DEVELOPMENT: picked up
 - 2026-08-22 — IN DEVELOPMENT → IN REVIEW: acceptance green
+- 2026-08-22 — IN REVIEW → REWORK: 1 blocking finding, F1 — `unwrap_dek_rejects_a_ciphertext_from_a_different_mount` is not falsifiable against the property it claims to test (passes with the `transit-other` fixture deleted entirely); 2 non-blocking findings noted (F2, F3)
+- 2026-08-22 — IN REVIEW → REWORK: review: F1 blocking (unwrap_dek_rejects_a_ciphertext_from_a_different_mount asserts only is_err(), passes with the fixture mount deleted); F2, F3 noted
