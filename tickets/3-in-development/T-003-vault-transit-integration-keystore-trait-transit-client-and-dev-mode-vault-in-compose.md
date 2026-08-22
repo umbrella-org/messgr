@@ -358,16 +358,24 @@ VAULT_TOKEN=messgr-dev-root-token
 ```
 vault-dev-init:
     curl -sf --header "X-Vault-Token: messgr-dev-root-token" --request POST \
-        --data '{{{{"type":"transit"}}}}' http://localhost:8200/v1/sys/mounts/transit || true
+        --data '{"type":"transit"}' http://localhost:8200/v1/sys/mounts/transit || true
     curl -sf --header "X-Vault-Token: messgr-dev-root-token" --request POST \
         http://localhost:8200/v1/transit/keys/messgr-dek || true
+    curl -sf --header "X-Vault-Token: messgr-dev-root-token" --request POST \
+        --data '{"type":"transit"}' http://localhost:8200/v1/sys/mounts/transit-other || true
+    curl -sf --header "X-Vault-Token: messgr-dev-root-token" --request POST \
+        http://localhost:8200/v1/transit-other/keys/messgr-dek || true
 ```
 
-(`just` uses `{{` / `}}` for its own interpolation, so the literal JSON body's braces must be
-doubled as shown — verify with `just --dry-run vault-dev-init` before relying on it.) Add a line
-to `README.md`'s Local development steps: after `docker compose up -d`, run `just vault-dev-init`
-once (idempotent — the `|| true` absorbs Vault's "path is already in use" on a second run, same
-rationale as `provision_tenant`'s own idempotence).
+(`just`'s own `{{ }}` interpolation syntax only fires around an actual expression; a literal
+JSON body in single braces passes through unmodified — confirmed with `just --dry-run
+vault-dev-init` before writing this. Do **not** double the braces; doubling produces malformed
+JSON `{{"type":"transit"}}}}` since `}}}}` is not consumed as a closer with no matching `{{`
+open.) The second pair of mounts (`transit-other`) is Task 7's fixture for the
+cross-mount-rejection test. Add a line to `README.md`'s Local development steps: after
+`docker compose up -d`, run `just vault-dev-init` once (idempotent — the `|| true` absorbs
+Vault's "path is already in use" on a second run, same rationale as `provision_tenant`'s own
+idempotence).
 
 #### Task 6 — CI: `.github/workflows/ci.yml`
 
@@ -397,13 +405,17 @@ Add a `vault` service to the `test` job (alongside `postgres`) and a bootstrap s
       - uses: Swatinem/rust-cache@v2
       - run: cargo build
       - run: cargo run --bin messgr-control -- migrate
-      - name: Bootstrap Vault Transit mount + key (dev fixture)
+      - name: Bootstrap Vault Transit mount + key (dev fixture, matches `just vault-dev-init`)
         run: |
           for i in $(seq 1 30); do curl -sf "$VAULT_ADDR/v1/sys/health" && break; sleep 1; done
           curl -sf --header "X-Vault-Token: $VAULT_TOKEN" --request POST \
             --data '{"type":"transit"}' "$VAULT_ADDR/v1/sys/mounts/transit"
           curl -sf --header "X-Vault-Token: $VAULT_TOKEN" --request POST \
             "$VAULT_ADDR/v1/transit/keys/messgr-dek"
+          curl -sf --header "X-Vault-Token: $VAULT_TOKEN" --request POST \
+            --data '{"type":"transit"}' "$VAULT_ADDR/v1/sys/mounts/transit-other"
+          curl -sf --header "X-Vault-Token: $VAULT_TOKEN" --request POST \
+            "$VAULT_ADDR/v1/transit-other/keys/messgr-dek"
       - run: cargo test
 ```
 
@@ -497,8 +509,8 @@ async fn unwrap_dek_rejects_a_ciphertext_from_a_different_mount() {
 }
 ```
 
-Extend Task 5's `justfile` recipe and Task 6's CI bootstrap step to also enable a second mount
-`transit-other` with its own `messgr-dek` key (same two `curl` calls, different mount path), so
+Task 5's `justfile` recipe and Task 6's CI bootstrap step already enable this second mount
+`transit-other` with its own `messgr-dek` key, so
 `unwrap_dek_rejects_a_ciphertext_from_a_different_mount` has a real second key to fail against.
 
 ### Acceptance test
@@ -565,3 +577,5 @@ T-004/T-009/T-012.
 
 - 2026-08-22 — created (TO DO). source: chat: PLAN.md's build-order decomposition of DESIGN.md §14 step 0 (Vault, code half) — the next unblocked ticket after T-001/T-002, foundational for the per-customer-DEK invariant (§7.6, AGENTS.md #7). Renumbered from the plan's original provisional `T-002` after that id was consumed by an unplanned ticket (T-002, spawned from T-001's review).
 - 2026-08-22 — TO DO → READY: plan complete
+- 2026-08-22 — plan amended inline: applicability-gate audit (fresh sub-agent) found Task 5's `justfile` recipe doubled the JSON body's braces (`{{{{...}}}}`), which `just` does not un-escape symmetrically — `{{{{` becomes a literal `{{`, but the unmatched `}}}}` passes through unmodified, producing malformed JSON that Vault would 400 on while `|| true` hid the failure. Fixed to single braces (verified with `just --dry-run`); folded Task 7's `transit-other` second-mount fixture directly into Task 5's recipe and Task 6's CI step instead of leaving it as a separate to-do note. No other finding; dependency resolution (`vaultrs` 0.8.0, `async-trait` 0.1.92, `base64` 0.22.1, `zeroize` 1.9.0, none yanked) and every file the plan touches re-verified unchanged since refinement.
+- 2026-08-22 — READY → IN DEVELOPMENT: picked up
