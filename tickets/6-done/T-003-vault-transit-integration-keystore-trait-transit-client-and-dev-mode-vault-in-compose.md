@@ -716,3 +716,4 @@ cost: estimated M, actual M
 - 2026-08-22 — IN REVIEW → REWORK: review: F1 blocking (unwrap_dek_rejects_a_ciphertext_from_a_different_mount asserts only is_err(), passes with the fixture mount deleted); F2, F3 noted
 - 2026-08-22 — REWORK → IN REVIEW: findings fixed
 - 2026-08-22 — scoped re-review: F1 verified fixed (mutation-tested by deleting and restoring the `transit-other` mount); F2, F3 stand as noted from the first pass. 0 blocking, 0 new findings.
+- 2026-08-22 — IN REVIEW → DONE: scoped re-review clean; F1 fixed, F2/F3 noted

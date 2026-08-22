@@ -20,11 +20,10 @@ Last updated: 2026-08-22
 
 ## IN REVIEW
 
-### messgr (1/1)
+### messgr (0/1)
 
 | id | title | depends-on |
 |---|---|---|
-| T-003 | Vault Transit integration: KeyStore trait, Transit client, and dev-mode Vault in compose | [T-001] |
 
 ## REWORK
 
@@ -55,6 +54,7 @@ Last updated: 2026-08-22
 |---|---|---|
 | T-001 | Control database, tenant registry, and single-tenant provisioning | yes — MERGED: `feat/T-001-control-database-tenant-registry-and-single-tenant-provisioning` (tidied to 5 atomic commits:… |
 | T-002 | Provisioning path: preserve connection options and write the platform_audit trail | yes — MERGED: `feat/T-002-provisioning-path-preserve-connection-options-and-write-the-platform-audit-trail` (1 commit: … |
+| T-003 | Vault Transit integration: KeyStore trait, Transit client, and dev-mode Vault in compose | no — publish-gated |
 
 ## DROPPED
 
