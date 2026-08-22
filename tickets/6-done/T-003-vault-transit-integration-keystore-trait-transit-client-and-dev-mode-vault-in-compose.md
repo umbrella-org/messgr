@@ -717,3 +717,4 @@ cost: estimated M, actual M
 - 2026-08-22 — REWORK → IN REVIEW: findings fixed
 - 2026-08-22 — scoped re-review: F1 verified fixed (mutation-tested by deleting and restoring the `transit-other` mount); F2, F3 stand as noted from the first pass. 0 blocking, 0 new findings.
 - 2026-08-22 — IN REVIEW → DONE: scoped re-review clean; F1 fixed, F2/F3 noted
+- 2026-08-22 — MERGED: `feat/T-003-vault-transit-integration-keystore-trait-transit-client-and-dev-mode-vault-in-compose` (commits `58b8f09`, `a9c1308`) merged into `main` via `--no-ff` (merge commit `fef2dac`; local repo only). Post-merge: fmt/clippy/build clean, 17/17 tests green.
