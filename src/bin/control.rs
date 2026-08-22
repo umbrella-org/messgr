@@ -27,6 +27,11 @@ enum Command {
         region: String,
         #[arg(long = "database-name")]
         database_name: String,
+        /// Operator identity recorded on the platform_audit row. No auth
+        /// realm exists yet for messgr-control, so this is supplied
+        /// explicitly rather than inferred.
+        #[arg(long)]
+        actor: String,
     },
 }
 
@@ -56,6 +61,7 @@ async fn main() {
             slug,
             region,
             database_name,
+            actor,
         } => {
             let tenant_id = provision_tenant(
                 &control_pool,
@@ -64,6 +70,7 @@ async fn main() {
                 &region,
                 &database_name,
                 config.profile,
+                &actor,
             )
             .await
             .unwrap_or_else(|err| {

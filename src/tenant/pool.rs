@@ -14,12 +14,7 @@ pub async fn connect_tenant_pool(
     max_connections: u32,
     profile: Profile,
 ) -> Result<PgPool, sqlx::Error> {
-    let tenant_url = db::with_database_name(base_db_url, database_name);
-    db::connect_with_expected_database(
-        &tenant_url,
-        max_connections,
-        database_name,
-        profile,
-    )
-    .await
+    let options = db::with_database_name(base_db_url, database_name)?;
+    db::connect_with_expected_database(options, max_connections, database_name, profile)
+        .await
 }
