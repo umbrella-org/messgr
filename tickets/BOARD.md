@@ -9,7 +9,7 @@ hand — edit the tickets. Hand-written planning notes live in [`NOTES.md`](NOTE
 **WIP limits (per child-project):**
 - `messgr`: `3-in-development/` ≤ 1 · `4-in-review/` ≤ 1
 
-Last updated: 2026-08-22
+Last updated: 2026-08-29
 
 ## IN DEVELOPMENT
 
@@ -45,6 +45,7 @@ Last updated: 2026-08-22
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
+| T-004 | Per-tenant Transit mount + AppRole creation wired into the provisioning command | medium | medium | M | [T-003] |  |
 
 ## DONE
 
