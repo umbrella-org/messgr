@@ -13,10 +13,23 @@ review (`db::with_database_name` dropping connection-string options, `platform_a
 written), and consumed the id this plan had reserved for "Vault Transit integration" below.
 Every id from that point on has been renumbered **+1** from the original draft to absorb the
 shift (`T-002 Vault Transit integration` → `T-003`, and so on through the old `T-060` → `T-061`)
-— the whole reason this file warns about churn. Ids below assume the tickets are filed in the
-order listed, so `T-003` is the next one filed. If they are filed out of order — or another
-unplanned ticket lands mid-sequence again, the way `T-002` did — the `depends-on` columns must
-be re-mapped once more; they reference provisional ids, not fixed ones.
+— the whole reason this file warns about churn. Ids below assume the remaining tickets are
+filed in the order listed. If they are filed out of order — or another unplanned ticket lands
+mid-sequence again, the way `T-002` did — the `depends-on` columns must be re-mapped once more;
+they reference provisional ids, not fixed ones.
+
+**Filed and merged so far:** `T-001`, `T-002`, `T-003` (Vault Transit integration — `KeyStore`
+trait, dev-mode Vault), `T-004` (per-tenant Transit mount + AppRole, wired into provisioning).
+Build step 0's code half is therefore complete; `T-005` is the next row here not yet filed,
+though nothing forces it next — it is ops/doc work needed before go-live rather than before
+code, so `T-006` (producer registry) is the natural choice if the code track matters more.
+
+**Sizing calibration, from the four filed so far.** `T-003` was estimated M and came in M.
+`T-004` was estimated M *in this file*, re-graded L at refinement, and came in L: the Vault
+admin surface (mount, key, ACL policy, AppRole, response-wrapped SecretID) plus a schema
+migration and a signature change threaded through every call site was more than the one-line
+row suggested. Treat the M on the remaining Vault/infra rows as optimistic — `T-005` and
+`T-009` especially.
 
 **Sequencing rules that constrain this list** (§14, restated so they are not lost in a
 re-order):
@@ -51,10 +64,18 @@ under a real KEK — the one thing in the design that cannot be retrofitted (§7
 |---|---|---|---|---|
 | T-003 | Vault Transit integration: `KeyStore` trait, Transit client, dev-mode Vault in compose with the non-dev startup guard | §7.6, §11.1 (guard pattern), §13 | T-001 | M |
 | T-004 | Per-tenant Transit mount + AppRole creation wired into the provisioning command (fills the seam T-001 left) | §7.6, §11.4, §14 step 0b | T-003 | M |
-| T-005 | Vault production topology: 3-node Raft, Shamir unseal runbook with named keyholders, AppRole/SecretID delivery | §7.6, §13 | T-003 | M (ops/doc; needed before go-live, not before code) |
+| T-005 | Vault production topology: 3-node Raft, Shamir unseal runbook with named keyholders, AppRole/SecretID delivery (including the unwrap step for the token `messgr-control provision` prints once) | §7.6, §13 | T-004 | M (ops/doc; needed before go-live, not before code) |
 
 Note: `KeyStore` must keep `wrapped_dek` opaque — the deferred "wrapped DEKs in Vault KV"
 migration (§7.6) only stays available if the column never leaks into queries or the API.
+
+Note: **`T-004` created each tenant's Vault identity but deliberately wired nothing to
+*authenticate* as it.** `VaultKeyStore` still connects with an environment `VAULT_TOKEN`;
+`tenant.vault_role_id` is recorded and each tenant's SecretID is printed once, response-wrapped,
+but no runtime process performs an AppRole login. Doing that — unwrapping the SecretID, logging
+in, and using the resulting tenant-scoped token for `create_dek`/`unwrap_dek` — is `T-009`'s
+work and is not visible in that row's one-line description. Do not assume the per-tenant
+credentials are in use just because they exist.
 
 ## Build step 1 — Producer registry and mTLS identity
 
@@ -84,7 +105,7 @@ mechanics and an audit trail that is correct from the first row, not safety.
 | id | title | design refs | depends-on | size |
 |---|---|---|---|---|
 | T-008 | `tenant_config` table + typed config loading (retention, timezone/locale defaults, schedule horizon, verification mode, staleness bound, quota day boundary) | §4.10 | T-001 | S |
-| T-009 | Per-customer DEK lifecycle: `customer_dek`, datakey creation, bounded zeroizing LRU cache, pre-provisioning batch, per-tenant HMAC pepper | §7.1, §7.6, §4.5 | T-003, T-004 | L |
+| T-009 | Per-customer DEK lifecycle: `customer_dek`, datakey creation, bounded zeroizing LRU cache, pre-provisioning batch, per-tenant HMAC pepper — **plus the AppRole login `T-004` left unwired** (see the note under build step 0) | §7.1, §7.6, §4.5 | T-003, T-004 | L |
 | T-010 | Ledger + outbox schema: `comms_request` (monthly RANGE partitions), `outbox`, `comms_event`, `idempotency`, indexes as specified | §4.1–§4.4 | T-006, T-008 | L |
 | T-011 | Template store: immutable `(template_id, version, locale)` rows, approval metadata, render path, version pinning onto the ledger row | §4.4 | T-010 | M |
 | T-012 | `messgr-ingest`: `POST /comms`, idempotency replay, single-transaction ledger + outbox write, payload/destination encryption + HMAC | §4.1–§4.3, §7, §11 | T-007, T-009, T-010, T-011 | L |
@@ -353,7 +374,7 @@ the sweep jobs. None of it is a feature; without it the steps above are not oper
 | T-057 | Fleet migration runner: iterate the tenant registry, apply migrations, record `tenant_schema_version`, report drift; never automatic on process start; expand/contract lint | §13, §4.11, §12 | T-001 | M |
 | T-058 | Observability: Prometheus metrics (outbox depth and age, send rate, gate outcomes, provider errors, DEK cache hit rate), alerting rules, per-database IO monitoring for noisy-neighbour identification | §9, §11.3, §12 | T-014 | M |
 | T-059 | Deployment packaging: systemd/Compose units for all six binaries, PgBouncer transaction-mode config with dispatchers bypassing it, TOML + env config, secrets only from Vault | §13, §2.3, §7.6 | T-025 | L |
-| T-060 | Backup and restore: cluster backup policy, rehearsed single-tenant restore runbook (full-cluster recovery to a side instance, `pg_dump`, load), RTO measured and recorded | §13, §7.3, §12 | T-059 | M |
+| T-060 | Backup and restore: cluster backup policy, rehearsed single-tenant restore runbook (full-cluster recovery to a side instance, `pg_dump`, load), RTO measured and recorded. **Begins by sizing one tenant's ledger** — no storage estimate exists anywhere yet, and restore time is a function of total cluster size, not the one tenant being recovered (still-open 16) | §13, §7.3, §12 | T-059 | M-L |
 | T-061 | Sweep jobs: idempotency rows (30d), orphan events, `producer_usage` minute/day rows — one scheduled-maintenance home rather than three ad-hoc ones | §4.3, §4.9, §10 | T-024, T-035 | S |
 
 ---
@@ -393,7 +414,7 @@ From "Still open" (§ at end of DESIGN.md). These need user/business answers, no
 | 9 Scheduling horizon confirmation + override holder | T-028 |
 | 10 Two-person approval mechanism | T-041 |
 | 11 Launch regions | T-005, T-056 |
-| 12 Vault edition | T-004 |
+| 12 Vault edition | Nothing — `T-004` shipped on OSS mounts + policies per decision 17. Confirm only in case an Enterprise licence is already held, which would shape `T-005` |
 | 13 Cloud OTP posture | T-052 |
 | 14 Offboarding SLA and archive pricing | T-055 |
-| 16 Single-tenant restore RTO | T-060 |
+| 16 Single-tenant restore RTO | T-060 — unanswerable until per-tenant storage is sized; that sizing is now the first task of that ticket |
