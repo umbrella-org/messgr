@@ -873,7 +873,7 @@ unwrap DEK   POST transit/decrypt/messgr-dek  { ciphertext }
 >
 > If an HSM becomes available later, switching to auto-unseal is a Vault configuration change and a `seal migrate` — it does not affect messgr's code or schema. Worth revisiting once the ops burden is felt.
 
-**Per-tenant KEKs.** Each tenant gets its own Transit mount and key — `transit/<tenant_slug>/messgr-dek`, recorded as `tenant.vault_mount` in the control database (§4.11). Vault policies bind an AppRole to exactly one mount, so a compromised tenant credential cannot decrypt another tenant's data, and no single key exists whose loss exposes the platform.
+**Per-tenant KEKs.** Each tenant gets its own Transit mount and key. `tenant.vault_mount` (§4.11) records the **mount path only** — `transit/<tenant_slug>` — never the key name appended; the key inside that mount is always the fixed name `messgr-dek`, since mount varies per tenant and key name never does. (Corrected here: an earlier draft of this paragraph wrote the combined identifier `transit/<tenant_slug>/messgr-dek` as if that whole string were the value of `tenant.vault_mount`. It reads naturally as prose but is wrong as an implementation instruction — Vault's own Transit API takes mount and key name as two separate path segments, so a literal reading would have doubled the key-name segment the first time code actually built a request from the column. Caught during T-004's refinement, before any code shipped against it.) Vault policies bind an AppRole to exactly one mount, so a compromised tenant credential cannot decrypt another tenant's data, and no single key exists whose loss exposes the platform.
 
 This makes two operations trivial that would otherwise be projects:
 

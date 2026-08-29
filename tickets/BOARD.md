@@ -38,6 +38,7 @@ Last updated: 2026-08-29
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
+| T-004 | Per-tenant Transit mount + AppRole creation wired into the provisioning command | high | high | L | [T-003] |  |
 
 ## TO DO (impact order, per child)
 
@@ -45,7 +46,6 @@ Last updated: 2026-08-29
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
-| T-004 | Per-tenant Transit mount + AppRole creation wired into the provisioning command | medium | medium | M | [T-003] |  |
 
 ## DONE
 
