@@ -902,4 +902,5 @@ locked decision.
 - 2026-08-29 — plan amended inline: Task 7's dev/CI bootstrap renames the generic Transit fixture mounts from `transit`/`transit-other` (T-003) to `transit-fixture`/`transit-fixture-other`. Found live during acceptance testing: provisioning failed with "path is already in use at transit/" because Vault refuses to nest a new mount under an already-mounted path, and T-003's dev fixture already mounts a bare `transit` engine — every real `transit/<slug>` per-tenant mount collided with it. Renamed both fixtures (and `tests/keystore.rs`'s references) to names that don't start with `transit/`.
 - 2026-08-29 — IN DEVELOPMENT → IN REVIEW: acceptance green
 - 2026-08-29 — review: 0 blocking, 5 non-blocking (F1–F5) all noted
+- 2026-08-29 — merged to main (PR #4, 8f8233d)
 - 2026-08-29 — IN REVIEW → DONE: review clean; 5 non-blocking findings noted
