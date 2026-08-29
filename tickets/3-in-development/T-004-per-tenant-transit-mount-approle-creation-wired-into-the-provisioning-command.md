@@ -802,3 +802,4 @@ the doc together.
 
 - 2026-08-29 — created (TO DO). source: chat: decomposed from PLAN.md's build-order breakdown of DESIGN.md (build step 0, the seam T-003 left open).
 - 2026-08-29 — TO DO → READY: plan complete
+- 2026-08-29 — READY → IN DEVELOPMENT: picked up
