@@ -796,11 +796,110 @@ the doc together.
 
 ## Review
 
-<!-- empty until IN REVIEW -->
+- [x] Implementation audit — acceptance test re-run, tasks & criteria verified (step 2)
+- [x] Quality audit (step 3)
+- [x] Consistency audit (step 4)
+- [x] Documentation audit — coverage, whole-tree sweep, docs build clean (step 4a, if the project ships docs)
+- [x] Docs-readability pass on the ticket's changed `.adoc`/`.md` files, or a conscious skip recorded (step 4b, optional) — skipped: no docs-readability reviewer configured in this session
+- [x] Findings recorded in the ticket's `## Review` with severity, **class**, **and** disposition per the rules §5; disposition summary line present, and a `cost: estimated …, actual …` line beneath it (step 5)
+- [x] Remaining-tickets impact sweep done (step 8)
+
+**Diffed** `main..feat/T-004-per-tenant-transit-mount-approle-creation-wired-into-the-provisioning-command`
+(commits `c0c9769`, `d540f05`, `c91fa31`, `214f5f3`, `31179ca`, `70c723b`). Read the ticket from
+`main` throughout (in-tree layout — the feature branch's own copy of `tickets/` is stale, cut
+before the ticket moved to `4-in-review/`).
+
+**Implementation audit.** Prerequisite gate (T-003 done, merged `fef2dac`) confirmed. All 10
+confirmed design decisions honoured in the shipped code:
+
+| # | Decision | Verdict | Evidence |
+|---|---|---|---|
+| 1 | `tenant.vault_mount` = mount path only | Met | `provision.rs:129`; live: provisioned `acme-review`, `vault_mount` = `transit/acme-review`, not doubled with `/messgr-dek` |
+| 2 | New `vault_role_id` column; SecretID never in Postgres | Met | `migrations/control/0002_tenant_vault_role_id.sql`; grepped for secret-id persistence — none; live-checked `platform_audit.detail` across two provisioning runs, only `vault_role_id` present |
+| 3 | Shared `approle` backend, one role per tenant, enabled once in bootstrap | Met | `src/tenant/vault.rs` never enables an auth backend; `justfile`/CI do it once, idempotently |
+| 4 | Policy scoped to exactly the two `KeyStore` paths | Met | `policy_hcl_for` (`src/tenant/vault.rs:93-99`); unit test green; **mutation-verified live** — wildcarding the policy makes the isolation test fail, reverting makes it pass |
+| 5 | SecretID minted only on fresh provision | Met | `provision.rs:149`; live-verified twice, plus `idempotent_reprovision_does_not_mint_a_second_secret_id` |
+| 6 | Shared `connect_client`, admin path reuses it | Met (wording nit, F1) | `keystore.rs:96-107`; admin path goes through `VaultKeyStore::connect` in `bin/control.rs`, not `provision.rs` as the plan's own prose implied — same effective invariant, ticket's own Task 6 code sample already placed it there |
+| 7 | `KEY_NAME` `pub(crate)`, shared not duplicated | Met | `keystore.rs:22`, `tenant/vault.rs:23` |
+| 8 | New `src/tenant/vault.rs` module | Met | present, registered in `tenant/mod.rs` |
+| 9 | Mount idempotency via `mount::list`, not error-text | Met | `ensure_transit_mount` (`tenant/vault.rs:101-111`) |
+| 10 | `provision_tenant` signature/return type change, all call sites updated | Met | `provision.rs:85-95`; all 10 call sites across `tests/tenancy.rs` updated (counted: 2+2+1+1+2+2=10) |
+
+All 9 tasks present and correct in the files they name, cross-checked against actual file
+content, not the plan's prose.
+
+**Acceptance test re-run, live** (fresh Postgres 18-alpine + dev-mode Vault via Docker/OrbStack,
+port 5432 remapped locally to 55432 for the run, `compose.yml`/`.env` reverted after — same
+workaround T-003's review used):
+
+```
+docker compose up -d                                        # both healthy
+just vault-dev-init                                         # transit-fixture, transit-fixture-other, approle bootstrapped
+cargo run --bin messgr-control -- migrate                   # clean
+cargo fmt --check                                           # clean
+cargo clippy --all-targets --all-features -- -D warnings    # clean
+cargo build                                                  # clean
+cargo test                                                   # 21 passed, 0 failed
+```
+
+9 lib unit + 3 `tests/keystore.rs` + 6 `tests/tenancy.rs` + 3 `tests/tenant_vault.rs`, all green.
+Manual smoke check (ticket's own acceptance criterion): ran `messgr-control provision` twice for
+the same slug — first run printed `vault_wrapped_secret_id=...`, second did not; `vault_role_id`
+identical both times.
+
+**Both bugs the ticket's History records as found live during implementation, independently
+re-verified:** (1) the `transit-fixture`/`transit-fixture-other` rename — grepped the whole tree,
+no stray `transit`/`transit-other` mount references remain in `tests/keystore.rs`, `justfile`, or
+CI; (2) the lazy Vault-client construction — ran `messgr-control migrate` with `VAULT_ADDR`/
+`VAULT_TOKEN` unset entirely; succeeded, confirming `Migrate` has zero Vault dependency.
+
+**Isolation-proof test, mutation-tested** (same standard T-001/F13 and T-003/F1 established for
+this codebase — verify by breaking the property, not by reading the assertion):
+`tests/tenant_vault.rs::tenant_a_vault_credentials_cannot_read_tenant_bs_dek` was put through a
+real mutation: `policy_hcl_for` was temporarily wildcarded to grant every tenant's policy access
+across all tenant mounts — reintroducing the exact cross-tenant bug this ticket exists to
+prevent. The test **failed** as expected. Reverted; test and the pure-function policy-HCL unit
+test both green again. **The test survives mutation — it genuinely catches a regression of the
+property it claims to test.** Live-captured the actual rejection: `APIError { code: 403, errors:
+["...permission denied..."] }` — a real Vault ACL denial, not an accident of the fixture (the
+test's own admin-client-succeeds-on-the-same-path check already rules out "route not found" as
+the cause, the exact false-pass mode T-003/F1 was blocking on).
+
+**Quality/consistency/docs audits.** No SecretID leakage anywhere — grepped code, logs, and
+`platform_audit`'s JSON detail; only `vault_role_id` (public) is ever persisted or logged.
+`README.md`'s new prose checked against live CLI output. `DESIGN.md` §7.6's correction reads
+correctly and doesn't contradict anything else in the document.
+
+| id | severity | class | disposition | description | evidence | suggestion |
+|---|---|---|---|---|---|---|
+| F1 | non-blocking | stale-xref | noted | No `plan amended inline` History line for two real, good deviations from the Implementation Plan's own code samples: (a) Task 6's snippet builds the admin `VaultKeyStore` unconditionally in `main()`; shipped code builds it lazily inside the `Provision` arm only (the fix for the lazy-Vault-client bug, explained in commit `d540f05`'s body but not mirrored into ticket History); (b) Task 7's snippet references "the existing `transit`/`transit-other` curl calls", but the shipped fix renamed both to `transit-fixture`/`transit-fixture-other` (commit `31179ca`, found live). | Ticket `## History` (no amendment lines); commits `d540f05`, `31179ca`. | Add two `plan amended inline` lines summarizing these two live-found deviations. |
+| F2 | non-blocking | test-gap | noted | The isolation test's cross-mount assertion is `result.is_err()`, not an inspection of error content — unlike this same codebase's own established fix for the identical failure shape (`tests/keystore.rs`, T-003/F1), which asserts the error names the specific mechanism. Confirmed by mutation the test does catch a real regression (survives), and the admin-success check already rules out the "broken fixture" false-pass mode — so this is a narrower gap than T-003/F1's, not the same defect, but the local precedent isn't applied consistently. | `tests/tenant_vault.rs:178-187` vs. `tests/keystore.rs:94-100`. Live error: `APIError { code: 403, errors: ["...permission denied..."] }`. | Tighten to assert the error `Debug` output contains `"permission denied"` (or `"403"`), matching `tests/keystore.rs`'s pattern. |
+| F3 | non-blocking | docs-gap | noted | `DESIGN.md` §4.11's canonical `CREATE TABLE tenant` block doesn't list `vault_role_id`, unlike `vault_mount`'s inline comment on the same block — §4.11 is the schema-of-record AGENTS.md points readers at for any schema change. | `DESIGN.md:586-596`; `migrations/control/0002_tenant_vault_role_id.sql`. | Add `vault_role_id text UNIQUE, -- public AppRole RoleID (§7.6)` to §4.11's table block. |
+| F4 | non-blocking | design | noted | `tests/tenancy.rs`'s `drop_test_tenant` cleans up Postgres rows only, not the Vault mount/policy/role each of its 10 `provision_tenant` calls now creates — unlike `tests/tenant_vault.rs`'s parallel helper, which does. Harmless in CI (ephemeral Vault per run); a long-lived local dev-mode Vault accumulates fixtures across `tenancy.rs` runs. | `tests/tenancy.rs:39-77` vs. `tests/tenant_vault.rs:29-79`. | Fold into a themed follow-up if `tests/tenancy.rs` is touched again; not worth its own ticket at this scale. |
+| F5 | non-blocking | docs-gap | noted | README's illustrative `provision` output shows `vault_wrapped_secret_id=eyJhbGciOi...` (looks like a JWT); the real token is Vault's own `hvs.<base64>` format (live: `hvs.CAESIAf...`). Cosmetic only. | `README.md:23` vs. live output. | Fix the placeholder to `hvs.CAESI...` next time this section is touched. |
+
+**Disposition summary:** 5 non-blocking findings, all `noted` (F1–F5). No `fixed inline`,
+`folded`, or `new ticket` dispositions — none passed the promotion test on its own.
+
+cost: estimated L, actual L
+
+**Verdict: no blocking findings. Ticket proceeds to `tickets/6-done/`.** Acceptance test fully
+green, all ten decisions honoured, both live-found bugs independently re-verified fixed, the
+`vault_mount` fix confirmed against a real provisioned row, no SecretID leakage anywhere, and the
+isolation-proof test survived a real mutation attempt (reintroducing the exact bug it exists to
+catch). The five findings are genuine but small — none breaks the golden path or contradicts a
+locked decision.
+
+**Impact sweep (step 8).** No ticket in `tickets/1-to-do/` or `tickets/2-ready/` lists T-004 in
+`depends-on:` (the board is otherwise empty of TO DO/READY tickets). Nothing to patch.
 
 ## History
 
 - 2026-08-29 — created (TO DO). source: chat: decomposed from PLAN.md's build-order breakdown of DESIGN.md (build step 0, the seam T-003 left open).
 - 2026-08-29 — TO DO → READY: plan complete
 - 2026-08-29 — READY → IN DEVELOPMENT: picked up
+- 2026-08-29 — plan amended inline: Task 6's admin `VaultKeyStore` is constructed lazily inside the `Provision` arm only, not unconditionally in `main()` as the plan's code sample showed — an unconditional connect would have made `messgr-control migrate` depend on Vault too, with no functional need, and raced CI's Vault-readiness retry loop (which runs after the migrate step). Found and fixed during implementation, before any test ran.
+- 2026-08-29 — plan amended inline: Task 7's dev/CI bootstrap renames the generic Transit fixture mounts from `transit`/`transit-other` (T-003) to `transit-fixture`/`transit-fixture-other`. Found live during acceptance testing: provisioning failed with "path is already in use at transit/" because Vault refuses to nest a new mount under an already-mounted path, and T-003's dev fixture already mounts a bare `transit` engine — every real `transit/<slug>` per-tenant mount collided with it. Renamed both fixtures (and `tests/keystore.rs`'s references) to names that don't start with `transit/`.
 - 2026-08-29 — IN DEVELOPMENT → IN REVIEW: acceptance green
+- 2026-08-29 — review: 0 blocking, 5 non-blocking (F1–F5) all noted
+- 2026-08-29 — IN REVIEW → DONE: review clean; 5 non-blocking findings noted
