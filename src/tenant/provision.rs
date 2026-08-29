@@ -1,9 +1,61 @@
 use sqlx::{Executor, PgPool, Row};
 use uuid::Uuid;
+use vaultrs::client::VaultClient;
 
 use crate::profile::Profile;
 
-use super::{pool::connect_tenant_pool, repo};
+use super::{pool::connect_tenant_pool, repo, vault};
+
+/// The outcome of a successful `provision_tenant` call.
+#[derive(Debug)]
+pub struct ProvisionOutcome {
+    pub tenant_id: Uuid,
+    /// Public AppRole identifier, also persisted as `tenant.vault_role_id`.
+    pub vault_role_id: String,
+    /// Present only on a fresh provision (decision 5) — an idempotent
+    /// re-provision of an already-active tenant never mints a second live
+    /// credential. Response-wrapped, 10-minute TTL, single-use unwrap.
+    /// Print once for out-of-band delivery; never persist.
+    pub vault_wrapped_secret_id: Option<String>,
+}
+
+/// A provisioning run can now fail on either the Postgres side or the Vault
+/// side.
+#[derive(Debug)]
+pub enum ProvisionError {
+    Database(sqlx::Error),
+    Vault(crate::keystore::KeyStoreError),
+}
+
+impl std::fmt::Display for ProvisionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Database(err) => write!(f, "provisioning failed (database): {err}"),
+            Self::Vault(err) => write!(f, "provisioning failed (vault): {err}"),
+        }
+    }
+}
+
+impl std::error::Error for ProvisionError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Database(err) => Some(err),
+            Self::Vault(err) => Some(err),
+        }
+    }
+}
+
+impl From<sqlx::Error> for ProvisionError {
+    fn from(err: sqlx::Error) -> Self {
+        Self::Database(err)
+    }
+}
+
+impl From<crate::keystore::KeyStoreError> for ProvisionError {
+    fn from(err: crate::keystore::KeyStoreError) -> Self {
+        Self::Vault(err)
+    }
+}
 
 /// Provisions a tenant end to end (DESIGN.md §11.4, minus the pieces that
 /// don't exist yet — see the ticket's decision 2): ensures the `tenant` row
@@ -26,10 +78,11 @@ use super::{pool::connect_tenant_pool, repo};
 /// operator identity supplied by the caller, since `messgr-control` has no
 /// auth realm to infer it from yet.
 ///
-/// Out of scope, deliberately: creating the tenant's Vault Transit mount and
-/// AppRole, and starting its dispatcher pair. Those subsystems don't exist
-/// yet (§7.6 lands with encryption, §9 with the dispatcher); `vault_mount` is
-/// still recorded now as the deterministic path it will occupy later.
+/// Creates (or idempotently re-confirms) the tenant's Vault Transit mount,
+/// key, ACL policy, and AppRole (T-004, DESIGN.md §7.6). Starting the
+/// tenant's dispatcher pair is still out of scope — that subsystem doesn't
+/// exist yet (§9).
+#[allow(clippy::too_many_arguments)] // one more (vault_client) than a request struct would justify refactoring for right now; every arg is a distinct, already-necessary input
 pub async fn provision_tenant(
     control_pool: &PgPool,
     base_db_url: &str,
@@ -38,7 +91,8 @@ pub async fn provision_tenant(
     database_name: &str,
     profile: Profile,
     actor: &str,
-) -> Result<Uuid, sqlx::Error> {
+    vault_client: &VaultClient,
+) -> Result<ProvisionOutcome, ProvisionError> {
     let (tenant_id, outcome) = match repo::find_by_slug(control_pool, slug).await? {
         Some(tenant)
             if tenant.region == region && tenant.database_name == database_name =>
@@ -69,11 +123,12 @@ pub async fn provision_tenant(
                     tenant.region, tenant.database_name,
                 )
                 .into(),
-            ));
+            )
+            .into());
         }
         None => {
             let id = Uuid::new_v4();
-            let vault_mount = format!("transit/{slug}/messgr-dek");
+            let vault_mount = format!("transit/{slug}");
             let webhook_token = Uuid::new_v4().to_string();
 
             repo::insert_provisioning(
@@ -90,6 +145,11 @@ pub async fn provision_tenant(
             (id, "created")
         }
     };
+
+    let mint_secret_id = outcome == "created";
+    let vault_outcome =
+        vault::provision_vault(vault_client, slug, mint_secret_id).await?;
+    repo::record_vault_role_id(control_pool, tenant_id, &vault_outcome.role_id).await?;
 
     ensure_database_exists(control_pool, database_name).await?;
 
@@ -118,11 +178,16 @@ pub async fn provision_tenant(
             "region": region,
             "database_name": database_name,
             "outcome": outcome,
+            "vault_role_id": vault_outcome.role_id,
         }),
     )
     .await?;
 
-    Ok(tenant_id)
+    Ok(ProvisionOutcome {
+        tenant_id,
+        vault_role_id: vault_outcome.role_id,
+        vault_wrapped_secret_id: vault_outcome.wrapped_secret_id,
+    })
 }
 
 async fn ensure_database_exists(
