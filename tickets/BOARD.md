@@ -38,6 +38,7 @@ Last updated: 2026-08-29
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
+| T-005 | Producer registry: producer table, repository, and register/disable operations | medium | medium | M | [T-001] |  |
 
 ## TO DO (impact order, per child)
 
