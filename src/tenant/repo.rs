@@ -10,7 +10,7 @@ pub async fn find_by_slug(
 ) -> Result<Option<Tenant>, sqlx::Error> {
     sqlx::query_as::<_, Tenant>(
         r#"
-        SELECT id, slug, region, database_name, vault_mount, webhook_token, status, created_at
+        SELECT id, slug, region, database_name, vault_mount, vault_role_id, webhook_token, status, created_at
         FROM tenant
         WHERE slug = $1
         "#,
@@ -18,6 +18,22 @@ pub async fn find_by_slug(
     .bind(slug)
     .fetch_optional(pool)
     .await
+}
+
+/// Persists the public AppRole RoleID Vault issued for this tenant
+/// (`tenant.vault_role_id`, T-004). Never called with a SecretID — that is
+/// never a column (DESIGN.md §7.6, this ticket's decision 2).
+pub async fn record_vault_role_id(
+    pool: &PgPool,
+    tenant_id: Uuid,
+    vault_role_id: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE tenant SET vault_role_id = $1 WHERE id = $2")
+        .bind(vault_role_id)
+        .bind(tenant_id)
+        .execute(pool)
+        .await
+        .map(|_| ())
 }
 
 /// Inserts a new tenant row in `provisioning` status. Callers must have
