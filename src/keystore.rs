@@ -17,9 +17,11 @@ use zeroize::Zeroizing;
 use crate::profile::Profile;
 
 /// The key name used inside every tenant's own Transit mount —
-/// `transit/<tenant_slug>/messgr-dek` (DESIGN.md §7.6). Mount varies per
-/// tenant; this never does.
-const KEY_NAME: &str = "messgr-dek";
+/// `transit/<tenant_slug>` (DESIGN.md §7.6). Mount varies per tenant; this
+/// never does. `pub(crate)` so `tenant::vault` (T-004) can create a key of
+/// this exact name inside the mount it provisions, without a second module
+/// defining the same string (drift hazard).
+pub(crate) const KEY_NAME: &str = "messgr-dek";
 
 /// One data-encryption key. `plaintext` is zeroized on drop; `wrapped` is the
 /// opaque Vault ciphertext to persist as `customer_dek.wrapped_dek` (a later
@@ -87,20 +89,35 @@ impl VaultKeyStore {
     /// Connects using `VAULT_ADDR`/`VAULT_TOKEN` from the environment
     /// (`vaultrs`'s own default — see `VaultClientSettingsBuilder`).
     pub fn connect(profile: Profile) -> Result<Self, KeyStoreError> {
-        dotenvy::dotenv().ok();
-
-        let settings: VaultClientSettings = VaultClientSettingsBuilder::default()
-            .build()
-            .unwrap_or_else(|err| {
-                panic!("failed to build Vault client settings: {err}")
-            });
-
-        assert_tls_outside_dev(&settings.address, profile);
-
         Ok(Self {
-            client: VaultClient::new(settings)?,
+            client: connect_client(profile)?,
         })
     }
+
+    /// The underlying Vault client, for callers that need admin-level
+    /// operations `KeyStore`'s own two methods don't cover (T-004's
+    /// mount/key/policy/role provisioning). Same guarded, env-based client
+    /// either way — see `connect_client`.
+    pub fn client(&self) -> &VaultClient {
+        &self.client
+    }
+}
+
+/// Builds a Vault client from `VAULT_ADDR`/`VAULT_TOKEN` (`vaultrs`'s own
+/// env defaults), applying the non-dev TLS guard. Shared by
+/// `VaultKeyStore::connect` (data-plane, tenant-scoped calls) and
+/// `tenant::vault`'s admin provisioning path (T-004) — one way this
+/// codebase turns environment variables into a Vault client, not two.
+pub(crate) fn connect_client(profile: Profile) -> Result<VaultClient, KeyStoreError> {
+    dotenvy::dotenv().ok();
+
+    let settings: VaultClientSettings = VaultClientSettingsBuilder::default()
+        .build()
+        .unwrap_or_else(|err| panic!("failed to build Vault client settings: {err}"));
+
+    assert_tls_outside_dev(&settings.address, profile);
+
+    Ok(VaultClient::new(settings)?)
 }
 
 #[async_trait]

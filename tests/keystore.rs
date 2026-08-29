@@ -16,7 +16,7 @@ async fn create_dek_and_unwrap_dek_round_trip() {
     let store = store();
 
     let dek = store
-        .create_dek("transit")
+        .create_dek("transit-fixture")
         .await
         .expect("create_dek failed");
     assert_eq!(
@@ -31,7 +31,7 @@ async fn create_dek_and_unwrap_dek_round_trip() {
     );
 
     let unwrapped = store
-        .unwrap_dek("transit", &dek.wrapped)
+        .unwrap_dek("transit-fixture", &dek.wrapped)
         .await
         .expect("unwrap_dek failed");
     assert_eq!(
@@ -45,11 +45,11 @@ async fn create_dek_returns_a_distinct_key_each_call() {
     let store = store();
 
     let first = store
-        .create_dek("transit")
+        .create_dek("transit-fixture")
         .await
         .expect("first create_dek failed");
     let second = store
-        .create_dek("transit")
+        .create_dek("transit-fixture")
         .await
         .expect("second create_dek failed");
 
@@ -72,11 +72,11 @@ async fn unwrap_dek_rejects_a_ciphertext_from_a_different_mount() {
     //
     // Review finding T-003/F1: an earlier version of this test asserted only
     // `result.is_err()`, which is satisfied by *any* Vault-side error —
-    // including "transit-other's fixture is missing or broken", which would
+    // including "transit-fixture-other's fixture is missing or broken", which would
     // make this test pass for the wrong reason (the same T-001/F13 failure
-    // shape). Confirmed by mutation: deleting the `transit-other` mount
+    // shape). Confirmed by mutation: deleting the `transit-fixture-other` mount
     // outright left this test green. Fixed two ways: (1) prove
-    // `transit-other` genuinely has its own working key by round-tripping a
+    // `transit-fixture-other` genuinely has its own working key by round-tripping a
     // DEK through it before the cross-mount attempt, so a broken fixture
     // fails loudly and separately from the property under test; (2) assert
     // on the actual error content (`KeyStoreError`'s `Debug`, which surfaces
@@ -86,27 +86,27 @@ async fn unwrap_dek_rejects_a_ciphertext_from_a_different_mount() {
     let store = store();
 
     let dek = store
-        .create_dek("transit")
+        .create_dek("transit-fixture")
         .await
         .expect("create_dek failed");
 
-    let other_dek = store.create_dek("transit-other").await.expect(
-        "transit-other's own create_dek failed — the cross-mount fixture is broken, \
+    let other_dek = store.create_dek("transit-fixture-other").await.expect(
+        "transit-fixture-other's own create_dek failed — the cross-mount fixture is broken, \
          not the property this test exists to check",
     );
     store
-        .unwrap_dek("transit-other", &other_dek.wrapped)
+        .unwrap_dek("transit-fixture-other", &other_dek.wrapped)
         .await
-        .expect("transit-other must be able to decrypt its own ciphertext");
+        .expect("transit-fixture-other must be able to decrypt its own ciphertext");
 
     let error = store
-        .unwrap_dek("transit-other", &dek.wrapped)
+        .unwrap_dek("transit-fixture-other", &dek.wrapped)
         .await
         .expect_err("decrypting under the wrong mount's key must fail, not succeed");
     let message = format!("{error:?}");
     assert!(
         message.contains("cipher") || message.contains("authentication"),
         "must fail specifically because Transit rejected the ciphertext under the wrong key, \
-         not for an unrelated reason (e.g. a broken/missing transit-other fixture): {message:?}"
+         not for an unrelated reason (e.g. a broken/missing transit-fixture-other fixture): {message:?}"
     );
 }

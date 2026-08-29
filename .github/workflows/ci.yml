@@ -63,17 +63,19 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo build
       - run: cargo run --bin messgr-control -- migrate
-      - name: Bootstrap Vault Transit mount + key (dev fixture, matches `just vault-dev-init`)
+      - name: Bootstrap Vault Transit fixture mounts + approle auth (matches `just vault-dev-init`)
         run: |
           for i in $(seq 1 30); do curl -sf "$VAULT_ADDR/v1/sys/health" && break; sleep 1; done
           curl -sf --header "X-Vault-Token: $VAULT_TOKEN" --request POST \
-            --data '{"type":"transit"}' "$VAULT_ADDR/v1/sys/mounts/transit"
+            --data '{"type":"transit"}' "$VAULT_ADDR/v1/sys/mounts/transit-fixture"
           curl -sf --header "X-Vault-Token: $VAULT_TOKEN" --request POST \
-            "$VAULT_ADDR/v1/transit/keys/messgr-dek"
+            "$VAULT_ADDR/v1/transit-fixture/keys/messgr-dek"
           curl -sf --header "X-Vault-Token: $VAULT_TOKEN" --request POST \
-            --data '{"type":"transit"}' "$VAULT_ADDR/v1/sys/mounts/transit-other"
+            --data '{"type":"transit"}' "$VAULT_ADDR/v1/sys/mounts/transit-fixture-other"
           curl -sf --header "X-Vault-Token: $VAULT_TOKEN" --request POST \
-            "$VAULT_ADDR/v1/transit-other/keys/messgr-dek"
+            "$VAULT_ADDR/v1/transit-fixture-other/keys/messgr-dek"
+          curl -sf --header "X-Vault-Token: $VAULT_TOKEN" --request POST \
+            --data '{"type":"approle"}' "$VAULT_ADDR/v1/sys/auth/approle"
       # The two-tenant isolation suite this build step is required to have
       # (DESIGN.md §14: "From step 0b onward, CI runs a two-tenant
       # integration suite").

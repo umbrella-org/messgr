@@ -18,6 +18,7 @@ use sqlx::{Executor, PgPool};
 use uuid::Uuid;
 
 use messgr::db;
+use messgr::keystore::VaultKeyStore;
 use messgr::profile::Profile;
 use messgr::tenant::provision::provision_tenant;
 
@@ -25,6 +26,12 @@ fn control_database_url() -> String {
     dotenvy::dotenv().ok();
     std::env::var("CONTROL_DATABASE_URL")
         .expect("CONTROL_DATABASE_URL must be set for tests")
+}
+
+/// Every `provision_tenant` call needs an admin Vault client (T-004). One
+/// connected `VaultKeyStore` per test, its `.client()` passed to each call.
+fn vault_keystore() -> VaultKeyStore {
+    VaultKeyStore::connect(Profile::Dev).expect("connecting to dev-mode Vault failed")
 }
 
 fn unique_name(prefix: &str) -> String {
@@ -77,6 +84,7 @@ async fn two_tenants_are_isolated_by_database() {
     let control_pool = db::connect(&control_url, 5)
         .await
         .expect("failed to connect to control database");
+    let vault = vault_keystore();
 
     let slug_a = unique_name("test_tenant_a");
     let db_a = unique_name("test_db_a");
@@ -91,6 +99,7 @@ async fn two_tenants_are_isolated_by_database() {
         &db_a,
         Profile::Dev,
         "test-actor",
+        vault.client(),
     )
     .await
     .expect("provisioning tenant A failed");
@@ -102,10 +111,11 @@ async fn two_tenants_are_isolated_by_database() {
         &db_b,
         Profile::Dev,
         "test-actor",
+        vault.client(),
     )
     .await
     .expect("provisioning tenant B failed");
-    assert_ne!(tenant_a, tenant_b);
+    assert_ne!(tenant_a.tenant_id, tenant_b.tenant_id);
 
     let pool_a =
         messgr::tenant::pool::connect_tenant_pool(&control_url, &db_a, 2, Profile::Dev)
@@ -158,6 +168,7 @@ async fn work_on_tenant_as_pool_never_reads_or_writes_tenant_bs_database() {
     let control_pool = db::connect(&control_url, 5)
         .await
         .expect("failed to connect to control database");
+    let vault = vault_keystore();
 
     let slug_a = unique_name("test_tenant_write_a");
     let db_a = unique_name("test_db_write_a");
@@ -172,6 +183,7 @@ async fn work_on_tenant_as_pool_never_reads_or_writes_tenant_bs_database() {
         &db_a,
         Profile::Dev,
         "test-actor",
+        vault.client(),
     )
     .await
     .expect("provisioning tenant A failed");
@@ -183,6 +195,7 @@ async fn work_on_tenant_as_pool_never_reads_or_writes_tenant_bs_database() {
         &db_b,
         Profile::Dev,
         "test-actor",
+        vault.client(),
     )
     .await
     .expect("provisioning tenant B failed");
@@ -229,6 +242,7 @@ async fn a_mis_wired_pool_trips_the_current_database_assertion() {
     let control_pool = db::connect(&control_url, 5)
         .await
         .expect("failed to connect to control database");
+    let vault = vault_keystore();
 
     let slug = unique_name("test_tenant_mis_wired");
     let db_name = unique_name("test_db_mis_wired");
@@ -241,6 +255,7 @@ async fn a_mis_wired_pool_trips_the_current_database_assertion() {
         &db_name,
         Profile::Dev,
         "test-actor",
+        vault.client(),
     )
     .await
     .expect("provisioning failed");
@@ -272,11 +287,12 @@ async fn provisioning_writes_a_platform_audit_row() {
     let control_pool = db::connect(&control_url, 5)
         .await
         .expect("failed to connect to control database");
+    let vault = vault_keystore();
 
     let slug = unique_name("test_tenant_audit_created");
     let db_name = unique_name("test_db_audit_created");
 
-    let tenant_id = provision_tenant(
+    let outcome = provision_tenant(
         &control_pool,
         &control_url,
         &slug,
@@ -284,6 +300,7 @@ async fn provisioning_writes_a_platform_audit_row() {
         &db_name,
         Profile::Dev,
         "test-actor",
+        vault.client(),
     )
     .await
     .expect("provisioning failed");
@@ -291,7 +308,7 @@ async fn provisioning_writes_a_platform_audit_row() {
     let rows: Vec<(String, Option<String>)> = sqlx::query_as(
         "SELECT action, detail->>'outcome' FROM platform_audit WHERE tenant_id = $1 ORDER BY at",
     )
-    .bind(tenant_id)
+    .bind(outcome.tenant_id)
     .fetch_all(&control_pool)
     .await
     .expect("querying platform_audit failed");
@@ -311,11 +328,12 @@ async fn idempotent_reprovision_writes_a_second_platform_audit_row() {
     let control_pool = db::connect(&control_url, 5)
         .await
         .expect("failed to connect to control database");
+    let vault = vault_keystore();
 
     let slug = unique_name("test_tenant_audit_idempotent");
     let db_name = unique_name("test_db_audit_idempotent");
 
-    let tenant_id = provision_tenant(
+    let first = provision_tenant(
         &control_pool,
         &control_url,
         &slug,
@@ -323,6 +341,7 @@ async fn idempotent_reprovision_writes_a_second_platform_audit_row() {
         &db_name,
         Profile::Dev,
         "test-actor",
+        vault.client(),
     )
     .await
     .expect("first provisioning failed");
@@ -335,6 +354,7 @@ async fn idempotent_reprovision_writes_a_second_platform_audit_row() {
         &db_name,
         Profile::Dev,
         "test-actor",
+        vault.client(),
     )
     .await
     .expect("idempotent re-provisioning failed");
@@ -342,7 +362,7 @@ async fn idempotent_reprovision_writes_a_second_platform_audit_row() {
     let rows: Vec<(String, Option<String>)> = sqlx::query_as(
         "SELECT action, detail->>'outcome' FROM platform_audit WHERE tenant_id = $1 ORDER BY at",
     )
-    .bind(tenant_id)
+    .bind(first.tenant_id)
     .fetch_all(&control_pool)
     .await
     .expect("querying platform_audit failed");
@@ -368,12 +388,13 @@ async fn rejected_reprovision_writes_a_platform_audit_row() {
     let control_pool = db::connect(&control_url, 5)
         .await
         .expect("failed to connect to control database");
+    let vault = vault_keystore();
 
     let slug = unique_name("test_tenant_audit_rejected");
     let db_name = unique_name("test_db_audit_rejected");
     let conflicting_db_name = unique_name("test_db_audit_rejected_conflict");
 
-    let tenant_id = provision_tenant(
+    let first = provision_tenant(
         &control_pool,
         &control_url,
         &slug,
@@ -381,6 +402,7 @@ async fn rejected_reprovision_writes_a_platform_audit_row() {
         &db_name,
         Profile::Dev,
         "test-actor",
+        vault.client(),
     )
     .await
     .expect("first provisioning failed");
@@ -393,6 +415,7 @@ async fn rejected_reprovision_writes_a_platform_audit_row() {
         &conflicting_db_name,
         Profile::Dev,
         "test-actor",
+        vault.client(),
     )
     .await;
 
@@ -405,7 +428,7 @@ async fn rejected_reprovision_writes_a_platform_audit_row() {
         "SELECT action, detail->>'attempted_database_name' FROM platform_audit \
          WHERE tenant_id = $1 AND action = 'tenant.provision_rejected'",
     )
-    .bind(tenant_id)
+    .bind(first.tenant_id)
     .fetch_all(&control_pool)
     .await
     .expect("querying platform_audit failed");

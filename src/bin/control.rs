@@ -2,6 +2,7 @@ use clap::{Parser, Subcommand};
 
 use messgr::config::Config;
 use messgr::db;
+use messgr::keystore::VaultKeyStore;
 use messgr::tenant::provision::provision_tenant;
 
 #[derive(Parser)]
@@ -63,7 +64,13 @@ async fn main() {
             database_name,
             actor,
         } => {
-            let tenant_id = provision_tenant(
+            // Connected only here, not unconditionally in `main` — `Migrate`
+            // has no Vault dependency and must not gain one (§13: never
+            // couple a subcommand to a service it doesn't use).
+            let vault_keystore = VaultKeyStore::connect(config.profile).expect(
+                "failed to connect to Vault (has VAULT_ADDR/VAULT_TOKEN been set?)",
+            );
+            let outcome = provision_tenant(
                 &control_pool,
                 &config.control_database_url,
                 &slug,
@@ -71,16 +78,24 @@ async fn main() {
                 &database_name,
                 config.profile,
                 &actor,
+                vault_keystore.client(),
             )
             .await
             .unwrap_or_else(|err| {
                 panic!(
                     "failed to provision tenant {slug:?} (has `messgr-control migrate` been \
-                     run against the control database?): {err}"
+                     run against the control database, and is Vault reachable and unsealed?): {err}"
                 )
             });
 
-            println!("{tenant_id}");
+            println!("{}", outcome.tenant_id);
+            println!("vault_role_id={}", outcome.vault_role_id);
+            if let Some(token) = outcome.vault_wrapped_secret_id {
+                println!(
+                    "vault_wrapped_secret_id={token}  # single-use, 10m TTL — unwrap once at the \
+                     tenant's dispatcher deployment (`vault unwrap`); do not store this line anywhere"
+                );
+            }
         }
     }
 }
