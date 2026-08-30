@@ -359,3 +359,4 @@ table DESIGN.md documents.
 
 - 2026-08-30 — created (TO DO). source: chat: filed from PLAN.md build-step-1 row; same family as T-005 (producer registry write side / mTLS resolution read side)
 - 2026-08-30 — TO DO → READY: plan complete
+- 2026-08-30 — READY → IN DEVELOPMENT: picked up
