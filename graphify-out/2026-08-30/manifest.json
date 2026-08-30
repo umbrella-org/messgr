@@ -1,0 +1,284 @@
+{
+  "Cargo.toml": {
+    "mtime": 1787396592.2045372,
+    "seen": 1788066396.3994298,
+    "ast_hash": "d8ce819cfed1ff19447d3c1c79869dff",
+    "semantic_hash": ""
+  },
+  "migrations/control/0001_control_schema.sql": {
+    "mtime": 1787335331.5999496,
+    "seen": 1788066396.399437,
+    "ast_hash": "988d2bc0c76f75b1aeae4d0f95c140d3",
+    "semantic_hash": ""
+  },
+  "migrations/control/0002_tenant_vault_role_id.sql": {
+    "mtime": 1787993672.6222086,
+    "seen": 1788066396.3994381,
+    "ast_hash": "624bab0a50d8c0302db3c556963704e5",
+    "semantic_hash": ""
+  },
+  "post.lua": {
+    "mtime": 1787256346.32493,
+    "seen": 1788066396.399439,
+    "ast_hash": "168b8c4b0c5b3a45170cbd4a8cac1b0e",
+    "semantic_hash": ""
+  },
+  "src/bin/control.rs": {
+    "mtime": 1787993672.6248188,
+    "seen": 1788066396.399439,
+    "ast_hash": "5f8a744114abad890e81ec633e24d66d",
+    "semantic_hash": ""
+  },
+  "src/config.rs": {
+    "mtime": 1787335331.6105163,
+    "seen": 1788066396.3994398,
+    "ast_hash": "dd87d6ef535697937c27c0b5d1303de4",
+    "semantic_hash": ""
+  },
+  "src/db.rs": {
+    "mtime": 1787371774.7430067,
+    "seen": 1788066396.3994398,
+    "ast_hash": "5de3533baa3c4259cfcedb0efca451b3",
+    "semantic_hash": ""
+  },
+  "src/keystore.rs": {
+    "mtime": 1787993672.626932,
+    "seen": 1788066396.3994398,
+    "ast_hash": "c598ff420f2c9834e65319cfd49a3550",
+    "semantic_hash": ""
+  },
+  "src/lib.rs": {
+    "mtime": 1787396592.2191002,
+    "seen": 1788066396.399441,
+    "ast_hash": "4f8b58558f8abce99e2d58a14dbc3af9",
+    "semantic_hash": ""
+  },
+  "src/platform_audit.rs": {
+    "mtime": 1787371774.7444818,
+    "seen": 1788066396.399441,
+    "ast_hash": "fb2011e3a182f907ae874e2eff5312e8",
+    "semantic_hash": ""
+  },
+  "src/profile.rs": {
+    "mtime": 1787335331.620999,
+    "seen": 1788066396.399442,
+    "ast_hash": "8b006944acfbba04d403f676cb3b6bb6",
+    "semantic_hash": ""
+  },
+  "src/tenant/mod.rs": {
+    "mtime": 1787993672.6289659,
+    "seen": 1788066396.399442,
+    "ast_hash": "b62daee7cd4b399fe0d27973204240c1",
+    "semantic_hash": ""
+  },
+  "src/tenant/model.rs": {
+    "mtime": 1787993672.63078,
+    "seen": 1788066396.399442,
+    "ast_hash": "0736c446ac19f27890233c6f567553ec",
+    "semantic_hash": ""
+  },
+  "src/tenant/pool.rs": {
+    "mtime": 1787371774.74534,
+    "seen": 1788066396.399443,
+    "ast_hash": "24cc749c45ae7b3d4c22b82ec210e966",
+    "semantic_hash": ""
+  },
+  "src/tenant/provision.rs": {
+    "mtime": 1787993672.6329494,
+    "seen": 1788066396.399443,
+    "ast_hash": "a078e76d947922186c1e6d52a2d45909",
+    "semantic_hash": ""
+  },
+  "src/tenant/repo.rs": {
+    "mtime": 1787993672.6347554,
+    "seen": 1788066396.399443,
+    "ast_hash": "d32e39e9c0973777ea6889d85c846854",
+    "semantic_hash": ""
+  },
+  "src/tenant/vault.rs": {
+    "mtime": 1787993672.6365094,
+    "seen": 1788066396.3994439,
+    "ast_hash": "9f9ef091baf52d9a2064b03ca027bd7a",
+    "semantic_hash": ""
+  },
+  "tests/keystore.rs": {
+    "mtime": 1787993672.6387405,
+    "seen": 1788066396.3994439,
+    "ast_hash": "f244ecef2b5a27645564ca3af804036d",
+    "semantic_hash": ""
+  },
+  "tests/tenancy.rs": {
+    "mtime": 1787993672.6410666,
+    "seen": 1788066396.3994439,
+    "ast_hash": "af17f093f31aa4312d2af0d8ba79d4a3",
+    "semantic_hash": ""
+  },
+  "tests/tenant_vault.rs": {
+    "mtime": 1787993672.6429288,
+    "seen": 1788066396.399445,
+    "ast_hash": "289899eb7a0362d3f8fe7da1085ccba9",
+    "semantic_hash": ""
+  },
+  ".agents/skills/brine/SKILL.md": {
+    "mtime": 1787256694.8185444,
+    "seen": 1788066396.399445,
+    "ast_hash": "03e036f1464b1a5b9055626ab11c401e",
+    "semantic_hash": ""
+  },
+  ".agents/skills/brine/resources/TEMPLATE.md": {
+    "mtime": 1787256694.8205235,
+    "seen": 1788066396.399445,
+    "ast_hash": "81652b702407059d6c0b1fc730545f3a",
+    "semantic_hash": ""
+  },
+  ".agents/skills/brine/resources/docs-readability.prompt.md": {
+    "mtime": 1787256694.821232,
+    "seen": 1788066396.399446,
+    "ast_hash": "67f7b8c246b49d47667a1d652be039bd",
+    "semantic_hash": ""
+  },
+  ".agents/skills/brine/resources/review-protocol.md": {
+    "mtime": 1787256694.8217251,
+    "seen": 1788066396.399446,
+    "ast_hash": "1bd9af95c027a9fa477d302b93fec9b8",
+    "semantic_hash": ""
+  },
+  ".agents/skills/brine/resources/tickets-README.md": {
+    "mtime": 1787256694.8222303,
+    "seen": 1788066396.399446,
+    "ast_hash": "b5882e7c5269b48c4819f21509f7a7ad",
+    "semantic_hash": ""
+  },
+  ".github/dependabot.yml": {
+    "mtime": 1787256361.5218773,
+    "seen": 1788066396.399447,
+    "ast_hash": "c45420692ec8c736641408e89621b3f4",
+    "semantic_hash": ""
+  },
+  ".github/workflows/ci.yml": {
+    "mtime": 1787993672.61115,
+    "seen": 1788066396.399447,
+    "ast_hash": "1bb4944537f62a29b060bc840251629d",
+    "semantic_hash": ""
+  },
+  ".github/workflows/docs-release.yml": {
+    "mtime": 1788063199.9377449,
+    "seen": 1788066396.399447,
+    "ast_hash": "49991d7222db3e2812c5c317e40c91c1",
+    "semantic_hash": ""
+  },
+  ".github/workflows/release.yml": {
+    "mtime": 1788063577.4854338,
+    "seen": 1788066396.3994482,
+    "ast_hash": "829ceeb1b98c0b8b9e6170070753aa0a",
+    "semantic_hash": ""
+  },
+  "AGENTS.md": {
+    "mtime": 1787256762.724947,
+    "seen": 1788066396.3994482,
+    "ast_hash": "0cec9d3f3581c6b212ad7291c417e157",
+    "semantic_hash": ""
+  },
+  "CHANGELOG.md": {
+    "mtime": 1788063138.3700986,
+    "seen": 1788066396.3994482,
+    "ast_hash": "2272d8e25b1f2a49122faf5758293ba2",
+    "semantic_hash": ""
+  },
+  "CLAUDE.md": {
+    "mtime": 1787256762.7251089,
+    "seen": 1788066396.399449,
+    "ast_hash": "829c24062c3db6cd11bdbbe4d389c067",
+    "semantic_hash": ""
+  },
+  "DESIGN.md": {
+    "mtime": 1787993672.613673,
+    "seen": 1788066396.399449,
+    "ast_hash": "02108cca591f68b224ca7eda324d3964",
+    "semantic_hash": ""
+  },
+  "PLAN.md": {
+    "mtime": 1787993672.6160262,
+    "seen": 1788066396.399449,
+    "ast_hash": "03ed64c2d724961ea5f29407b317c87c",
+    "semantic_hash": ""
+  },
+  "README.md": {
+    "mtime": 1788066073.1730225,
+    "seen": 1788066396.399449,
+    "ast_hash": "f9ffeb8ed747f4c6ff213a3c593cf8be",
+    "semantic_hash": ""
+  },
+  "RELEASING.md": {
+    "mtime": 1788063600.7537477,
+    "seen": 1788066396.39945,
+    "ast_hash": "0ddb501b4143e568137b1cbf2b8cf9cd",
+    "semantic_hash": ""
+  },
+  "compose.yml": {
+    "mtime": 1787396592.2108307,
+    "seen": 1788066396.39945,
+    "ast_hash": "eec0c4aad73577b9cacdcf65a5679970",
+    "semantic_hash": ""
+  },
+  "docs/pdf-theme/messgr-theme.yml": {
+    "mtime": 1788062634.651053,
+    "seen": 1788066396.39945,
+    "ast_hash": "6c1b8ef6923682a7b3fbc8e53d502a39",
+    "semantic_hash": ""
+  },
+  "snowball.yaml": {
+    "mtime": 1788062622.1268332,
+    "seen": 1788066396.39945,
+    "ast_hash": "bd221ba9b69713515340b15b1510a615",
+    "semantic_hash": ""
+  },
+  "tickets/2-ready/T-005-producer-registry-producer-table-repository-and-register-disable-operations.md": {
+    "mtime": 1787994656.9716136,
+    "seen": 1788066396.3994508,
+    "ast_hash": "23927a29e64829b9930c91877ee0f951",
+    "semantic_hash": ""
+  },
+  "tickets/6-done/T-001-control-database-tenant-registry-and-single-tenant-provisioning.md": {
+    "mtime": 1787335374.4424508,
+    "seen": 1788066396.3994508,
+    "ast_hash": "fcd179b6b4b7f129bea28432df6b7d5b",
+    "semantic_hash": ""
+  },
+  "tickets/6-done/T-002-provisioning-path-preserve-connection-options-and-write-the-platform-audit-trail.md": {
+    "mtime": 1787371811.056993,
+    "seen": 1788066396.399452,
+    "ast_hash": "a8ea376db0f11f63557d65d2cd1e1f53",
+    "semantic_hash": ""
+  },
+  "tickets/6-done/T-003-vault-transit-integration-keystore-trait-transit-client-and-dev-mode-vault-in-compose.md": {
+    "mtime": 1787396663.5800815,
+    "seen": 1788066396.399452,
+    "ast_hash": "4923ffe513cc732e7232e8aa5bc19779",
+    "semantic_hash": ""
+  },
+  "tickets/6-done/T-004-per-tenant-transit-mount-approle-creation-wired-into-the-provisioning-command.md": {
+    "mtime": 1787993672.6449351,
+    "seen": 1788066396.399452,
+    "ast_hash": "c3f22dd8dd00da22daf31eb93f773695",
+    "semantic_hash": ""
+  },
+  "tickets/BOARD.md": {
+    "mtime": 1787994656.976132,
+    "seen": 1788066396.399453,
+    "ast_hash": "88b54eb56755c92d8ae07576244f4ebe",
+    "semantic_hash": ""
+  },
+  "tickets/NOTES.md": {
+    "mtime": 1787256346.3118875,
+    "seen": 1788066396.399453,
+    "ast_hash": "617bb684e88c3c9993a76a1cf04b3d43",
+    "semantic_hash": ""
+  },
+  "tickets/README.md": {
+    "mtime": 1787256346.308689,
+    "seen": 1788066396.399453,
+    "ast_hash": "653de6f9677fcc03722e97942182169b",
+    "semantic_hash": ""
+  }
+}

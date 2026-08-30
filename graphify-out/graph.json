@@ -1,0 +1,253 @@
+{
+  "directed": false,
+  "multigraph": false,
+  "graph": {},
+  "nodes": [
+    {
+      "label": "README.md",
+      "file_type": "document",
+      "source_file": "README.md",
+      "source_location": "L1",
+      "_origin": "ast",
+      "community": 0,
+      "community_name": "messgr",
+      "norm_label": "readme.md",
+      "id": "readme"
+    },
+    {
+      "label": "Local development",
+      "file_type": "document",
+      "source_file": "README.md",
+      "source_location": "L7",
+      "_origin": "ast",
+      "community": 0,
+      "community_name": "messgr",
+      "norm_label": "local development",
+      "id": "readme_local_development"
+    },
+    {
+      "label": "messgr",
+      "file_type": "document",
+      "source_file": "README.md",
+      "source_location": "L1",
+      "_origin": "ast",
+      "community": 0,
+      "community_name": "messgr",
+      "norm_label": "messgr",
+      "id": "readme_messgr"
+    },
+    {
+      "label": "Status",
+      "file_type": "document",
+      "source_file": "README.md",
+      "source_location": "L53",
+      "_origin": "ast",
+      "community": 0,
+      "community_name": "messgr",
+      "norm_label": "status",
+      "id": "readme_status"
+    },
+    {
+      "label": "CHANGELOG.md",
+      "file_type": "document",
+      "source_file": "CHANGELOG.md",
+      "source_location": "L1",
+      "_origin": "ast",
+      "id": "changelog",
+      "community": 1,
+      "community_name": "CHANGELOG.md",
+      "norm_label": "changelog.md"
+    },
+    {
+      "label": "Changelog",
+      "file_type": "document",
+      "source_file": "CHANGELOG.md",
+      "source_location": "L1",
+      "_origin": "ast",
+      "id": "changelog_changelog",
+      "community": 1,
+      "community_name": "CHANGELOG.md",
+      "norm_label": "changelog"
+    },
+    {
+      "label": "[Unreleased]",
+      "file_type": "document",
+      "source_file": "CHANGELOG.md",
+      "source_location": "L9",
+      "_origin": "ast",
+      "id": "changelog_unreleased",
+      "community": 1,
+      "community_name": "CHANGELOG.md",
+      "norm_label": "[unreleased]"
+    },
+    {
+      "label": "RELEASING.md",
+      "file_type": "document",
+      "source_file": "RELEASING.md",
+      "source_location": "L1",
+      "_origin": "ast",
+      "id": "releasing",
+      "community": 1,
+      "community_name": "CHANGELOG.md",
+      "norm_label": "releasing.md"
+    },
+    {
+      "label": "Cutting a release",
+      "file_type": "document",
+      "source_file": "RELEASING.md",
+      "source_location": "L29",
+      "_origin": "ast",
+      "id": "releasing_cutting_a_release",
+      "community": 2,
+      "community_name": "Releasing messgr",
+      "norm_label": "cutting a release"
+    },
+    {
+      "label": "One-time setup this depends on \u2014 NOT YET CONFIRMED",
+      "file_type": "document",
+      "source_file": "RELEASING.md",
+      "source_location": "L87",
+      "_origin": "ast",
+      "id": "releasing_one_time_setup_this_depends_on_not_yet_confirmed",
+      "community": 2,
+      "community_name": "Releasing messgr",
+      "norm_label": "one-time setup this depends on \u2014 not yet confirmed"
+    },
+    {
+      "label": "Releasing messgr",
+      "file_type": "document",
+      "source_file": "RELEASING.md",
+      "source_location": "L1",
+      "_origin": "ast",
+      "id": "releasing_releasing_messgr",
+      "community": 2,
+      "community_name": "Releasing messgr",
+      "norm_label": "releasing messgr"
+    },
+    {
+      "label": "Validating locally (no publish)",
+      "file_type": "document",
+      "source_file": "RELEASING.md",
+      "source_location": "L74",
+      "_origin": "ast",
+      "id": "releasing_validating_locally_no_publish",
+      "community": 2,
+      "community_name": "Releasing messgr",
+      "norm_label": "validating locally (no publish)"
+    }
+  ],
+  "links": [
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "CHANGELOG.md",
+      "source_location": "L1",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "changelog",
+      "target": "changelog_changelog",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "CHANGELOG.md",
+      "source_location": "L9",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "changelog_changelog",
+      "target": "changelog_unreleased",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "README.md",
+      "source_location": "L1",
+      "weight": 1.0,
+      "_origin": "ast",
+      "confidence_score": 1.0,
+      "source": "readme",
+      "target": "readme_messgr"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "README.md",
+      "source_location": "L53",
+      "weight": 1.0,
+      "_origin": "ast",
+      "confidence_score": 1.0,
+      "source": "readme_messgr",
+      "target": "readme_status"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "README.md",
+      "source_location": "L7",
+      "weight": 1.0,
+      "_origin": "ast",
+      "confidence_score": 1.0,
+      "source": "readme_messgr",
+      "target": "readme_local_development"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "RELEASING.md",
+      "source_location": "L1",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "releasing",
+      "target": "releasing_releasing_messgr",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "RELEASING.md",
+      "source_location": "L29",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "releasing_releasing_messgr",
+      "target": "releasing_cutting_a_release",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "RELEASING.md",
+      "source_location": "L74",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "releasing_releasing_messgr",
+      "target": "releasing_validating_locally_no_publish",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "RELEASING.md",
+      "source_location": "L87",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "releasing_releasing_messgr",
+      "target": "releasing_one_time_setup_this_depends_on_not_yet_confirmed",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "source_file": "RELEASING.md",
+      "source_location": "L31",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "releasing",
+      "target": "changelog",
+      "confidence_score": 1.0
+    }
+  ],
+  "hyperedges": [],
+  "built_at_commit": "5b42c39723e28322b8434fdd16e46ed17f5df4d8"
+}

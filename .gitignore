@@ -17,4 +17,4 @@
 
 # graphify - regenerated locally via `graphify` / the post-commit & post-checkout
 # hooks (graphify hook install); not tracked, everyone rebuilds their own.
-graphify-out/
+#graphify-out/

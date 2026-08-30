@@ -1,0 +1,16 @@
+# Build artifacts
+/messgr
+/dist
+/target
+
+# Rust
+*.test
+*.out
+.env
+
+# Editor / OS
+.DS_Store
+
+# AI
+.claude
+
