@@ -333,7 +333,7 @@ one row per attempt including the rejected one.
 | F3 | non-blocking | test-gap | fixed inline | **FIXED**, superseding the original `noted` disposition. No test in `tests/producer.rs` exercised `register`/`disable`/`list` with a `--tenant-slug` that does not exist, so F1's code path had zero coverage | `tests/producer.rs` (no such test, pre-fix) | Added `register_and_disable_against_an_unknown_tenant_slug_are_rejected_and_audited`, asserting both calls are rejected and both write a `rejected` `platform_audit` row with `tenant_id IS NULL` — commit `ba4ca6f` |
 | F4 | non-blocking | design | fixed inline | `disable_producer_inner`'s not-found branch audited a hardcoded empty-string `cert_subject` (no existing row is known at that point), indistinguishable in the audit trail from a real blank value | `src/producer/register.rs:284` (pre-fix) | Fixed: `audit()`'s `cert_subject` is now `Option<&str>`, serializing to JSON `null` when unknown — commit `fd300d4` on `feat/T-005-producer-registry` |
 
-Disposition summary: 2 blocking (F1, F2 — same root cause, fixed together in rework), 1 noted (F3), 1 fixed inline (F4).
+Disposition summary: 2 blocking (F1, F2 — same root cause, fixed together in rework), 2 fixed inline (F3, F4).
 
 cost: estimated M, actual M
 
@@ -346,3 +346,4 @@ cost: estimated M, actual M
 - 2026-08-30 — IN REVIEW → REWORK: F1/F2 blocking: tenant-not-found path skips the platform_audit write decision 4 requires
 - 2026-08-30 — REWORK → IN REVIEW: F1/F2 fixed: tenant-not-found now audits (commit ba4ca6f)
 - 2026-08-30 — IN REVIEW → DONE: scoped re-review: F1/F2 confirmed fixed; F3/F4 fixed inline; no blocking findings
+- 2026-08-30 — merged to main (PR #5, 12ec4581)
