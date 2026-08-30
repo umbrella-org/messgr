@@ -6,6 +6,7 @@
 # Rust
 *.test
 *.out
+.env
 
 # Editor / OS
 .DS_Store
