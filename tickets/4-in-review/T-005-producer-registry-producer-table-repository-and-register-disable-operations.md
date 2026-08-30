@@ -297,3 +297,4 @@ User-facing surface: the new `messgr-control producer` subcommands.
 - 2026-08-29 — created (TO DO). source: chat: filed from PLAN.md's build-step-1 row (provisional id `T-006` there; the per-prefix counter assigned `T-005`, as PLAN.md warned it would once tickets file out of the original draft order).
 - 2026-08-29 — TO DO → READY: plan complete; scope corrected to include the control-DB producer_cert write, re-graded S to M
 - 2026-08-30 — READY → IN DEVELOPMENT: picked up
+- 2026-08-30 — IN DEVELOPMENT → IN REVIEW: acceptance green

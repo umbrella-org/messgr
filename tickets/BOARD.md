@@ -13,18 +13,18 @@ Last updated: 2026-08-30
 
 ## IN DEVELOPMENT
 
+### messgr (0/1)
+
+| id | title | depends-on |
+|---|---|---|
+
+## IN REVIEW
+
 ### messgr (1/1)
 
 | id | title | depends-on |
 |---|---|---|
 | T-005 | Producer registry: producer table, repository, and register/disable operations | [T-001] |
-
-## IN REVIEW
-
-### messgr (0/1)
-
-| id | title | depends-on |
-|---|---|---|
 
 ## REWORK
 
