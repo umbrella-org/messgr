@@ -20,11 +20,10 @@ Last updated: 2026-08-30
 
 ## IN REVIEW
 
-### messgr (1/1)
+### messgr (0/1)
 
 | id | title | depends-on |
 |---|---|---|
-| T-005 | Producer registry: producer table, repository, and register/disable operations | [T-001] |
 
 ## REWORK
 
@@ -57,6 +56,7 @@ Last updated: 2026-08-30
 | T-002 | Provisioning path: preserve connection options and write the platform_audit trail | yes — MERGED: `feat/T-002-provisioning-path-preserve-connection-options-and-write-the-platform-audit-trail` (1 commit: … |
 | T-003 | Vault Transit integration: KeyStore trait, Transit client, and dev-mode Vault in compose | yes — MERGED: `feat/T-003-vault-transit-integration-keystore-trait-transit-client-and-dev-mode-vault-in-compose` (commi… |
 | T-004 | Per-tenant Transit mount + AppRole creation wired into the provisioning command | yes — merged to main (PR #4, 8f8233d) |
+| T-005 | Producer registry: producer table, repository, and register/disable operations | no — publish-gated |
 
 ## DROPPED
 

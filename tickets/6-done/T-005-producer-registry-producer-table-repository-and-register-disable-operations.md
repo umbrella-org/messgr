@@ -300,7 +300,17 @@ Checklist:
 - [x] Findings recorded with severity, class, and disposition; disposition summary + cost line below (step 5)
 - [x] Ticket moved to `tickets/6-done/` or `tickets/5-rework/`; `## History` appended (step 6)
 - [x] Remaining-tickets impact sweep done (step 8) — no ticket in `1-to-do/`/`2-ready/` references T-005 yet
-- [ ] Summary + commit message & MR attributes presented for approval (step 9)
+- [x] Summary + commit message & MR attributes presented for approval (step 9)
+
+**Scoped re-review (F1/F2 only, per the rework procedure):** read commit `ba4ca6f`'s diff
+directly rather than trusting the rework's self-report. Confirmed the fix matches the finding
+exactly — both `register_producer` and `disable_producer` now audit (`tenant_id: None`) before
+returning on an unknown `--tenant-slug`. Re-ran `just fmt`/`just lint`/`just test` (green, 7/7 in
+`tests/producer.rs`). Independently re-exercised both CLI paths against a fresh tenant
+(`acme-rereview`, actor `rereview-actor`): `producer register`/`disable --tenant-slug
+unknown-slug-rereview` both rejected and both confirmed via `psql` to have written a
+`rejected` `platform_audit` row with `tenant_id` NULL; the golden path (register + list
+against the real tenant) still works unchanged. No blocking findings remain.
 
 **Rework pass (scoped to F1/F2):** fixed on `feat/T-005-producer-registry` (commit `ba4ca6f`).
 `register_producer`/`disable_producer` now audit a tenant-not-found rejection
@@ -335,3 +345,4 @@ cost: estimated M, actual M
 - 2026-08-30 — IN DEVELOPMENT → IN REVIEW: acceptance green
 - 2026-08-30 — IN REVIEW → REWORK: F1/F2 blocking: tenant-not-found path skips the platform_audit write decision 4 requires
 - 2026-08-30 — REWORK → IN REVIEW: F1/F2 fixed: tenant-not-found now audits (commit ba4ca6f)
+- 2026-08-30 — IN REVIEW → DONE: scoped re-review: F1/F2 confirmed fixed; F3/F4 fixed inline; no blocking findings
