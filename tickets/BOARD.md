@@ -38,6 +38,7 @@ Last updated: 2026-08-30
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
+| T-006 | mTLS identity resolution: client cert to producer_cert to tenant/producer identity | medium | medium | M | [T-005] | T-005 |
 
 ## TO DO (impact order, per child)
 
@@ -45,7 +46,6 @@ Last updated: 2026-08-30
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
-| T-006 | mTLS identity resolution: client cert to producer_cert to tenant/producer identity | medium | medium | M | [T-005] | T-005 |
 
 ## DONE
 
