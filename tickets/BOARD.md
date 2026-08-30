@@ -9,14 +9,15 @@ hand — edit the tickets. Hand-written planning notes live in [`NOTES.md`](NOTE
 **WIP limits (per child-project):**
 - `messgr`: `3-in-development/` ≤ 1 · `4-in-review/` ≤ 1
 
-Last updated: 2026-08-29
+Last updated: 2026-08-30
 
 ## IN DEVELOPMENT
 
-### messgr (0/1)
+### messgr (1/1)
 
 | id | title | depends-on |
 |---|---|---|
+| T-005 | Producer registry: producer table, repository, and register/disable operations | [T-001] |
 
 ## IN REVIEW
 
@@ -38,7 +39,6 @@ Last updated: 2026-08-29
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
-| T-005 | Producer registry: producer table, repository, and register/disable operations | medium | medium | M | [T-001] |  |
 
 ## TO DO (impact order, per child)
 
