@@ -40,6 +40,16 @@ control-migrate:
 provision slug region db actor:
     cargo run --bin messgr-control -- provision --slug {{slug}} --region {{region}} --database-name {{db}} --actor {{actor}}
 
+producer-register tenant_slug name cert_subject owner_team contact actor:
+    cargo run --bin messgr-control -- producer register --tenant-slug {{tenant_slug}} --name {{name}} \
+        --cert-subject {{cert_subject}} --owner-team {{owner_team}} --contact {{contact}} --actor {{actor}}
+
+producer-disable tenant_slug name actor:
+    cargo run --bin messgr-control -- producer disable --tenant-slug {{tenant_slug}} --name {{name}} --actor {{actor}}
+
+producer-list tenant_slug:
+    cargo run --bin messgr-control -- producer list --tenant-slug {{tenant_slug}}
+
 # `transit-fixture`/`transit-fixture-other` are test-only fixtures for
 # tests/keystore.rs's generic KeyStore round-trip coverage — never a real
 # tenant's mount. Named to NOT start with "transit/" (T-004): Vault refuses

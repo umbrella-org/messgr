@@ -3,6 +3,7 @@ use clap::{Parser, Subcommand};
 use messgr::config::Config;
 use messgr::db;
 use messgr::keystore::VaultKeyStore;
+use messgr::producer::register::{disable_producer, list_producers, register_producer};
 use messgr::tenant::provision::provision_tenant;
 
 #[derive(Parser)]
@@ -33,6 +34,51 @@ enum Command {
         /// explicitly rather than inferred.
         #[arg(long)]
         actor: String,
+    },
+    /// Register, disable, or list producers (upstream systems allowed to
+    /// submit messages) for a tenant (DESIGN.md §4.9). No mTLS resolution or
+    /// send-path consumption of this identity yet (T-007).
+    Producer {
+        #[command(subcommand)]
+        command: ProducerCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum ProducerCommand {
+    /// Register a producer against a tenant. Writes both the tenant
+    /// `producer` row and the control `producer_cert` mapping. Safe to
+    /// re-run with identical inputs; rejected on conflicting ones.
+    Register {
+        #[arg(long = "tenant-slug")]
+        tenant_slug: String,
+        #[arg(long)]
+        name: String,
+        #[arg(long = "cert-subject")]
+        cert_subject: String,
+        #[arg(long = "owner-team")]
+        owner_team: String,
+        #[arg(long)]
+        contact: String,
+        /// Operator identity recorded on the platform_audit row.
+        #[arg(long)]
+        actor: String,
+    },
+    /// Disable a producer. Never deletes the control `producer_cert`
+    /// mapping — re-register to reverse it.
+    Disable {
+        #[arg(long = "tenant-slug")]
+        tenant_slug: String,
+        #[arg(long)]
+        name: String,
+        /// Operator identity recorded on the platform_audit row.
+        #[arg(long)]
+        actor: String,
+    },
+    /// List producers registered for a tenant.
+    List {
+        #[arg(long = "tenant-slug")]
+        tenant_slug: String,
     },
 }
 
@@ -97,5 +143,80 @@ async fn main() {
                 );
             }
         }
+        // No Vault client is connected for producer operations — they touch
+        // neither Transit nor AppRole, the same reason `Migrate` does not.
+        Command::Producer { command } => match command {
+            ProducerCommand::Register {
+                tenant_slug,
+                name,
+                cert_subject,
+                owner_team,
+                contact,
+                actor,
+            } => {
+                let outcome = register_producer(
+                    &control_pool,
+                    &config.control_database_url,
+                    &tenant_slug,
+                    &name,
+                    &cert_subject,
+                    &owner_team,
+                    &contact,
+                    config.profile,
+                    &actor,
+                )
+                .await
+                .unwrap_or_else(|err| {
+                    panic!("failed to register producer {name:?} for tenant {tenant_slug:?}: {err}")
+                });
+
+                println!("{}", outcome.producer_id);
+                println!("outcome={}", outcome.outcome);
+            }
+            ProducerCommand::Disable {
+                tenant_slug,
+                name,
+                actor,
+            } => {
+                let outcome = disable_producer(
+                    &control_pool,
+                    &config.control_database_url,
+                    &tenant_slug,
+                    &name,
+                    config.profile,
+                    &actor,
+                )
+                .await
+                .unwrap_or_else(|err| {
+                    panic!("failed to disable producer {name:?} for tenant {tenant_slug:?}: {err}")
+                });
+
+                println!("outcome={}", outcome.outcome);
+            }
+            ProducerCommand::List { tenant_slug } => {
+                let producers = list_producers(
+                    &control_pool,
+                    &config.control_database_url,
+                    &tenant_slug,
+                    config.profile,
+                )
+                .await
+                .unwrap_or_else(|err| {
+                    panic!("failed to list producers for tenant {tenant_slug:?}: {err}")
+                });
+
+                for producer in producers {
+                    println!(
+                        "{} name={} cert_subject={} owner_team={} contact={} enabled={}",
+                        producer.id,
+                        producer.name,
+                        producer.cert_subject,
+                        producer.owner_team,
+                        producer.contact,
+                        producer.enabled,
+                    );
+                }
+            }
+        },
     }
 }
