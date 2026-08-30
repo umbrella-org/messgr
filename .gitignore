@@ -1,6 +1,19 @@
+# Build artifacts
+/messgr
+/dist
 /target
-.env
 
+# Rust
+*.test
+*.out
+
+# Editor / OS
 .DS_Store
 
-.claude
+# AI
+.claude/settings.json
+.claude/settings.local.json
+
+# graphify - regenerated locally via `graphify` / the post-commit & post-checkout
+# hooks (graphify hook install); not tracked, everyone rebuilds their own.
+graphify-out/
