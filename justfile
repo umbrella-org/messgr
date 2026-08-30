@@ -50,6 +50,12 @@ producer-disable tenant_slug name actor:
 producer-list tenant_slug:
     cargo run --bin messgr-control -- producer list --tenant-slug {{tenant_slug}}
 
+dev-pki-bootstrap:
+    cargo run --bin messgr-control -- dev-pki bootstrap
+
+dev-pki-issue-cert common_name out_dir:
+    cargo run --bin messgr-control -- dev-pki issue-cert --common-name {{common_name}} --out-dir {{out_dir}}
+
 # `transit-fixture`/`transit-fixture-other` are test-only fixtures for
 # tests/keystore.rs's generic KeyStore round-trip coverage — never a real
 # tenant's mount. Named to NOT start with "transit/" (T-004): Vault refuses

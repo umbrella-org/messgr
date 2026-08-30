@@ -1,8 +1,11 @@
+use std::path::PathBuf;
+
 use clap::{Parser, Subcommand};
 
 use messgr::config::Config;
 use messgr::db;
 use messgr::keystore::VaultKeyStore;
+use messgr::producer::dev_pki;
 use messgr::producer::register::{disable_producer, list_producers, register_producer};
 use messgr::tenant::provision::provision_tenant;
 
@@ -36,11 +39,19 @@ enum Command {
         actor: String,
     },
     /// Register, disable, or list producers (upstream systems allowed to
-    /// submit messages) for a tenant (DESIGN.md §4.9). No mTLS resolution or
-    /// send-path consumption of this identity yet (T-007).
+    /// submit messages) for a tenant (DESIGN.md §4.9). mTLS resolution
+    /// (`messgr::producer::resolve`) is the first reader of what this
+    /// writes; no send-path binary consumes it yet.
     Producer {
         #[command(subcommand)]
         command: ProducerCommand,
+    },
+    /// Dev-only internal PKI for issuing test client certificates against
+    /// mTLS resolution (DESIGN.md §4.9, §11.1, T-006). Refuses to run
+    /// outside `profile = dev`.
+    DevPki {
+        #[command(subcommand)]
+        command: DevPkiCommand,
     },
 }
 
@@ -79,6 +90,21 @@ enum ProducerCommand {
     List {
         #[arg(long = "tenant-slug")]
         tenant_slug: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum DevPkiCommand {
+    /// Idempotently ensures the dev `pki` mount, a root CA, and the
+    /// permissive `producer-dev` role all exist. Safe to re-run.
+    Bootstrap,
+    /// Issues a leaf certificate for `--common-name` from the dev PKI,
+    /// writing `cert.pem`, `key.pem`, and `ca.pem` into `--out-dir`.
+    IssueCert {
+        #[arg(long = "common-name")]
+        common_name: String,
+        #[arg(long = "out-dir")]
+        out_dir: PathBuf,
     },
 }
 
@@ -218,5 +244,49 @@ async fn main() {
                 }
             }
         },
+        Command::DevPki { command } => {
+            let vault_keystore = VaultKeyStore::connect(config.profile).expect(
+                "failed to connect to Vault (has VAULT_ADDR/VAULT_TOKEN been set?)",
+            );
+
+            match command {
+                DevPkiCommand::Bootstrap => {
+                    dev_pki::bootstrap(vault_keystore.client(), config.profile)
+                        .await
+                        .expect("failed to bootstrap dev PKI");
+                    println!("dev PKI bootstrapped: mount=pki role=producer-dev");
+                }
+                DevPkiCommand::IssueCert {
+                    common_name,
+                    out_dir,
+                } => {
+                    let cert = dev_pki::issue_cert(vault_keystore.client(), config.profile, &common_name)
+                        .await
+                        .unwrap_or_else(|err| {
+                            panic!(
+                                "failed to issue a dev certificate for {common_name:?} (has \
+                                 `messgr-control dev-pki bootstrap` been run?): {err}"
+                            )
+                        });
+
+                    std::fs::create_dir_all(&out_dir).unwrap_or_else(|err| {
+                        panic!("failed to create {out_dir:?}: {err}")
+                    });
+                    std::fs::write(out_dir.join("cert.pem"), &cert.certificate)
+                        .unwrap_or_else(|err| {
+                            panic!("failed to write cert.pem: {err}")
+                        });
+                    std::fs::write(out_dir.join("key.pem"), &cert.private_key)
+                        .unwrap_or_else(|err| panic!("failed to write key.pem: {err}"));
+                    std::fs::write(out_dir.join("ca.pem"), &cert.issuing_ca)
+                        .unwrap_or_else(|err| panic!("failed to write ca.pem: {err}"));
+
+                    println!(
+                        "wrote cert.pem, key.pem, ca.pem to {}",
+                        out_dir.display()
+                    );
+                }
+            }
+        }
     }
 }
