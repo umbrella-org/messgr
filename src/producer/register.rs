@@ -251,7 +251,7 @@ async fn register_producer_inner(
 
 /// Disables a producer (decision 5, T-005): sets `enabled = false` on the
 /// tenant row and leaves the control `producer_cert` mapping in place, so
-/// T-007's mTLS resolution can tell "unknown cert" from "known but
+/// T-006's mTLS resolution can tell "unknown cert" from "known but
 /// disabled". Idempotent — disabling an already-disabled producer succeeds
 /// and still audits.
 pub async fn disable_producer(
@@ -319,6 +319,14 @@ async fn disable_producer_inner(
             )));
         }
     };
+
+    // Control-first (T-006 decision 2 — the inverse of register's tenant-first
+    // ordering, decision 2 of T-005): producer_cert.enabled is now the copy
+    // mTLS resolution actually reads, so a crash between the two writes must
+    // leave the fail-closed side landed first. Written on both the
+    // first-disable and idempotent branches, matching `repo::set_enabled`
+    // below.
+    cert_repo::set_cert_enabled(control_pool, &existing.cert_subject, false).await?;
 
     let outcome = if existing.enabled {
         repo::set_enabled(tenant_pool, existing.id, false).await?;

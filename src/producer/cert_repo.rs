@@ -14,6 +14,7 @@ pub struct ProducerCert {
     pub cert_subject: String,
     pub tenant_id: Uuid,
     pub producer_id: Uuid,
+    pub enabled: bool,
 }
 
 pub async fn find_producer_cert(
@@ -21,7 +22,7 @@ pub async fn find_producer_cert(
     cert_subject: &str,
 ) -> Result<Option<ProducerCert>, sqlx::Error> {
     sqlx::query_as::<_, ProducerCert>(
-        "SELECT cert_subject, tenant_id, producer_id FROM producer_cert WHERE cert_subject = $1",
+        "SELECT cert_subject, tenant_id, producer_id, enabled FROM producer_cert WHERE cert_subject = $1",
     )
     .bind(cert_subject)
     .fetch_optional(pool)
@@ -52,6 +53,26 @@ pub async fn upsert_producer_cert(
     .execute(pool)
     .await
     .map(|_| ())
+}
+
+/// Sets `producer_cert.enabled` (T-006 decision 1: this column, not the
+/// tenant-side `producer.enabled`, is what mTLS resolution actually reads,
+/// since resolution never opens a tenant pool). The only writers of this
+/// column are this function and the `INSERT`'s `DEFAULT true` in
+/// `upsert_producer_cert` above — its `ON CONFLICT` clause deliberately
+/// never touches `enabled`, so a repeated (idempotent) registration can
+/// never silently re-enable a disabled producer (decision 3).
+pub async fn set_cert_enabled(
+    pool: &PgPool,
+    cert_subject: &str,
+    enabled: bool,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE producer_cert SET enabled = $1 WHERE cert_subject = $2")
+        .bind(enabled)
+        .bind(cert_subject)
+        .execute(pool)
+        .await
+        .map(|_| ())
 }
 
 /// Test cleanup only — nothing in the register/disable operations deletes a
