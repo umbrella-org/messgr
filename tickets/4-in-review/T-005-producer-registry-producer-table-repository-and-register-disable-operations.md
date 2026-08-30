@@ -298,9 +298,18 @@ Checklist:
 - [x] Documentation audit — coverage, whole-tree sweep, docs build clean (step 4a)
 - [x] Docs-readability pass — skipped: no docs-readability reviewer configured in this session
 - [x] Findings recorded with severity, class, and disposition; disposition summary + cost line below (step 5)
-- [ ] Ticket moved to `tickets/6-done/` or `tickets/5-rework/`; `## History` appended (step 6)
+- [x] Ticket moved to `tickets/6-done/` or `tickets/5-rework/`; `## History` appended (step 6)
 - [x] Remaining-tickets impact sweep done (step 8) — no ticket in `1-to-do/`/`2-ready/` references T-005 yet
 - [ ] Summary + commit message & MR attributes presented for approval (step 9)
+
+**Rework pass (scoped to F1/F2):** fixed on `feat/T-005-producer-registry` (commit `ba4ca6f`).
+`register_producer`/`disable_producer` now audit a tenant-not-found rejection
+(`tenant_id: None`) before returning; `audit()`'s `tenant_id` param changed to `Option<Uuid>`.
+Re-ran `just fmt`/`just lint`/`just test` — all green, including the new regression test (7/7 in
+`tests/producer.rs`). Re-verified live against a fresh tenant (`acme-rework`): the golden path
+(register/list) is unchanged, and `producer register --tenant-slug does-not-exist ...` now
+writes a `producer.register`/`rejected` audit row with `tenant_id` NULL. F3 (test-gap) closed as
+a side effect of the same fix, disposition updated from `noted` to `fixed inline` accordingly.
 
 Re-ran `just fmt`/`just lint`/`just test` (all green, including all 6 `tests/producer.rs` cases)
 and the full CLI walkthrough from the acceptance test against a fresh tenant
@@ -309,9 +318,9 @@ one row per attempt including the rejected one.
 
 | id | severity | class | disposition | description | evidence | suggestion |
 |---|---|---|---|---|---|---|
-| F1 | blocking | correctness | — | `register_producer`/`disable_producer` resolve `--tenant-slug` and return early via `?` on an unknown slug *before* ever calling `register_producer_inner`/`disable_producer_inner`, which is where every `audit()` call lives — so a bad `--tenant-slug` produces a rejected exit with **zero** `platform_audit` row, contradicting T-005 decision 4 ("every register/disable attempt writes exactly one platform_audit row … including the rejected ones") | `src/producer/register.rs:85-89` (register), `src/producer/register.rs:251-255` (disable) | Write the not-tenant-found rejection's audit row before returning — with `tenant_id: None` in the `platform_audit` row, since no tenant resolved — in both `register_producer` and `disable_producer` |
-| F2 | blocking | docs-gap | — | README's Producers section asserts an unconditional guarantee ("Every `register`/`disable` attempt, including a rejected one, writes a `platform_audit` row") that F1 makes false | `README.md:67` | No separate doc edit needed once F1 is fixed — the claim becomes true again |
-| F3 | non-blocking | test-gap | noted | No test in `tests/producer.rs` exercises `register`/`disable`/`list` with a `--tenant-slug` that does not exist, so F1's code path had zero coverage | `tests/producer.rs` (no such test) | Add a regression test for the tenant-not-found path as part of F1's rework fix |
+| F1 | blocking | correctness | — | **FIXED.** `register_producer`/`disable_producer` resolve `--tenant-slug` and return early via `?` on an unknown slug *before* ever calling `register_producer_inner`/`disable_producer_inner`, which is where every `audit()` call lives — so a bad `--tenant-slug` produces a rejected exit with **zero** `platform_audit` row, contradicting T-005 decision 4 ("every register/disable attempt writes exactly one platform_audit row … including the rejected ones") | `src/producer/register.rs:85-89` (register), `src/producer/register.rs:251-255` (disable), pre-fix | Fixed: both now write an audit row (`tenant_id: None`, `audit()`'s signature changed to `Option<Uuid>`) before returning the rejection — commit `ba4ca6f` on `feat/T-005-producer-registry`. Verified live: `producer register --tenant-slug does-not-exist ...` now writes a `producer.register`/`rejected` row with `tenant_id` NULL (confirmed via `psql`), and the golden path (register/list against a real tenant) still works unchanged |
+| F2 | blocking | docs-gap | — | **FIXED** (as a consequence of F1). README's Producers section asserts an unconditional guarantee ("Every `register`/`disable` attempt, including a rejected one, writes a `platform_audit` row") that F1 made false | `README.md:67` | No separate doc edit needed — F1's fix makes the claim true again; re-verified live |
+| F3 | non-blocking | test-gap | fixed inline | **FIXED**, superseding the original `noted` disposition. No test in `tests/producer.rs` exercised `register`/`disable`/`list` with a `--tenant-slug` that does not exist, so F1's code path had zero coverage | `tests/producer.rs` (no such test, pre-fix) | Added `register_and_disable_against_an_unknown_tenant_slug_are_rejected_and_audited`, asserting both calls are rejected and both write a `rejected` `platform_audit` row with `tenant_id IS NULL` — commit `ba4ca6f` |
 | F4 | non-blocking | design | fixed inline | `disable_producer_inner`'s not-found branch audited a hardcoded empty-string `cert_subject` (no existing row is known at that point), indistinguishable in the audit trail from a real blank value | `src/producer/register.rs:284` (pre-fix) | Fixed: `audit()`'s `cert_subject` is now `Option<&str>`, serializing to JSON `null` when unknown — commit `fd300d4` on `feat/T-005-producer-registry` |
 
 Disposition summary: 2 blocking (F1, F2 — same root cause, fixed together in rework), 1 noted (F3), 1 fixed inline (F4).
@@ -325,3 +334,4 @@ cost: estimated M, actual M
 - 2026-08-30 — READY → IN DEVELOPMENT: picked up
 - 2026-08-30 — IN DEVELOPMENT → IN REVIEW: acceptance green
 - 2026-08-30 — IN REVIEW → REWORK: F1/F2 blocking: tenant-not-found path skips the platform_audit write decision 4 requires
+- 2026-08-30 — REWORK → IN REVIEW: F1/F2 fixed: tenant-not-found now audits (commit ba4ca6f)

@@ -20,10 +20,11 @@ Last updated: 2026-08-30
 
 ## IN REVIEW
 
-### messgr (0/1)
+### messgr (1/1)
 
 | id | title | depends-on |
 |---|---|---|
+| T-005 | Producer registry: producer table, repository, and register/disable operations | [T-001] |
 
 ## REWORK
 
@@ -31,7 +32,6 @@ Last updated: 2026-08-30
 
 | id | title | open findings |
 |---|---|---|
-| T-005 | Producer registry: producer table, repository, and register/disable operations | F1/F2 blocking: tenant-not-found path skips the platform_audit write decision 4 requires |
 
 ## READY (impact order, per child)
 
