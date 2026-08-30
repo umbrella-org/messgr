@@ -59,3 +59,11 @@ vault-dev-init:
         http://localhost:8200/v1/transit-fixture-other/keys/messgr-dek || true
     curl -sf --header "X-Vault-Token: messgr-dev-root-token" --request POST \
         --data '{"type":"approle"}' http://localhost:8200/v1/sys/auth/approle || true
+
+# Validate the AsciiDoc manual via snowball (broken includes/xrefs fail the check)
+docs-check:
+    snowball check
+
+# Render the user manual to PDF + EPUB into dist/docs/ (never committed)
+docs-build:
+    snowball build -o dist/docs

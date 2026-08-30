@@ -1,0 +1,10 @@
+= messgr User Manual
+:doctype: book
+:toc:
+:toclevels: 3
+:sectnums:
+:icons: font
+
+include::attributes.adoc[]
+
+include::user-manual/introduction.adoc[leveloffset=+1]

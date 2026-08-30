@@ -1,0 +1,25 @@
+books:
+  - src: docs/user-manual.adoc
+    out: messgr-user-manual
+# a second book is only ever needed if you actually have one:
+#  - src: docs/developer-handbook.adoc
+#    out: messgr-developer-handbook
+# theme: docs/pdf-theme/messgr-theme.yml   # optional; PDF only. The filename MUST end in
+# "-theme.yml": snowball derives the theme name by stripping ".yml" then
+# "-theme", then asciidoctor-pdf reloads "<dir>/<name>-theme.yml". A theme
+# file that does not exist still renders a PDF (falling back to the
+# built-in default theme) but the command still exits non-zero.
+attributes:
+  toc: left
+  sectnums: ""
+formats: [pdf, epub]
+revision:
+  from: git-describe
+  date-format: "%d %B %Y"
+mermaid:
+  format: png
+  puppeteer-args: ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"]
+failure-level:
+  pdf: WARN
+  epub: ERROR
+  check: WARN

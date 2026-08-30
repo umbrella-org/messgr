@@ -1,0 +1,11 @@
+// TODO: replace this placeholder chapter — it is a starting point, not content.
+//
+// This file opens at level 0 (`= Introduction`), not level 1 (`== Introduction`),
+// even though it is a chapter, not a book. The book master includes it with
+// leveloffset=+1, so it renders one level down from how it opens here; opening it
+// one level too high fails `snowball check`'s section-ordering validation on the
+// including document ("section title out of sequence"), not on this file in
+// isolation. Leave the offset relationship alone when you replace the content.
+= Introduction
+
+{product} does ... (replace this with a one-sentence summary of what it does).
