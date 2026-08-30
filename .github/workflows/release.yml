@@ -1,0 +1,258 @@
+name: release
+
+# Cut a release by pushing a semver tag, e.g. `git tag v0.1.0 && git push origin v0.1.0`.
+# See RELEASING.md for the one-time repo/secret setup this depends on.
+#
+# messgr has no goreleaser equivalent wired up (Rust, not Go) — this hand-rolls the same
+# shape morty/summer get from goreleaser: cross-compiled archives for macOS + Linux
+# (amd64/arm64), a GitHub release, and a Homebrew formula pushed to a tap. No compile-time
+# `sqlx::query!` macros are used in this codebase (grepped before writing this), so no
+# DATABASE_URL is needed to cross-compile.
+#
+# Deliberate deviation from morty/summer: this workflow does not re-run the test suite.
+# ci.yml already gates every push to main (Postgres + Vault services); a tag is pushed
+# against an already-green commit, so re-running the same suite four times (once per build
+# matrix leg) would be pure duplication.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (e.g. v0.1.3). Must already exist.'
+        required: true
+
+permissions:
+  contents: write
+
+# Never cancel a release in progress: a half-cancelled release is worse than a queued one.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            target: aarch64-apple-darwin
+            platform: darwin
+            arch: arm64
+          - os: macos-14
+            target: x86_64-apple-darwin
+            platform: darwin
+            arch: amd64
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            platform: linux
+            arch: amd64
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            platform: linux
+            arch: arm64
+            cross: true
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      # aarch64-unknown-linux-gnu cross-compiled from an x86_64 ubuntu runner needs its own
+      # linker; darwin targets don't (Xcode's toolchain on an Apple Silicon runner links both
+      # x86_64 and aarch64 natively).
+      - name: Install cross linker
+        if: matrix.cross
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> "$GITHUB_ENV"
+
+      - name: Determine version
+        id: version
+        run: |
+          tag="${{ inputs.tag || github.ref_name }}"
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+
+      - run: cargo build --release --target ${{ matrix.target }}
+
+      # Package every [[bin]] the workspace defines, not a hardcoded list — new binaries
+      # (messgr-ingest, messgr-dispatcher, ...) land in the archive automatically as they're
+      # added to Cargo.toml, no workflow edit required.
+      - name: Package archive
+        id: package
+        run: |
+          name="messgr_${{ steps.version.outputs.version }}_${{ matrix.platform }}_${{ matrix.arch }}"
+          mkdir -p "dist/$name"
+          bins=$(cargo metadata --no-deps --format-version 1 \
+            | jq -r '.packages[] | select(.name == "messgr") | .targets[] | select(.kind[] == "bin") | .name')
+          for bin in $bins; do
+            cp "target/${{ matrix.target }}/release/$bin" "dist/$name/"
+          done
+          tar -C dist -czf "dist/$name.tar.gz" "$name"
+          echo "archive=dist/$name.tar.gz" >> "$GITHUB_OUTPUT"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.package.outputs.name }}
+          path: ${{ steps.package.outputs.archive }}
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - id: version
+        run: |
+          tag="${{ inputs.tag || github.ref_name }}"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum ./*.tar.gz > checksums.txt
+
+      # `--clobber` on a re-run overwrites already-published assets on the same tag instead
+      # of failing with "asset already exists" — the same problem `mode: replace` +
+      # `replace_existing_artifacts: true` solve for goreleaser on morty/summer.
+      - name: Publish GitHub release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          prerelease=false
+          [[ "$VERSION" == *-* ]] && prerelease=true
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/*.tar.gz dist/checksums.txt --clobber
+          else
+            gh release create "$TAG" \
+              --title "$TAG" \
+              --generate-notes \
+              --prerelease="$prerelease" \
+              dist/*.tar.gz dist/checksums.txt
+          fi
+
+  homebrew:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      # messgr itself, so `cargo metadata` below can read Cargo.toml — checked out to the
+      # workspace root, separately from the tap repo below (which goes into `tap/`).
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.release.outputs.tag }}
+
+      - uses: actions/checkout@v7
+        with:
+          repository: codcod/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+          path: tap
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Compute per-platform checksums
+        id: sha
+        working-directory: dist
+        run: |
+          version="${{ needs.release.outputs.version }}"
+          for key in darwin_arm64 darwin_amd64 linux_amd64 linux_arm64; do
+            file="messgr_${version}_${key}.tar.gz"
+            sha=$(sha256sum "$file" | cut -d' ' -f1)
+            echo "${key}=${sha}" >> "$GITHUB_OUTPUT"
+          done
+
+      - name: Render formula
+        env:
+          VERSION: ${{ needs.release.outputs.version }}
+          TAG: ${{ needs.release.outputs.tag }}
+          SHA_DARWIN_ARM64: ${{ steps.sha.outputs.darwin_arm64 }}
+          SHA_DARWIN_AMD64: ${{ steps.sha.outputs.darwin_amd64 }}
+          SHA_LINUX_AMD64: ${{ steps.sha.outputs.linux_amd64 }}
+          SHA_LINUX_ARM64: ${{ steps.sha.outputs.linux_arm64 }}
+        run: |
+          bins=$(cargo metadata --no-deps --format-version 1 --manifest-path "$GITHUB_WORKSPACE/Cargo.toml" \
+            | jq -r '.packages[] | select(.name == "messgr") | .targets[] | select(.kind[] == "bin") | .name')
+          installs=""
+          tests=""
+          for bin in $bins; do
+            installs="${installs}    bin.install \"${bin}\"\n"
+            tests="${tests}    system \"#{bin}/${bin}\", \"--version\"\n"
+          done
+          cat > tap/Formula/messgr.rb <<EOF
+          class Messgr < Formula
+            desc "messgr control-plane and service binaries"
+            homepage "https://github.com/umbrella-org/messgr"
+            version "${VERSION}"
+            license "UNLICENSED"
+
+            on_macos do
+              on_arm do
+                url "https://github.com/umbrella-org/messgr/releases/download/${TAG}/messgr_${VERSION}_darwin_arm64.tar.gz"
+                sha256 "${SHA_DARWIN_ARM64}"
+              end
+              on_intel do
+                url "https://github.com/umbrella-org/messgr/releases/download/${TAG}/messgr_${VERSION}_darwin_amd64.tar.gz"
+                sha256 "${SHA_DARWIN_AMD64}"
+              end
+            end
+
+            on_linux do
+              on_intel do
+                url "https://github.com/umbrella-org/messgr/releases/download/${TAG}/messgr_${VERSION}_linux_amd64.tar.gz"
+                sha256 "${SHA_LINUX_AMD64}"
+              end
+              on_arm do
+                url "https://github.com/umbrella-org/messgr/releases/download/${TAG}/messgr_${VERSION}_linux_arm64.tar.gz"
+                sha256 "${SHA_LINUX_ARM64}"
+              end
+            end
+
+            def install
+          $(echo -e "$installs")
+            end
+
+            test do
+          $(echo -e "$tests")
+            end
+          end
+          EOF
+
+      - name: Commit and push formula
+        working-directory: tap
+        run: |
+          git config user.name "messgr-release"
+          git config user.email "messgr-release@users.noreply.github.com"
+          git add Formula/messgr.rb
+          if git diff --cached --quiet; then
+            echo "Formula unchanged, nothing to commit."
+            exit 0
+          fi
+          git commit -m "messgr ${{ needs.release.outputs.tag }}"
+          git push

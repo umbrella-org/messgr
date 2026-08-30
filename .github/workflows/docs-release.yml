@@ -1,0 +1,73 @@
+# Attach the AsciiDoc user manual (built with snowball: https://github.com/codcod/snowball)
+# to a GitHub release. Mirrors morty/summer's docs-release.yml verbatim in shape; only the
+# manual's output name changes (messgr-user-manual, per snowball.yaml).
+#
+# Two triggers, because GitHub does not chain a `release: published` event when the release
+# was created using the repo's default `secrets.GITHUB_TOKEN` — which is exactly what
+# release.yml's `gh release create` step does, so `release: published` alone never fires here
+# (confirmed live on morty). `release: published` is kept for a human-published release (one
+# hand-edited via the UI); `workflow_run` covers the release.yml-created case by reacting to
+# that workflow finishing instead of to the release event it raises.
+#
+# The manual is not the release: a broken manual build must never block or unpublish it.
+name: docs-release
+
+on:
+  release:
+    types: [published]
+  workflow_run:
+    workflows: [release]
+    types: [completed]
+
+permissions:
+  contents: write
+
+jobs:
+  attach-manual:
+    if: github.event_name == 'release' || github.event.workflow_run.conclusion == 'success'
+    # macOS, not ubuntu-latest: this step needs a preinstalled Homebrew, which only
+    # GitHub's macOS runners have.
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # workflow_run carries no `release` payload, so the tag has to be looked up. The
+      # release.yml run that just finished is, barring a race with a concurrent one, the
+      # newest release in the repo — release.yml's own concurrency group rules that out.
+      - name: Determine the release tag
+        id: tag
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ "${{ github.event_name }}" = "release" ]; then
+            tag="${{ github.event.release.tag_name }}"
+          else
+            tag="$(gh release list --limit 1 --json tagName --jq '.[0].tagName')"
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Install snowball
+        run: |
+          brew update --quiet
+          brew install codcod/tap/snowball
+          snowball setup
+
+      # A broken or missing docs source must never block the release: this step is allowed
+      # to fail without failing the workflow.
+      - name: Build user manual
+        continue-on-error: true
+        run: snowball build -o dist/docs
+
+      - name: Attach user manual to release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          shopt -s nullglob
+          existing=(dist/docs/*.pdf dist/docs/*.epub)
+          if [ ${#existing[@]} -eq 0 ]; then
+            echo "::warning::Release $TAG has no user manual attached — the build step failed" \
+              "or produced nothing; see the 'Build user manual' step's log."
+            exit 0
+          fi
+          gh release upload "$TAG" "${existing[@]}" --clobber
