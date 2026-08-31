@@ -10,6 +10,7 @@ pub struct Tenant {
     pub database_name: String,
     pub vault_mount: String,
     pub vault_role_id: Option<String>,
+    pub vault_pepper_wrapped: Option<String>,
     pub webhook_token: String,
     pub status: String,
     pub created_at: DateTime<Utc>,
