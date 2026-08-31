@@ -1,5 +1,6 @@
 pub mod config;
 pub mod db;
+pub mod key_cache;
 pub mod keystore;
 pub mod platform_audit;
 pub mod producer;
