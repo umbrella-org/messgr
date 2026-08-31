@@ -311,3 +311,4 @@ User-facing surface: the new `messgr-control tenant-config` subcommands.
 
 - 2026-08-31 — created (TO DO). source: chat: filed from PLAN.md's build-step-2 decomposition; umbrella of the step-2 ticket family (T-007–T-014)
 - 2026-08-31 — TO DO → READY: plan complete
+- 2026-08-31 — READY → IN DEVELOPMENT: picked up
