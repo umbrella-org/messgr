@@ -305,7 +305,28 @@ User-facing surface: the new `messgr-control tenant-config` subcommands.
 
 ## Review
 
-<!-- empty until IN REVIEW -->
+- [x] Implementation audit — acceptance test re-run, tasks & criteria verified (step 2)
+- [x] Quality audit (step 3)
+- [x] Consistency audit (step 4)
+- [x] Documentation audit — coverage, whole-tree sweep, docs build clean (step 4a) — README/justfile/DESIGN.md all updated and consistent; `snowball` docs build (`docs/user-manual.adoc`) is untouched by this ticket's surface, so not re-run
+- [x] Docs-readability pass — skipped: no docs-readability reviewer configured in this session
+- [x] Findings recorded with severity, class, and disposition; disposition summary + cost line below (step 5)
+- [x] Ticket moved to `tickets/6-done/` or `tickets/5-rework/`; `## History` appended (step 6)
+- [x] Remaining-tickets impact sweep done (step 8) — T-009 and T-014 (the only `1-to-do/` tickets referencing `tenant_config` specifically) still describe it accurately (`retention_years`/`default_timezone` exist exactly as they assume); no patch needed
+- [x] Summary + commit message & MR attributes presented for approval (step 9) — moot: PR #9 was already merged before this review ran (see History); recorded post hoc
+
+**Re-ran the acceptance test independently** on `main` post-merge (commit `6e4bba4`): `just fmt`/`just lint`/`just test` all green (26 unit + integration tests total, including `tests/tenant_config.rs`'s 5 and `control.rs`'s 2 new unit tests). Provisioned a fresh tenant (`acme_review`) and independently re-exercised the CLI: `show` before any `set` prints `not configured`; `set` → `outcome=created`; re-`set` identical → `outcome=idempotent`; an invalid `--verification-mode sometimes` is rejected by `clap` before touching the database; `set` against an unknown `--tenant-slug` exits non-zero and confirmed via `psql`/`docker exec` a `tenant_config.set`/`rejected` `platform_audit` row with `tenant_id IS NULL` — the T-005/F1 pattern this ticket set out to avoid, verified live rather than trusting the code read. Also directly attempted a second `tenant_config` row via `INSERT` against the tenant database: confirmed the `singleton` `PRIMARY KEY` actually rejects it (`duplicate key value violates unique constraint "tenant_config_pkey"`), not just documented as enforced. All test-tenant artifacts cleaned up afterward.
+
+Project-wide search for `tenant_config` found no stale reference introduced by this branch — every other file (`PLAN.md`, `DESIGN.md`, `tickets/T-009`, `tickets/T-014`) already agrees with the shipped six-column, no-`tenant_id`, singleton shape.
+
+| id | severity | class | disposition | description | evidence | suggestion |
+|---|---|---|---|---|---|---|
+| F1 | non-blocking | design | fixed inline | `TenantConfigCommand::Set`'s `verification_mode` field shadowed the imported `tenant_config::model::verification_mode` module inside its own match arm, forcing a fully-qualified `messgr::tenant_config::model::verification_mode::OBSERVE` instead of the already-imported unqualified path used everywhere else in the file (the `PossibleValuesParser` construction two arms up) | `src/bin/control.rs` (pre-fix, `Command::TenantConfig` arm) | **FIXED.** Renamed the destructured binding to `verification_mode_arg`, leaving the module import unqualified everywhere; `just fmt`/`just lint`/`just test` re-confirmed green after the change |
+| F2 | non-blocking | design | noted | No validation that `--retention-years`, `--schedule-horizon-days`, or `--staleness-max-age-seconds` are non-negative — a negative value silently produces a nonsensical row (e.g. a negative interval) instead of a rejected argument | `src/bin/control.rs`, `TenantConfigCommand::Set` | Consistent with the rest of `messgr-control`'s admin surface (e.g. `producer register`'s `--owner-team`/`--contact` are also unvalidated free text) — an operator-trusted CLI, not user-facing input. Not worth a dedicated ticket on its own; fold into whichever future ticket first adds general CLI input validation, if one is ever filed |
+
+Disposition summary: 1 fixed inline (F1), 1 noted (F2). No blocking findings.
+
+cost: estimated S, actual S
 
 ## History
 
@@ -313,3 +334,5 @@ User-facing surface: the new `messgr-control tenant-config` subcommands.
 - 2026-08-31 — TO DO → READY: plan complete
 - 2026-08-31 — READY → IN DEVELOPMENT: picked up
 - 2026-08-31 — IN DEVELOPMENT → IN REVIEW: acceptance green
+- 2026-08-31 — IN REVIEW → DONE: review clean: 1 fixed inline (F1), 1 noted (F2); no blocking findings
+- 2026-08-31 — merged to main (PR #9, 6e4bba4) — merged ahead of this review's completion; F1's fix landed in a separate direct commit (a3a904d) after the merge, since no PR remained open to carry it

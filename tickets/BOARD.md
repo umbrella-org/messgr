@@ -20,11 +20,10 @@ Last updated: 2026-08-31
 
 ## IN REVIEW
 
-### messgr (1/1)
+### messgr (0/1)
 
 | id | title | depends-on |
 |---|---|---|
-| T-007 | tenant_config table + typed config loading | [T-001] |
 
 ## REWORK
 
@@ -66,6 +65,7 @@ Last updated: 2026-08-31
 | T-004 | Per-tenant Transit mount + AppRole creation wired into the provisioning command | yes — merged to main (PR #4, 8f8233d) |
 | T-005 | Producer registry: producer table, repository, and register/disable operations | yes — merged to main (PR #5, 12ec4581) |
 | T-006 | mTLS identity resolution: client cert to producer_cert to tenant/producer identity | yes — merged to main (PR #6, c15d237) |
+| T-007 | tenant_config table + typed config loading | no — publish-gated |
 
 ## DROPPED
 
