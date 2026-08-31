@@ -121,6 +121,19 @@ producer-disable tenant_slug name actor:
 producer-list tenant_slug:
     cargo run --bin {{bin}} -- producer list --tenant-slug {{tenant_slug}}
 
+# Set (create or overwrite) a tenant's typed configuration
+[group('control-plane')]
+tenant-config-set tenant retention_years default_timezone default_locale quota_day_boundary_tz staleness_max_age_seconds actor:
+    cargo run --bin {{bin}} -- tenant-config set --tenant-slug {{tenant}} \
+        --retention-years {{retention_years}} --default-timezone {{default_timezone}} \
+        --default-locale {{default_locale}} --quota-day-boundary-tz {{quota_day_boundary_tz}} \
+        --staleness-max-age-seconds {{staleness_max_age_seconds}} --actor {{actor}}
+
+# Show a tenant's typed configuration
+[group('control-plane')]
+tenant-config-show tenant_slug:
+    cargo run --bin {{bin}} -- tenant-config show --tenant-slug {{tenant_slug}}
+
 # Bootstrap the dev-only internal PKI (Vault-backed)
 [group('control-plane')]
 dev-pki-bootstrap:

@@ -543,8 +543,10 @@ Everything an institution can differ on lives in its own database, so there is n
 
 ```sql
 CREATE TABLE tenant_config (
-    tenant_id           uuid PRIMARY KEY,
-    display_name        text NOT NULL,
+    singleton           boolean NOT NULL DEFAULT true,  -- no tenant_id (§2.1 — the tenant is
+                                                         -- the database); PRIMARY KEY (singleton)
+                                                         -- + CHECK(singleton) enforces one row
+    display_name        text,                   -- not yet created — no reader yet (T-007)
     retention_years     int  NOT NULL,          -- 7 for this customer; another may want 3
     default_timezone    text NOT NULL,          -- fallback for unknown customer tz (§6.1)
     default_locale      text NOT NULL,
@@ -552,9 +554,10 @@ CREATE TABLE tenant_config (
     quota_day_boundary_tz text NOT NULL,
     verification_mode   text NOT NULL DEFAULT 'observe',  -- enforce | observe (§5)
     staleness_max_age   interval NOT NULL,                -- projection freshness bound (§4.8)
-    oidc_issuer         text,                   -- the tenant's own IdP (§11.1)
-    oidc_client_id      text,
-    oidc_group_claim    text
+    oidc_issuer         text,                   -- the tenant's own IdP (§11.1) — not yet created, added by T-035
+    oidc_client_id      text,                   -- not yet created, added by T-035
+    oidc_group_claim    text,                   -- not yet created, added by T-035
+    PRIMARY KEY (singleton)
 );
 
 CREATE TABLE quiet_hours_policy (
@@ -576,6 +579,13 @@ CREATE TABLE provider_config (
     PRIMARY KEY (tenant_id, channel, priority)
 );
 ```
+
+T-007 ships only `tenant_config`'s `retention_years`, `default_timezone`, `default_locale`,
+`schedule_horizon_days`, `quota_day_boundary_tz`, `verification_mode`, and `staleness_max_age` —
+`display_name` and the `oidc_*` columns are shown above as the eventual design but are not yet
+migrated; nothing reads them yet (T-035 adds the `oidc_*` columns when real OIDC lands).
+`quiet_hours_policy` and `provider_config` are unrelated tables not yet created either (later
+tickets: quiet-hours resolution, T-012's provider selection).
 
 **Tenants bring their own provider accounts.** The platform never resells messaging, which removes an entire category of problems: rate limits and spend are naturally per-tenant, there is no shared provider budget to arbitrate, and a tenant exhausting its Twilio credit is visibly its own problem. Credentials are referenced by Vault path, never stored in Postgres. Producer quotas (§5.1) become a governance tool for the tenant's internal teams rather than a billing mechanism for the platform.
 

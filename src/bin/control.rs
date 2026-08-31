@@ -8,6 +8,8 @@ use messgr::keystore::VaultKeyStore;
 use messgr::producer::dev_pki;
 use messgr::producer::register::{disable_producer, list_producers, register_producer};
 use messgr::tenant::provision::provision_tenant;
+use messgr::tenant_config::configure::{set_tenant_config, show_tenant_config};
+use messgr::tenant_config::model::{TenantConfigInput, verification_mode};
 
 #[derive(Parser)]
 #[command(name = "messgr-control", about = "messgr control-plane operations")]
@@ -52,6 +54,14 @@ enum Command {
     DevPki {
         #[command(subcommand)]
         command: DevPkiCommand,
+    },
+    /// Set or show a tenant's typed configuration (DESIGN.md §4.10, T-007):
+    /// retention, timezone/locale defaults, schedule horizon, verification
+    /// mode, staleness bound, and quota day boundary. A fresh tenant has no
+    /// row until `set` is run at least once.
+    TenantConfig {
+        #[command(subcommand)]
+        command: TenantConfigCommand,
     },
 }
 
@@ -105,6 +115,49 @@ enum DevPkiCommand {
         common_name: String,
         #[arg(long = "out-dir")]
         out_dir: PathBuf,
+    },
+}
+
+#[derive(Subcommand)]
+enum TenantConfigCommand {
+    /// Create or overwrite the tenant's single `tenant_config` row. Safe to
+    /// re-run: identical inputs are an idempotent no-op, different inputs
+    /// overwrite the row (there is nothing to conflict with — it is a
+    /// singleton).
+    Set {
+        #[arg(long = "tenant-slug")]
+        tenant_slug: String,
+        #[arg(long = "retention-years")]
+        retention_years: i32,
+        #[arg(long = "default-timezone")]
+        default_timezone: String,
+        #[arg(long = "default-locale")]
+        default_locale: String,
+        /// Defaults to 90 (DESIGN.md §4.10's own SQL default) when omitted.
+        #[arg(long = "schedule-horizon-days")]
+        schedule_horizon_days: Option<i32>,
+        #[arg(long = "quota-day-boundary-tz")]
+        quota_day_boundary_tz: String,
+        /// `enforce` or `observe`; defaults to `observe` (DESIGN.md §4.10's
+        /// own SQL default) when omitted.
+        #[arg(
+            long = "verification-mode",
+            value_parser = clap::builder::PossibleValuesParser::new([
+                verification_mode::ENFORCE,
+                verification_mode::OBSERVE,
+            ])
+        )]
+        verification_mode: Option<String>,
+        #[arg(long = "staleness-max-age-seconds")]
+        staleness_max_age_seconds: i64,
+        /// Operator identity recorded on the platform_audit row.
+        #[arg(long)]
+        actor: String,
+    },
+    /// Show a tenant's typed configuration, or report that none is set.
+    Show {
+        #[arg(long = "tenant-slug")]
+        tenant_slug: String,
     },
 }
 
@@ -288,5 +341,157 @@ async fn main() {
                 }
             }
         }
+        // No Vault client is connected here either — neither arm touches
+        // Transit or AppRole.
+        Command::TenantConfig { command } => {
+            match command {
+                TenantConfigCommand::Set {
+                    tenant_slug,
+                    retention_years,
+                    default_timezone,
+                    default_locale,
+                    schedule_horizon_days,
+                    quota_day_boundary_tz,
+                    verification_mode,
+                    staleness_max_age_seconds,
+                    actor,
+                } => {
+                    let input = TenantConfigInput {
+                        retention_years,
+                        default_timezone,
+                        default_locale,
+                        schedule_horizon_days: schedule_horizon_days.unwrap_or(90),
+                        quota_day_boundary_tz,
+                        verification_mode: verification_mode.unwrap_or_else(|| {
+                            messgr::tenant_config::model::verification_mode::OBSERVE
+                                .to_string()
+                        }),
+                        staleness_max_age: sqlx::postgres::types::PgInterval {
+                            months: 0,
+                            days: 0,
+                            microseconds: staleness_max_age_seconds * 1_000_000,
+                        },
+                    };
+
+                    let outcome = set_tenant_config(
+                    &control_pool,
+                    &config.control_database_url,
+                    &tenant_slug,
+                    input,
+                    config.profile,
+                    &actor,
+                )
+                .await
+                .unwrap_or_else(|err| {
+                    panic!("failed to set tenant_config for tenant {tenant_slug:?}: {err}")
+                });
+
+                    println!("outcome={}", outcome.outcome);
+                }
+                TenantConfigCommand::Show { tenant_slug } => {
+                    let config_row = show_tenant_config(
+                    &control_pool,
+                    &config.control_database_url,
+                    &tenant_slug,
+                    config.profile,
+                )
+                .await
+                .unwrap_or_else(|err| {
+                    panic!("failed to show tenant_config for tenant {tenant_slug:?}: {err}")
+                });
+
+                    match config_row {
+                        Some(config_row) => println!(
+                            "retention_years={} default_timezone={} default_locale={} \
+                         schedule_horizon_days={} quota_day_boundary_tz={} verification_mode={} \
+                         staleness_max_age_seconds={}",
+                            config_row.retention_years,
+                            config_row.default_timezone,
+                            config_row.default_locale,
+                            config_row.schedule_horizon_days,
+                            config_row.quota_day_boundary_tz,
+                            config_row.verification_mode,
+                            config_row.staleness_max_age_duration().num_seconds(),
+                        ),
+                        None => println!("not configured"),
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tenant_config_set_defaults_schedule_horizon_and_verification_mode_when_omitted()
+    {
+        let cli = Cli::try_parse_from([
+            "messgr-control",
+            "tenant-config",
+            "set",
+            "--tenant-slug",
+            "acme",
+            "--retention-years",
+            "7",
+            "--default-timezone",
+            "Europe/London",
+            "--default-locale",
+            "en-GB",
+            "--quota-day-boundary-tz",
+            "Europe/London",
+            "--staleness-max-age-seconds",
+            "7200",
+            "--actor",
+            "operator@example.com",
+        ])
+        .expect("parsing tenant-config set without the optional flags must succeed");
+
+        let Command::TenantConfig {
+            command:
+                TenantConfigCommand::Set {
+                    schedule_horizon_days,
+                    verification_mode,
+                    ..
+                },
+        } = cli.command
+        else {
+            panic!("expected TenantConfig::Set");
+        };
+
+        assert_eq!(schedule_horizon_days, None);
+        assert_eq!(verification_mode, None);
+    }
+
+    #[test]
+    fn tenant_config_set_rejects_an_invalid_verification_mode() {
+        let result = Cli::try_parse_from([
+            "messgr-control",
+            "tenant-config",
+            "set",
+            "--tenant-slug",
+            "acme",
+            "--retention-years",
+            "7",
+            "--default-timezone",
+            "Europe/London",
+            "--default-locale",
+            "en-GB",
+            "--quota-day-boundary-tz",
+            "Europe/London",
+            "--staleness-max-age-seconds",
+            "7200",
+            "--verification-mode",
+            "sometimes",
+            "--actor",
+            "operator@example.com",
+        ]);
+
+        assert!(
+            result.is_err(),
+            "an invalid --verification-mode value must fail to parse"
+        );
     }
 }
