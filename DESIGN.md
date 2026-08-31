@@ -601,7 +601,11 @@ CREATE TABLE tenant (
 CREATE TABLE producer_cert (
     cert_subject text PRIMARY KEY,              -- CN/SAN presented by the producer
     tenant_id    uuid NOT NULL REFERENCES tenant(id),
-    producer_id  uuid NOT NULL                  -- resolved within that tenant's producer table
+    producer_id  uuid NOT NULL,                 -- resolved within that tenant's producer table
+    enabled      bool NOT NULL DEFAULT true     -- denormalized from producer.enabled (T-006):
+                                                 -- resolution reads only this column, so it
+                                                 -- never has to open the tenant database above
+                                                 -- just to tell "unknown" from "disabled" apart
 );
 
 CREATE TABLE tenant_schema_version (             -- migrations run N times; drift must be visible

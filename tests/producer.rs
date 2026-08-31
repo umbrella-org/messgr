@@ -9,6 +9,7 @@ use messgr::db;
 use messgr::keystore::VaultKeyStore;
 use messgr::producer::cert_repo;
 use messgr::producer::register::{disable_producer, list_producers, register_producer};
+use messgr::producer::resolve::{ResolutionError, resolve_producer};
 use messgr::profile::Profile;
 use messgr::tenant::provision::provision_tenant;
 
@@ -579,4 +580,255 @@ async fn register_and_disable_against_an_unknown_tenant_slug_are_rejected_and_au
             "cleanup: failed to delete platform_audit rows for actor {unique_actor}: {err}"
         );
     }
+}
+
+#[tokio::test]
+async fn resolve_producer_resolves_a_registered_cert_subject() {
+    let control_url = control_database_url();
+    let control_pool = db::connect(&control_url, 5)
+        .await
+        .expect("failed to connect to control database");
+    let vault = vault_keystore();
+
+    let slug = unique_name("test_tenant_resolve_ok");
+    let db_name = unique_name("test_db_resolve_ok");
+    let cert_subject = format!("CN={}", unique_name("resolve-ok"));
+
+    let tenant_id =
+        provision_test_tenant(&control_pool, &control_url, &vault, &slug, &db_name)
+            .await;
+
+    let outcome = register_producer(
+        &control_pool,
+        &control_url,
+        &slug,
+        "resolve-ok-producer",
+        &cert_subject,
+        "team",
+        "team@example.com",
+        Profile::Dev,
+        "test-actor",
+    )
+    .await
+    .expect("registration failed");
+
+    let resolved = resolve_producer(&control_pool, &cert_subject)
+        .await
+        .expect("resolving a registered, enabled producer must succeed");
+    assert_eq!(resolved.tenant_id, tenant_id);
+    assert_eq!(resolved.producer_id, outcome.producer_id);
+
+    cleanup_cert(&control_pool, &cert_subject).await;
+    drop_test_tenant(&control_pool, &db_name, &slug).await;
+}
+
+#[tokio::test]
+async fn resolve_producer_rejects_an_unknown_cert_subject() {
+    let control_url = control_database_url();
+    let control_pool = db::connect(&control_url, 5)
+        .await
+        .expect("failed to connect to control database");
+
+    let unknown_cert_subject = format!("CN={}", unique_name("resolve-unknown"));
+
+    let result = resolve_producer(&control_pool, &unknown_cert_subject).await;
+    assert!(
+        matches!(result, Err(ResolutionError::UnknownCert)),
+        "an unregistered cert_subject must resolve to UnknownCert, got {result:?}"
+    );
+}
+
+#[tokio::test]
+async fn resolve_producer_distinguishes_disabled_from_unknown() {
+    let control_url = control_database_url();
+    let control_pool = db::connect(&control_url, 5)
+        .await
+        .expect("failed to connect to control database");
+    let vault = vault_keystore();
+
+    let slug = unique_name("test_tenant_resolve_disabled");
+    let db_name = unique_name("test_db_resolve_disabled");
+    let cert_subject = format!("CN={}", unique_name("resolve-disabled"));
+
+    let tenant_id =
+        provision_test_tenant(&control_pool, &control_url, &vault, &slug, &db_name)
+            .await;
+
+    let outcome = register_producer(
+        &control_pool,
+        &control_url,
+        &slug,
+        "resolve-disabled-producer",
+        &cert_subject,
+        "team",
+        "team@example.com",
+        Profile::Dev,
+        "test-actor",
+    )
+    .await
+    .expect("registration failed");
+
+    disable_producer(
+        &control_pool,
+        &control_url,
+        &slug,
+        "resolve-disabled-producer",
+        Profile::Dev,
+        "test-actor",
+    )
+    .await
+    .expect("disable failed");
+
+    let result = resolve_producer(&control_pool, &cert_subject).await;
+    match result {
+        Err(ResolutionError::Disabled {
+            tenant_id: resolved_tenant_id,
+            producer_id: resolved_producer_id,
+        }) => {
+            assert_eq!(resolved_tenant_id, tenant_id);
+            assert_eq!(resolved_producer_id, outcome.producer_id);
+        }
+        other => panic!(
+            "a disabled producer must resolve to Disabled with the correct ids, not \
+             {other:?} (must not be indistinguishable from UnknownCert)"
+        ),
+    }
+
+    cleanup_cert(&control_pool, &cert_subject).await;
+    drop_test_tenant(&control_pool, &db_name, &slug).await;
+}
+
+#[tokio::test]
+async fn idempotent_reregistration_does_not_silently_reenable_a_disabled_producer() {
+    // Regression guard for T-006 decision 3: cert_repo::upsert_producer_cert's
+    // ON CONFLICT clause must never touch `enabled`, or a repeated
+    // (idempotent) `register` call after a `disable` would silently
+    // re-admit a producer that was deliberately shut off.
+    let control_url = control_database_url();
+    let control_pool = db::connect(&control_url, 5)
+        .await
+        .expect("failed to connect to control database");
+    let vault = vault_keystore();
+
+    let slug = unique_name("test_tenant_resolve_reenable");
+    let db_name = unique_name("test_db_resolve_reenable");
+    let cert_subject = format!("CN={}", unique_name("resolve-reenable"));
+
+    provision_test_tenant(&control_pool, &control_url, &vault, &slug, &db_name).await;
+
+    register_producer(
+        &control_pool,
+        &control_url,
+        &slug,
+        "reenable-producer",
+        &cert_subject,
+        "team",
+        "team@example.com",
+        Profile::Dev,
+        "test-actor",
+    )
+    .await
+    .expect("first registration failed");
+
+    disable_producer(
+        &control_pool,
+        &control_url,
+        &slug,
+        "reenable-producer",
+        Profile::Dev,
+        "test-actor",
+    )
+    .await
+    .expect("disable failed");
+
+    // Identical inputs to the first call — T-005 decision 3's idempotent
+    // reconfirm path, which calls upsert_producer_cert again.
+    register_producer(
+        &control_pool,
+        &control_url,
+        &slug,
+        "reenable-producer",
+        &cert_subject,
+        "team",
+        "team@example.com",
+        Profile::Dev,
+        "test-actor",
+    )
+    .await
+    .expect("idempotent re-registration failed");
+
+    let result = resolve_producer(&control_pool, &cert_subject).await;
+    assert!(
+        matches!(result, Err(ResolutionError::Disabled { .. })),
+        "an idempotent re-registration must not re-enable a disabled producer_cert row, got {result:?}"
+    );
+
+    cleanup_cert(&control_pool, &cert_subject).await;
+    drop_test_tenant(&control_pool, &db_name, &slug).await;
+}
+
+#[tokio::test]
+async fn resolve_producer_never_leaks_across_tenants() {
+    let control_url = control_database_url();
+    let control_pool = db::connect(&control_url, 5)
+        .await
+        .expect("failed to connect to control database");
+    let vault = vault_keystore();
+
+    let slug_a = unique_name("test_tenant_resolve_iso_a");
+    let db_a = unique_name("test_db_resolve_iso_a");
+    let slug_b = unique_name("test_tenant_resolve_iso_b");
+    let db_b = unique_name("test_db_resolve_iso_b");
+    let cert_a = format!("CN={}", unique_name("resolve-iso-a"));
+    let cert_b = format!("CN={}", unique_name("resolve-iso-b"));
+
+    let tenant_id_a =
+        provision_test_tenant(&control_pool, &control_url, &vault, &slug_a, &db_a)
+            .await;
+    let tenant_id_b =
+        provision_test_tenant(&control_pool, &control_url, &vault, &slug_b, &db_b)
+            .await;
+
+    let outcome_a = register_producer(
+        &control_pool,
+        &control_url,
+        &slug_a,
+        "shared-name",
+        &cert_a,
+        "team-a",
+        "a@example.com",
+        Profile::Dev,
+        "test-actor",
+    )
+    .await
+    .expect("registering producer for tenant A failed");
+
+    register_producer(
+        &control_pool,
+        &control_url,
+        &slug_b,
+        "shared-name",
+        &cert_b,
+        "team-b",
+        "b@example.com",
+        Profile::Dev,
+        "test-actor",
+    )
+    .await
+    .expect("registering producer for tenant B failed");
+
+    let resolved_a = resolve_producer(&control_pool, &cert_a)
+        .await
+        .expect("resolving tenant A's cert_subject must succeed");
+    assert_eq!(resolved_a.tenant_id, tenant_id_a);
+    assert_eq!(resolved_a.producer_id, outcome_a.producer_id);
+    assert_ne!(
+        resolved_a.tenant_id, tenant_id_b,
+        "resolving tenant A's cert_subject must never return tenant B's tenant_id"
+    );
+
+    cleanup_cert(&control_pool, &cert_a).await;
+    cleanup_cert(&control_pool, &cert_b).await;
+    drop_test_tenant(&control_pool, &db_a, &slug_a).await;
+    drop_test_tenant(&control_pool, &db_b, &slug_b).await;
 }

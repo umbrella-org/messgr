@@ -53,19 +53,44 @@ cargo run --bin messgr-control -- producer disable --tenant-slug acme --name fra
 tenant (DESIGN.md §4.9): it writes both the `producer` row in the tenant's own database and the
 `producer_cert` mapping in the control database, in that order (a producer only in the tenant
 database is inert; a `producer_cert` pointing at no producer is a worse, later failure). No send
-path consumes this identity yet — mTLS resolution against `producer_cert` is `T-007`.
+path consumes this identity yet — `messgr::producer::resolve` (below) is the first reader.
 
 Re-running `register` with identical inputs for the same `--name` is a safe no-op. Re-running it
 with different inputs for the same `--name`, or with a `--cert-subject` already bound to another
 producer (in this tenant or a different one), is rejected with a non-zero exit.
 
-`producer disable` sets the tenant-side row to disabled but never deletes the `producer_cert`
-mapping — that is what lets a disabled producer's certificate fail with a distinct, diagnosable
-error at the mTLS edge instead of looking unregistered. It is reversible by registering the same
-`--name`/`--cert-subject` again. Disabling an already-disabled producer is a safe no-op.
+`producer disable` sets **two** copies to disabled, control database first: `producer_cert.enabled`
+(control) — the column mTLS resolution actually reads, since resolution never opens a tenant
+database — and then `producer.enabled` (tenant) — the source of truth `producer list` displays.
+Neither row is ever deleted, so a disabled producer's certificate fails resolution with a
+distinct, diagnosable "disabled" error instead of looking unregistered. Reversible by registering
+the same `--name`/`--cert-subject` again (which never re-enables `producer_cert.enabled` — only
+`disable` and the initial `register` ever touch that column). Disabling an already-disabled
+producer is a safe no-op.
 
 Every `register`/`disable` attempt, including a rejected one, writes a `platform_audit` row
 (`producer.register` / `producer.disable`).
+
+### mTLS resolution and dev PKI
+
+`messgr::producer::resolve::resolve_producer(control_pool, cert_subject)` (DESIGN.md §4.9, §11.1,
+T-006) is the shared layer future ingest binaries compose to turn a client certificate's subject
+into `(tenant_id, producer_id)`: one control-database query, distinguishing an unknown cert from a
+known-but-disabled one. No TLS-terminating binary exists yet to call it — that is `T-011`
+(`messgr-ingest`).
+
+To exercise it locally without a real CA:
+
+```
+just dev-pki-bootstrap                                  # one-time: mount pki, root CA, producer-dev role
+just dev-pki-issue-cert fraud-alerts.internal /tmp/cert  # writes cert.pem, key.pem, ca.pem
+openssl x509 -noout -subject -in /tmp/cert/cert.pem      # CN=fraud-alerts.internal
+```
+
+`dev-pki bootstrap`/`dev-pki issue-cert` are backed by Vault's own PKI secrets engine (the same
+dev-mode Vault `docker compose up -d` already starts) and refuse to run outside
+`MESSGR_PROFILE=dev` — minting a trusted producer client certificate ad hoc must never be
+reachable against a real Vault.
 
 `docker compose up -d` also starts a dev-mode Vault (`VAULT_ADDR=http://localhost:8200`,
 `VAULT_TOKEN=messgr-dev-root-token`, both in `.env.example`) backing the `KeyStore` trait
