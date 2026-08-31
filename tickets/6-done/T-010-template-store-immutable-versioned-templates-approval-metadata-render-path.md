@@ -334,7 +334,26 @@ User-facing surface: the new `messgr-control template` subcommands.
 
 ## Review
 
-<!-- empty until IN REVIEW -->
+- [x] Implementation audit — acceptance test re-run, tasks & criteria verified (step 2)
+- [x] Quality audit (step 3)
+- [x] Consistency audit (step 4)
+- [x] Documentation audit — coverage, whole-tree sweep, docs build clean (step 4a) — README/justfile/DESIGN.md all updated; `just docs-check` clean
+- [x] Docs-readability pass — skipped: no docs-readability reviewer configured in this session
+- [x] Findings recorded with severity, class, and disposition; disposition summary + cost line below (step 5)
+- [x] Ticket moved to `tickets/6-done/` or `tickets/5-rework/`; `## History` appended (step 6)
+- [x] Remaining-tickets impact sweep done (step 8) — re-read T-011 (the only `1-to-do/`/`2-ready/` ticket with `depends-on: [..., T-010, ...]`); its Description names T-010 only generically ("the template store") and doesn't assume any specific function signature or CLI shape, so nothing needs patching. `T-014` depends only on `T-009`, not `T-010`.
+
+**Independent verification**, checked out `feat/T-010-template-store` directly rather than trusting the implementation's self-report: re-ran `just fmt`/`just lint`/`just test` on the branch — clean, 6/6 new integration tests in `tests/template.rs`, 5/5 new unit tests in `render.rs`, 1/1 new CLI unit test in `control.rs`, 51 tests total, no regressions. Diffed the branch against `main` (`git diff main...HEAD --stat`): exactly the migration, the five `src/template/*.rs` files, `src/lib.rs`'s one-line registration, `src/bin/control.rs`, `tests/template.rs`, and the three docs files — nothing else. Line-by-line compared the migration's `CREATE TABLE` against DESIGN.md §4.4 — verbatim match, including the deliberate no-`tenant_id`/no-`REFERENCES`/no-status-column omissions (decision 1). Independently provisioned a fresh tenant (`t010review`) and ran the full CLI walkthrough by hand — `approve` → `outcome=created`; `show`/`list` round-trip every field; `render` with `--var name=Jordan --var "balance=£120.00"` printed `Hi Jordan, your balance is £120.00.` exactly; a repeat `approve` exited non-zero ("already approved; approve a new version instead"); `platform_audit` held exactly one `created` and one `rejected` `template.approve` row for that tenant. Cleaned up the review tenant afterward via `docker exec` (the earlier host-`psql` cleanup script that had hung this session pointed at exactly this DB-connectivity issue, not at anything in this ticket's own code).
+
+Project-wide search (`grep -rn template`) found no stale reference this branch should have updated — every hit outside the new files is in `PLAN.md`/`AGENTS.md`/`DESIGN.md`/`tickets/README.md`/`T-011`, all still accurate; `T-011`'s Description was re-checked explicitly (see the impact sweep above).
+
+| id | severity | class | disposition | description | evidence | suggestion |
+|---|---|---|---|---|---|---|
+| F1 | non-blocking | design | noted | `approve_template_inner`'s check-then-insert (`repo::find` then, only if `None`, `repo::insert`) is not atomic: two concurrent `approve` calls for the same `(template_id, version, locale)` could both pass the existence check, and the loser's `INSERT` would then fail on the primary-key constraint as a raw `ApproveError::Database` — skipping the `rejected`-audit branch entirely, so that attempt would write **no** `platform_audit` row at all, contradicting decision 6's "every approve call, including a rejected one, writes exactly one row" | `src/template/approve.rs`, `approve_template_inner` | Same check-then-act shape already exists in `producer::register::register_producer_inner` (`find_by_name` then `insert`) and `tenant_config::configure::set_tenant_config_inner`, neither previously flagged across the T-005/T-007/T-009 reviews — this is an established, accepted risk tolerance for a single-operator CLI with no concurrent-caller expectation, not a new gap T-010 introduced. Not worth a dedicated ticket for one ticket's instance of a pattern that already exists three times; revisit only if/when this CLI ever gains a concurrent-caller story |
+
+Disposition summary: 1 noted (F1). No blocking findings.
+
+cost: estimated M, actual M
 
 ## History
 
@@ -342,3 +361,4 @@ User-facing surface: the new `messgr-control template` subcommands.
 - 2026-08-31 — TO DO → READY: plan complete
 - 2026-08-31 — READY → IN DEVELOPMENT: picked up
 - 2026-08-31 — IN DEVELOPMENT → IN REVIEW: acceptance green
+- 2026-08-31 — IN REVIEW → DONE: review clean: 1 noted (F1); no blocking findings
