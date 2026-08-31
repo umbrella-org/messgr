@@ -65,7 +65,7 @@ Last updated: 2026-08-31
 | T-006 | mTLS identity resolution: client cert to producer_cert to tenant/producer identity | yes — merged to main (PR #6, c15d237) |
 | T-007 | tenant_config table + typed config loading | yes — merged to main (PR #9, 6e4bba4) — merged ahead of this review's completion; F1's fix landed in a separate direct … |
 | T-008 | Per-customer DEK lifecycle: customer_dek, LRU cache, pre-provisioning, HMAC pepper | yes — merged to main (PR #10, 73d6fa4) |
-| T-009 | Ledger + outbox schema: comms_request, outbox, comms_event, idempotency | no — publish-gated |
+| T-009 | Ledger + outbox schema: comms_request, outbox, comms_event, idempotency | yes — merged to main (PR #11, 65c5e70) |
 
 ## DROPPED
 

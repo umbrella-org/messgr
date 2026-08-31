@@ -338,5 +338,5 @@ cost: estimated L, actual M — the confirmed decision to ship schema-only (no R
 - 2026-08-31 — TO DO → READY: plan complete
 - 2026-08-31 — READY → IN DEVELOPMENT: picked up
 - 2026-08-31 — IN DEVELOPMENT → IN REVIEW: acceptance green
-- 2026-08-31 — IN REVIEW → DONE: review clean; 1 noted (F1); no blocking findings
 - 2026-08-31 — IN REVIEW → DONE: review clean: 1 noted (F1); no blocking findings
+- 2026-08-31 — merged to main (PR #11, 65c5e70)
