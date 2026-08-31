@@ -1,16 +1,16 @@
 # Graph Report - messgr  (2026-08-31)
 
 ## Corpus Check
-- 60 files · ~84,518 words
+- 60 files · ~84,604 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 655 nodes · 1001 edges · 40 communities (39 shown, 1 thin omitted)
+- 604 nodes · 953 edges · 35 communities (31 shown, 4 thin omitted)
 - Extraction: 96% EXTRACTED · 4% INFERRED · 0% AMBIGUOUS · INFERRED: 42 edges (avg confidence: 0.8)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `a9f836a6`
+- Built from commit: `43eb61bd`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -19,8 +19,8 @@
 - Releasing messgr
 - messgr — Design
 - Tasks
-- KeyStoreError
-- register.rs
+- Profile
+- producer.rs
 - provision_tenant
 - Tasks
 - PLAN.md — provisional ticket list for building DESIGN.md
@@ -37,48 +37,43 @@
 - Brine
 - `tickets/` — the feature flow
 - vault.rs
-- producer.rs
+- resolve_producer
 - record
 - messgr
-- Profile
-- T-007 — tenant_config table + typed config loading
-- T-008 — Per-customer DEK lifecycle: customer_dek, LRU cache, pre-provisioning, HMAC pepper
-- T-009 — Ledger + outbox schema: comms_request, outbox, comms_event, idempotency
-- T-010 — Template store: immutable versioned templates, approval metadata, render path
-- T-011 — messgr-ingest: POST /comms, idempotency replay, ledger + outbox write, encryption
+- producer/dev_pki.rs
+- ClientError
+- Result
+- VaultClient
 - cert_repo.rs
-- T-012 — Sender trait + first SMS provider adapter + provider_config
-- T-013 — Minimal dispatcher: per-channel claim loop, LISTEN/NOTIFY wakeup, comms_event write
-- T-014 — Partition lifecycle: create-ahead, move to slow tablespace, detach + drop
 
 ## God Nodes (most connected - your core abstractions)
-1. `Profile` - 25 edges
-2. `PLAN.md — provisional ticket list for building DESIGN.md` - 24 edges
-3. `register_producer()` - 22 edges
+1. `PLAN.md — provisional ticket list for building DESIGN.md` - 24 edges
+2. `register_producer()` - 22 edges
+3. `Profile` - 21 edges
 4. `provision_tenant()` - 20 edges
-5. `KeyStoreError` - 18 edges
-6. `messgr — Design` - 17 edges
+5. `messgr — Design` - 17 edges
+6. `KeyStoreError` - 15 edges
 7. `VaultKeyStore` - 15 edges
 8. `disable_producer()` - 15 edges
 9. `list_producers()` - 15 edges
 10. `provision_test_tenant()` - 15 edges
 
 ## Surprising Connections (you probably didn't know these)
-- `disable_keeps_the_cert_mapping_and_is_idempotent()` --calls--> `disable_producer()`  [INFERRED]
-  tests/producer.rs → src/producer/register.rs
-- `idempotent_reregistration_does_not_silently_reenable_a_disabled_producer()` --calls--> `disable_producer()`  [INFERRED]
-  tests/producer.rs → src/producer/register.rs
-- `register_and_disable_against_an_unknown_tenant_slug_are_rejected_and_audited()` --calls--> `disable_producer()`  [INFERRED]
-  tests/producer.rs → src/producer/register.rs
-- `resolve_producer_distinguishes_disabled_from_unknown()` --calls--> `disable_producer()`  [INFERRED]
-  tests/producer.rs → src/producer/register.rs
-- `cert_subject_already_bound_to_a_different_tenant_is_rejected()` --calls--> `list_producers()`  [INFERRED]
-  tests/producer.rs → src/producer/register.rs
+- `idempotent_reprovision_does_not_mint_a_second_secret_id()` --calls--> `provision_tenant()`  [INFERRED]
+  tests/tenant_vault.rs → src/tenant/provision.rs
+- `tenant_a_vault_credentials_cannot_read_tenant_bs_dek()` --calls--> `provision_tenant()`  [INFERRED]
+  tests/tenant_vault.rs → src/tenant/provision.rs
+- `idempotent_reregistration_does_not_silently_reenable_a_disabled_producer()` --calls--> `resolve_producer()`  [INFERRED]
+  tests/producer.rs → src/producer/resolve.rs
+- `resolve_producer_distinguishes_disabled_from_unknown()` --calls--> `resolve_producer()`  [INFERRED]
+  tests/producer.rs → src/producer/resolve.rs
+- `resolve_producer_never_leaks_across_tenants()` --calls--> `resolve_producer()`  [INFERRED]
+  tests/producer.rs → src/producer/resolve.rs
 
 ## Import Cycles
 - None detected.
 
-## Communities (40 total, 1 thin omitted)
+## Communities (35 total, 4 thin omitted)
 
 ### Community 0 - "AGENTS.md"
 Cohesion: 0.05
@@ -96,13 +91,13 @@ Nodes (49): 10. Delivery receipts, 11.1 Authentication and authorization, 11.2 Q
 Cohesion: 0.09
 Nodes (21): 0. Feature branch (mandatory), Acceptance test, Confirmed design decisions (do not deviate without asking), Description, Docs update (mandatory when user-facing), Finish (mandatory), History, Implementation Plan (+13 more)
 
-### Community 4 - "KeyStoreError"
-Cohesion: 0.10
-Nodes (27): Send, assert_tls_outside_dev(), connect_client(), Dek, guard_allows_https_address_outside_dev(), guard_allows_non_https_address_in_dev(), guard_panics_for_non_https_address_outside_dev(), KeyStore (+19 more)
+### Community 4 - "Profile"
+Cohesion: 0.05
+Nodes (41): Send, Config, Self, String, assert_tls_outside_dev(), connect_client(), Dek, guard_allows_https_address_outside_dev() (+33 more)
 
-### Community 5 - "register.rs"
-Cohesion: 0.15
-Nodes (25): main(), audit(), disable_producer(), disable_producer_inner(), DisableOutcome, list_producers(), ProducerError, register_producer_inner() (+17 more)
+### Community 5 - "producer.rs"
+Cohesion: 0.16
+Nodes (43): main(), audit(), disable_producer(), disable_producer_inner(), DisableOutcome, list_producers(), ProducerError, register_producer() (+35 more)
 
 ### Community 6 - "provision_tenant"
 Cohesion: 0.15
@@ -137,8 +132,8 @@ Cohesion: 0.11
 Nodes (18): 0. Feature branch (mandatory), Acceptance test, Confirmed design decisions (do not deviate without asking), Description, Docs update (mandatory when user-facing), family: T-NNN             # optional single umbrella id (same child); groups pickup order on the board; NEVER gates; omit if none, Finish (mandatory), History (+10 more)
 
 ### Community 14 - "tenant_vault.rs"
-Cohesion: 0.18
-Nodes (14): create_dek_and_unwrap_dek_round_trip(), create_dek_returns_a_distinct_key_each_call(), store(), unwrap_dek_rejects_a_ciphertext_from_a_different_mount(), control_database_url(), drop_test_tenant(), idempotent_reprovision_does_not_mint_a_second_secret_id(), login_as_tenant() (+6 more)
+Cohesion: 0.36
+Nodes (10): control_database_url(), drop_test_tenant(), idempotent_reprovision_does_not_mint_a_second_secret_id(), login_as_tenant(), provisioning_creates_a_mount_scoped_to_exactly_this_tenant(), PgPool, String, VaultClient (+2 more)
 
 ### Community 15 - "db.rs"
 Cohesion: 0.20
@@ -168,73 +163,41 @@ Nodes (11): 0. Child-projects (the multi-project model), 1. Status is the direct
 Cohesion: 0.35
 Nodes (10): ensure_transit_mount(), policy_hcl_for(), policy_hcl_names_exactly_the_two_keystore_paths(), provision_vault(), ClientError, Option, Result, String (+2 more)
 
-### Community 22 - "producer.rs"
-Cohesion: 0.17
-Nodes (34): register_producer(), ResolutionError, resolve_producer(), ResolvedIdentity, Display, Error, Formatter, From (+26 more)
+### Community 22 - "resolve_producer"
+Cohesion: 0.19
+Nodes (12): ResolutionError, resolve_producer(), ResolvedIdentity, Display, Error, Formatter, From, Option (+4 more)
 
 ### Community 23 - "record"
 Cohesion: 0.36
 Nodes (7): record(), Error, Option, PgPool, Result, Uuid, Value
 
-### Community 30 - "Profile"
-Cohesion: 0.16
-Nodes (17): GenerateCertificateResponse, Config, Self, String, assert_dev_profile(), bootstrap(), ensure_pki_mount(), guard_allows_dev() (+9 more)
-
-### Community 31 - "T-007 — tenant_config table + typed config loading"
-Cohesion: 0.29
-Nodes (6): Description, History, Implementation Plan, Outcome, Review, T-007 — tenant_config table + typed config loading
-
-### Community 32 - "T-008 — Per-customer DEK lifecycle: customer_dek, LRU cache, pre-provisioning, HMAC pepper"
-Cohesion: 0.29
-Nodes (6): Description, History, Implementation Plan, Outcome, Review, T-008 — Per-customer DEK lifecycle: customer_dek, LRU cache, pre-provisioning, HMAC pepper
-
-### Community 33 - "T-009 — Ledger + outbox schema: comms_request, outbox, comms_event, idempotency"
-Cohesion: 0.29
-Nodes (6): Description, History, Implementation Plan, Outcome, Review, T-009 — Ledger + outbox schema: comms_request, outbox, comms_event, idempotency
-
-### Community 34 - "T-010 — Template store: immutable versioned templates, approval metadata, render path"
-Cohesion: 0.29
-Nodes (6): Description, History, Implementation Plan, Outcome, Review, T-010 — Template store: immutable versioned templates, approval metadata, render path
-
-### Community 35 - "T-011 — messgr-ingest: POST /comms, idempotency replay, ledger + outbox write, encryption"
-Cohesion: 0.29
-Nodes (6): Description, History, Implementation Plan, Outcome, Review, T-011 — messgr-ingest: POST /comms, idempotency replay, ledger + outbox write, encryption
+### Community 30 - "producer/dev_pki.rs"
+Cohesion: 0.37
+Nodes (13): ClientError, GenerateCertificateResponse, KeyStoreError, Profile, Result, assert_dev_profile(), bootstrap(), ensure_pki_mount() (+5 more)
 
 ### Community 36 - "cert_repo.rs"
 Cohesion: 0.36
 Nodes (11): delete_producer_cert(), find_producer_cert(), ProducerCert, Error, Option, PgPool, Result, String (+3 more)
 
-### Community 37 - "T-012 — Sender trait + first SMS provider adapter + provider_config"
-Cohesion: 0.29
-Nodes (6): Description, History, Implementation Plan, Outcome, Review, T-012 — Sender trait + first SMS provider adapter + provider_config
-
-### Community 38 - "T-013 — Minimal dispatcher: per-channel claim loop, LISTEN/NOTIFY wakeup, comms_event write"
-Cohesion: 0.29
-Nodes (6): Description, History, Implementation Plan, Outcome, Review, T-013 — Minimal dispatcher: per-channel claim loop, LISTEN/NOTIFY wakeup, comms_event write
-
-### Community 39 - "T-014 — Partition lifecycle: create-ahead, move to slow tablespace, detach + drop"
-Cohesion: 0.29
-Nodes (6): Description, History, Implementation Plan, Outcome, Review, T-014 — Partition lifecycle: create-ahead, move to slow tablespace, detach + drop
-
 ## Knowledge Gaps
-- **293 isolated node(s):** `messgr`, `When to use`, `Install & register`, `Project configuration (in `pickle.toml` + the `AGENTS.md` marker block)`, `The rules (summary — full text in `resources/tickets-README.md`)` (+288 more)
+- **253 isolated node(s):** `Board rule`, `Corrections on the record`, `Hard invariants`, `Project configuration`, `Reading order` (+248 more)
   These have ≤1 connection - possible missing edges or undocumented components.
-- **1 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **4 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `Profile` connect `Profile` to `KeyStoreError`, `register.rs`, `provision_tenant`, `tenant_vault.rs`, `db.rs`, `producer.rs`?**
-  _High betweenness centrality (0.051) - this node is a cross-community bridge._
-- **Why does `KeyStoreError` connect `KeyStoreError` to `vault.rs`, `Profile`, `provision_tenant`?**
-  _High betweenness centrality (0.024) - this node is a cross-community bridge._
-- **Why does `provision_tenant()` connect `provision_tenant` to `tenant_vault.rs`, `register.rs`, `Profile`, `producer.rs`?**
-  _High betweenness centrality (0.023) - this node is a cross-community bridge._
+- **Why does `Profile` connect `Profile` to `producer.rs`, `provision_tenant`, `db.rs`?**
+  _High betweenness centrality (0.048) - this node is a cross-community bridge._
+- **Why does `provision_tenant()` connect `provision_tenant` to `Profile`, `producer.rs`, `tenant_vault.rs`?**
+  _High betweenness centrality (0.026) - this node is a cross-community bridge._
+- **Why does `KeyStoreError` connect `Profile` to `vault.rs`, `provision_tenant`?**
+  _High betweenness centrality (0.025) - this node is a cross-community bridge._
 - **Are the 13 inferred relationships involving `register_producer()` (e.g. with `main()` and `connect_tenant_pool()`) actually correct?**
   _`register_producer()` has 13 INFERRED edges - model-reasoned connections that need verification._
 - **Are the 11 inferred relationships involving `provision_tenant()` (e.g. with `main()` and `connect_tenant_pool()`) actually correct?**
   _`provision_tenant()` has 11 INFERRED edges - model-reasoned connections that need verification._
-- **What connects `messgr`, `When to use`, `Install & register` to the rest of the system?**
-  _293 weakly-connected nodes found - possible documentation gaps or missing edges._
+- **What connects `Board rule`, `Corrections on the record`, `Hard invariants` to the rest of the system?**
+  _253 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `AGENTS.md` be split into smaller, more focused modules?**
   _Cohesion score 0.04878048780487805 - nodes in this community are weakly interconnected._

@@ -1,11 +1,37 @@
-// TODO: replace this placeholder chapter — it is a starting point, not content.
-//
-// This file opens at level 0 (`= Introduction`), not level 1 (`== Introduction`),
-// even though it is a chapter, not a book. The book master includes it with
-// leveloffset=+1, so it renders one level down from how it opens here; opening it
-// one level too high fails `snowball check`'s section-ordering validation on the
-// including document ("section title out of sequence"), not on this file in
-// isolation. Leave the offset relationship alone when you replace the content.
 = Introduction
 
-{product} does ... (replace this with a one-sentence summary of what it does).
+{product} is a centralized communications orchestration system and audit ledger for a bank:
+every SMS, email, and WhatsApp message sent to a customer passes through it, is recorded, and
+is queryable through one API and UI. The full design — data model, gate chain, PII handling,
+tenancy — is recorded in `DESIGN.md` at the root of the repository; this manual documents how
+to operate what has actually been built against that design.
+
+== Status
+
+{product} is a design-driven, from-scratch rebuild. Feature work is tracked as tickets against
+`DESIGN.md` (see `tickets/BOARD.md`), and only part of the design is implemented so far. The
+only binary that exists today is `messgr-control`, the control-plane CLI: tenant provisioning,
+the producer registry, and a dev-only internal PKI for issuing test client certificates. There
+is no send path, dispatcher, or query API/UI yet — those are later tickets.
+
+== Tenancy
+
+{product} is multi-tenant: each tenant gets its own database, and a shared control database
+holds the tenant registry, producer-certificate mappings, and platform audit trail.
+`messgr-control provision` creates a tenant's database, applies its migrations, registers it in
+the control database, and provisions the tenant's own HashiCorp Vault Transit mount, key, ACL
+policy, and AppRole for per-customer data-encryption keys.
+
+== Producers
+
+A *producer* is an upstream system — fraud alerts, statements, onboarding, and so on — allowed
+to submit messages on behalf of a tenant. `messgr-control producer` registers, disables, and
+lists producers for a tenant. Producer and tenant identity on the send path are resolved from
+the client's mTLS certificate, never from the request body; `messgr::producer::resolve` is the
+shared resolution layer, though no TLS-terminating ingest binary calls it yet.
+
+== Dev PKI
+
+`messgr-control dev-pki` issues test client certificates from a Vault-backed PKI secrets engine,
+so producer mTLS resolution can be exercised locally without a real certificate authority. It
+refuses to run outside a `dev` profile.
