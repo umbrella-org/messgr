@@ -65,7 +65,7 @@ Last updated: 2026-08-31
 | T-005 | Producer registry: producer table, repository, and register/disable operations | yes — merged to main (PR #5, 12ec4581) |
 | T-006 | mTLS identity resolution: client cert to producer_cert to tenant/producer identity | yes — merged to main (PR #6, c15d237) |
 | T-007 | tenant_config table + typed config loading | yes — merged to main (PR #9, 6e4bba4) — merged ahead of this review's completion; F1's fix landed in a separate direct … |
-| T-008 | Per-customer DEK lifecycle: customer_dek, LRU cache, pre-provisioning, HMAC pepper | no — publish-gated |
+| T-008 | Per-customer DEK lifecycle: customer_dek, LRU cache, pre-provisioning, HMAC pepper | yes — merged to main (PR #10, 73d6fa4) |
 
 ## DROPPED
 

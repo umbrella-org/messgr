@@ -1100,3 +1100,4 @@ Implementation Plan is still empty, pending refinement). Nothing to patch.
 - 2026-08-31 — READY → IN DEVELOPMENT: picked up
 - 2026-08-31 — IN DEVELOPMENT → IN REVIEW: acceptance green
 - 2026-08-31 — IN REVIEW → DONE: review clean: 2 fixed inline (F1, F2), 1 noted (F3); no blocking findings
+- 2026-08-31 — merged to main (PR #10, 73d6fa4)
