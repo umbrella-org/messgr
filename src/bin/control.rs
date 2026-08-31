@@ -8,6 +8,10 @@ use messgr::db;
 use messgr::keystore::VaultKeyStore;
 use messgr::producer::dev_pki;
 use messgr::producer::register::{disable_producer, list_producers, register_producer};
+use messgr::template::approve::{
+    approve_template, list_template_versions, render_preview, show_template,
+};
+use messgr::template::model::channel;
 use messgr::tenant::provision::provision_tenant;
 use messgr::tenant_config::configure::{set_tenant_config, show_tenant_config};
 use messgr::tenant_config::model::{TenantConfigInput, verification_mode};
@@ -68,6 +72,15 @@ enum Command {
     CustomerDek {
         #[command(subcommand)]
         command: CustomerDekCommand,
+    },
+    /// Approve, show, list, or render versioned message templates (DESIGN.md
+    /// §4.4, T-010). Templates are immutable once approved — a content
+    /// change is always a new `--version`. The audited, role-gated admin
+    /// approval workflow (§11.1, §11.3) is `T-042`'s scope; this is the bare
+    /// operator-driven surface, matching `producer`/`tenant-config`.
+    Template {
+        #[command(subcommand)]
+        command: TemplateCommand,
     },
 }
 
@@ -180,6 +193,79 @@ enum CustomerDekCommand {
         /// Operator identity recorded on the platform_audit row.
         #[arg(long)]
         actor: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum TemplateCommand {
+    /// Approve a new template version. Rejected if this exact
+    /// `(template_id, version, locale)` has already been approved — bump
+    /// `--version` instead (T-010 decision 5).
+    Approve {
+        #[arg(long = "tenant-slug")]
+        tenant_slug: String,
+        #[arg(long = "template-id")]
+        template_id: String,
+        #[arg(long)]
+        version: i32,
+        /// `sms`, `email`, or `whatsapp` (DESIGN.md §4.4).
+        #[arg(
+            long,
+            value_parser = clap::builder::PossibleValuesParser::new([
+                channel::SMS,
+                channel::EMAIL,
+                channel::WHATSAPP,
+            ])
+        )]
+        channel: String,
+        #[arg(long)]
+        locale: String,
+        /// Path to a file holding the template body — bodies can be
+        /// multi-line, so this is a file rather than an inline flag.
+        #[arg(long = "body-file")]
+        body_file: PathBuf,
+        /// Operator identity recorded on the platform_audit row and stamped
+        /// as `approved_by`.
+        #[arg(long)]
+        actor: String,
+    },
+    /// Show one approved template version/locale, or report that none
+    /// exists.
+    Show {
+        #[arg(long = "tenant-slug")]
+        tenant_slug: String,
+        #[arg(long = "template-id")]
+        template_id: String,
+        #[arg(long)]
+        version: i32,
+        #[arg(long)]
+        locale: String,
+    },
+    /// List every approved version/locale for a `template_id`.
+    List {
+        #[arg(long = "tenant-slug")]
+        tenant_slug: String,
+        #[arg(long = "template-id")]
+        template_id: String,
+    },
+    /// Render one approved template version/locale against `--var key=value`
+    /// pairs, printing the rendered body. A key referenced by the body but
+    /// not supplied here is a hard error (T-010 decision 3).
+    Render {
+        #[arg(long = "tenant-slug")]
+        tenant_slug: String,
+        #[arg(long = "template-id")]
+        template_id: String,
+        #[arg(long)]
+        version: i32,
+        #[arg(long)]
+        locale: String,
+        /// Repeatable `key=value` pair. For more than one, invoke this
+        /// command directly with repeated `--var` flags — the `justfile`
+        /// recipe only takes one (the same `customer-dek-pre-provision`
+        /// limitation as `--customer-id`).
+        #[arg(long = "var")]
+        var: Vec<String>,
     },
 }
 
@@ -469,6 +555,150 @@ async fn main() {
                 }
             }
         }
+        // No Vault client is connected here either — none of the four arms
+        // touches Transit or AppRole.
+        Command::Template { command } => match command {
+            TemplateCommand::Approve {
+                tenant_slug,
+                template_id,
+                version,
+                channel,
+                locale,
+                body_file,
+                actor,
+            } => {
+                let body = std::fs::read_to_string(&body_file).unwrap_or_else(|err| {
+                    panic!("failed to read {body_file:?}: {err}")
+                });
+
+                let outcome = approve_template(
+                    &control_pool,
+                    &config.control_database_url,
+                    &tenant_slug,
+                    &template_id,
+                    version,
+                    &channel,
+                    &locale,
+                    &body,
+                    config.profile,
+                    &actor,
+                )
+                .await
+                .unwrap_or_else(|err| {
+                    panic!(
+                        "failed to approve template {template_id:?} version {version} \
+                         locale {locale:?} for tenant {tenant_slug:?}: {err}"
+                    )
+                });
+
+                println!("outcome={}", outcome.outcome);
+            }
+            TemplateCommand::Show {
+                tenant_slug,
+                template_id,
+                version,
+                locale,
+            } => {
+                let template = show_template(
+                    &control_pool,
+                    &config.control_database_url,
+                    &tenant_slug,
+                    &template_id,
+                    version,
+                    &locale,
+                    config.profile,
+                )
+                .await
+                .unwrap_or_else(|err| {
+                    panic!(
+                        "failed to show template {template_id:?} version {version} \
+                         locale {locale:?} for tenant {tenant_slug:?}: {err}"
+                    )
+                });
+
+                match template {
+                    Some(template) => println!(
+                        "template_id={} version={} channel={} locale={} approved_by={} \
+                         approved_at={} body={:?}",
+                        template.template_id,
+                        template.version,
+                        template.channel,
+                        template.locale,
+                        template.approved_by,
+                        template.approved_at,
+                        template.body,
+                    ),
+                    None => println!("not found"),
+                }
+            }
+            TemplateCommand::List {
+                tenant_slug,
+                template_id,
+            } => {
+                let templates = list_template_versions(
+                    &control_pool,
+                    &config.control_database_url,
+                    &tenant_slug,
+                    &template_id,
+                    config.profile,
+                )
+                .await
+                .unwrap_or_else(|err| {
+                    panic!(
+                        "failed to list template versions for {template_id:?} tenant \
+                         {tenant_slug:?}: {err}"
+                    )
+                });
+
+                for template in templates {
+                    println!(
+                        "version={} locale={} channel={} approved_by={} approved_at={}",
+                        template.version,
+                        template.locale,
+                        template.channel,
+                        template.approved_by,
+                        template.approved_at,
+                    );
+                }
+            }
+            TemplateCommand::Render {
+                tenant_slug,
+                template_id,
+                version,
+                locale,
+                var,
+            } => {
+                let variables: std::collections::HashMap<String, String> = var
+                    .iter()
+                    .map(|pair| {
+                        pair.split_once('=').unwrap_or_else(|| {
+                            panic!("--var {pair:?} must be in key=value form")
+                        })
+                    })
+                    .map(|(key, value)| (key.to_string(), value.to_string()))
+                    .collect();
+
+                let rendered = render_preview(
+                    &control_pool,
+                    &config.control_database_url,
+                    &tenant_slug,
+                    &template_id,
+                    version,
+                    &locale,
+                    &variables,
+                    config.profile,
+                )
+                .await
+                .unwrap_or_else(|err| {
+                    panic!(
+                        "failed to render template {template_id:?} version {version} \
+                         locale {locale:?} for tenant {tenant_slug:?}: {err}"
+                    )
+                });
+
+                println!("{rendered}");
+            }
+        },
     }
 }
 
@@ -543,6 +773,34 @@ mod tests {
         assert!(
             result.is_err(),
             "an invalid --verification-mode value must fail to parse"
+        );
+    }
+
+    #[test]
+    fn template_approve_rejects_an_invalid_channel() {
+        let result = Cli::try_parse_from([
+            "messgr-control",
+            "template",
+            "approve",
+            "--tenant-slug",
+            "acme",
+            "--template-id",
+            "balance-alert",
+            "--version",
+            "1",
+            "--channel",
+            "carrier-pigeon",
+            "--locale",
+            "en-GB",
+            "--body-file",
+            "/tmp/does-not-need-to-exist.txt",
+            "--actor",
+            "operator@example.com",
+        ]);
+
+        assert!(
+            result.is_err(),
+            "an invalid --channel value must fail to parse"
         );
     }
 }

@@ -360,6 +360,8 @@ CREATE TABLE template (
 
 Templates are **immutable once approved**; changes create a new version. Every `comms_request` pins `template_version`, so "what exactly did we send this customer in 2021" remains answerable years later. Approval metadata is captured because a bank will need to show who signed off on customer-facing content.
 
+**Render syntax (T-010): literal `{{key}}` placeholders**, substituted by plain string scanning against a caller-supplied variable map — no templating engine. Whitespace inside the braces is trimmed, so `{{ key }}` matches too. A key the body references but the caller doesn't supply is a hard render error, never sent as literal `{{key}}` text or blanked out — a bank must not send customer-facing content with an unsubstituted placeholder. A variable the caller supplies but the body never references is silently ignored.
+
 ### 4.5 Keys, erasure, and campaign rollup
 
 ```sql
