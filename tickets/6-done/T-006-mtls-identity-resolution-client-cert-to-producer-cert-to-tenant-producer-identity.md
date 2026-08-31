@@ -409,4 +409,4 @@ cost: estimated M, actual M
 - 2026-08-30 — IN DEVELOPMENT → IN REVIEW: acceptance green
 - 2026-08-30 — plan amended inline: corrected decision 6 and Task 5's dev-PKI prose (F1: named the wrong Vault-connect call; F2: omitted the mount-TTL and mount-race fixes the acceptance test's own failures forced) to match what actually shipped
 - 2026-08-30 — IN REVIEW → DONE: review clean; F1/F2 fixed inline (plan prose), F3 noted; no blocking findings
-- 2026-08-30 — IN REVIEW → DONE: review clean: F1/F2 fixed inline, F3 noted
+- 2026-08-31 — merged to main (PR #6, c15d237)
