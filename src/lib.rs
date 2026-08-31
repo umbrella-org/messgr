@@ -1,4 +1,5 @@
 pub mod config;
+pub mod customer_dek;
 pub mod db;
 pub mod key_cache;
 pub mod keystore;
