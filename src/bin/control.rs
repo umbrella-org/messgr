@@ -352,7 +352,7 @@ async fn main() {
                     default_locale,
                     schedule_horizon_days,
                     quota_day_boundary_tz,
-                    verification_mode,
+                    verification_mode: verification_mode_arg,
                     staleness_max_age_seconds,
                     actor,
                 } => {
@@ -362,10 +362,8 @@ async fn main() {
                         default_locale,
                         schedule_horizon_days: schedule_horizon_days.unwrap_or(90),
                         quota_day_boundary_tz,
-                        verification_mode: verification_mode.unwrap_or_else(|| {
-                            messgr::tenant_config::model::verification_mode::OBSERVE
-                                .to_string()
-                        }),
+                        verification_mode: verification_mode_arg
+                            .unwrap_or_else(|| verification_mode::OBSERVE.to_string()),
                         staleness_max_age: sqlx::postgres::types::PgInterval {
                             months: 0,
                             days: 0,
