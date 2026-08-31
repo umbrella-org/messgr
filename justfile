@@ -177,10 +177,24 @@ template-render tenant_slug template_id version locale var:
 dev-pki-bootstrap:
     cargo run --bin {{bin}} -- dev-pki bootstrap
 
-# Issue a dev leaf certificate for mTLS testing
+# Issue a dev leaf certificate for mTLS testing (a producer/client identity)
 [group('control-plane')]
 dev-pki-issue-cert common_name out_dir:
     cargo run --bin {{bin}} -- dev-pki issue-cert --common-name {{common_name}} --out-dir {{out_dir}}
+
+# Issue a dev leaf certificate for a server identity (e.g. messgr-ingest) --
+# unlike dev-pki-issue-cert, this sets a DNS SAN so hostname verification
+# succeeds against it
+[group('control-plane')]
+dev-pki-issue-server-cert common_name out_dir:
+    cargo run --bin {{bin}} -- dev-pki issue-cert --common-name {{common_name}} --out-dir {{out_dir}} --server
+
+# Run messgr-ingest (POST /comms). Requires INGEST_TLS_CERT_FILE,
+# INGEST_TLS_KEY_FILE, and INGEST_TLS_CLIENT_CA_FILE to be set (see
+# .env.example); INGEST_LISTEN_ADDR defaults to 0.0.0.0:8443.
+[group('control-plane')]
+ingest-run:
+    cargo run --bin messgr-ingest
 
 # Validate the AsciiDoc manual via snowball (broken includes/xrefs fail the check)
 [group('docs')]

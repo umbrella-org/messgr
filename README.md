@@ -152,10 +152,10 @@ role-gated admin approval workflow (§11.1, §11.3) is `T-042`'s scope, not this
 ### mTLS resolution and dev PKI
 
 `messgr::producer::resolve::resolve_producer(control_pool, cert_subject)` (DESIGN.md §4.9, §11.1,
-T-006) is the shared layer future ingest binaries compose to turn a client certificate's subject
-into `(tenant_id, producer_id)`: one control-database query, distinguishing an unknown cert from a
-known-but-disabled one. No TLS-terminating binary exists yet to call it — that is `T-011`
-(`messgr-ingest`).
+T-006) is the shared layer that turns a client certificate's subject into `(tenant_id,
+producer_id)`: one control-database query, distinguishing an unknown cert from a
+known-but-disabled one. `messgr-ingest` (`T-011`, below) is the binary that terminates the mTLS
+handshake and calls it.
 
 To exercise it locally without a real CA:
 
@@ -169,6 +169,48 @@ openssl x509 -noout -subject -in /tmp/cert/cert.pem      # CN=fraud-alerts.inter
 dev-mode Vault `docker compose up -d` already starts) and refuse to run outside
 `MESSGR_PROFILE=dev` — minting a trusted producer client certificate ad hoc must never be
 reachable against a real Vault.
+
+### messgr-ingest: `POST /comms`
+
+`messgr-ingest` (`T-011`) is the first end-to-end send path: it terminates mTLS itself, resolves
+the client certificate to a producer via `resolve_producer` above, and writes the ledger +
+outbox row in one transaction, encrypting the destination and rendered template body under the
+customer's DEK (DESIGN.md §4.1–§4.3, §7, §11). No gate chain and no resolution-at-ingest exist
+yet (`T-016`/`T-017`), so the request body must supply `customer_id` and `destination` directly,
+and `class = "auth"` is rejected outright (`422`) — OTP has its own path (`sms-sender`/`otp-api`,
+`T-047`), never this one.
+
+Requires four env vars, no defaults (`.env.example`): `INGEST_LISTEN_ADDR` (default
+`0.0.0.0:8443` if unset), `INGEST_TLS_CERT_FILE`, `INGEST_TLS_KEY_FILE`,
+`INGEST_TLS_CLIENT_CA_FILE`. Locally, mint a server identity with a DNS SAN (unlike a producer's
+own client certificate, a server's certificate *is* hostname-checked by whatever connects to
+it):
+
+```
+just dev-pki-bootstrap
+just dev-pki-issue-server-cert messgr-ingest.internal /tmp/ingest-cert   # writes cert.pem, key.pem, ca.pem
+
+INGEST_TLS_CERT_FILE=/tmp/ingest-cert/cert.pem \
+INGEST_TLS_KEY_FILE=/tmp/ingest-cert/key.pem \
+INGEST_TLS_CLIENT_CA_FILE=/tmp/ingest-cert/ca.pem \
+just ingest-run
+```
+
+Then, with a tenant provisioned, configured, and a producer registered (sections above) and a
+client certificate issued for it via `just dev-pki-issue-cert` (no `--server` — a producer's
+certificate is never hostname-checked):
+
+```
+curl -sk --cert /tmp/producer-cert/cert.pem --key /tmp/producer-cert/key.pem \
+  --cacert /tmp/ingest-cert/ca.pem --resolve messgr-ingest.internal:8443:127.0.0.1 \
+  -H "Idempotency-Key: demo-1" -H "Content-Type: application/json" \
+  -d '{"customer_id":"<uuid>","destination":"+15550100","channel":"sms","class":"transactional","template_id":"balance-alert","template_version":1,"variables":{"name":"Jordan","balance":"100.00"}}' \
+  https://messgr-ingest.internal:8443/comms
+```
+
+Returns `201` with a `comms_request_id` on the first call; repeating it with the same
+`Idempotency-Key` returns `200` with the same id rather than sending twice. Nothing dispatches
+the row yet — `final_status` stays `NULL` until `T-013`'s dispatcher exists.
 
 `docker compose up -d` also starts a dev-mode Vault (`VAULT_ADDR=http://localhost:8200`,
 `VAULT_TOKEN=messgr-dev-root-token`, both in `.env.example`) backing the `KeyStore` trait
@@ -188,4 +230,6 @@ Design-driven, from-scratch rebuild in progress against `DESIGN.md`. Ticket `T-0
 establishes the control database, tenant registry, and this provisioning CLI — the
 foundation everything else (producer identity, the ledger, dispatchers) builds on.
 
- Only binary that exists so far is messgr-control — run directly with cargo run --bin messgr-control -- <subcommand>.
+ Two binaries exist so far: messgr-control (provisioning/admin CLI, run with cargo run --bin
+messgr-control -- <subcommand>) and messgr-ingest (T-011's POST /comms service, run with
+cargo run --bin messgr-ingest or `just ingest-run`).
