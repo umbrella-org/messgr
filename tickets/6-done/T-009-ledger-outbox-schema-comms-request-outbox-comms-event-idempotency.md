@@ -311,7 +311,26 @@ editing the design to match the code.
 
 ## Review
 
-<!-- empty until IN REVIEW -->
+- [x] Implementation audit — acceptance test re-run, tasks & criteria verified (step 2)
+- [x] Quality audit (step 3)
+- [x] Consistency audit (step 4)
+- [x] Documentation audit — coverage, whole-tree sweep, docs build clean (step 4a) — no user-facing surface shipped; confirmed no README/justfile/DESIGN.md/CHANGELOG.md edit is needed or missing
+- [x] Docs-readability pass — skipped: no `.md`/`.adoc` files changed by this ticket
+- [x] Findings recorded with severity, class, and disposition; disposition summary + cost line below (step 5)
+- [x] Ticket moved to `tickets/6-done/` or `tickets/5-rework/`; `## History` appended (step 6)
+- [x] Remaining-tickets impact sweep done (step 8) — re-read T-010, T-011, T-014 (the only `1-to-do/` tickets depending on T-009); all three describe the schema only in generic terms ("the comms_request column", "ledger/outbox schema", "the partitioned comms_request table") that still hold exactly as shipped. No patch needed.
+
+**Independent verification**, checked out `feat/T-009-ledger-outbox-schema` directly rather than trusting the implementation's self-report: re-ran `just fmt`/`just lint`/`just test` on the branch — clean, 6/6 in `tests/ledger_outbox_schema.rs`, 51 tests total, no regressions. Diffed the branch against `main` (`git diff main...feat/T-009-ledger-outbox-schema --stat`): exactly the two files the plan's two tasks name, nothing else. Line-by-line compared the migration's `CREATE TABLE` statements against DESIGN.md §4.1–§4.4 — verbatim match, including the deliberate omissions (no `tenant_id` on `outbox`/`comms_event`/`idempotency`, no `REFERENCES` clause anywhere). Independently provisioned a fresh tenant (`t009rvw2`) and confirmed via `psql`/`docker exec`: `comms_request` and `comms_event` each show exactly 2 partitions (`<table>_2026_08`, `<table>_2026_09`); `outbox` and `idempotency` are plain tables. Grepped `src/`/`tests/` project-wide: no Rust module references these tables outside the new test file, confirming decision 5 (no model/repo/CLI) was honoured. Cleaned up the review tenant afterward.
+
+Project-wide search for `comms_request`/`outbox`/`comms_event`/`idempotency` found no stale reference this branch should have updated — every hit outside the new files is in `PLAN.md`/`AGENTS.md`/`DESIGN.md`, all still accurate.
+
+| id | severity | class | disposition | description | evidence | suggestion |
+|---|---|---|---|---|---|---|
+| F1 | non-blocking | test-gap | noted | Task 2 item 1 verifies the next-month bootstrap partition *exists* (`pg_inherits` count), but no test actually inserts a row with `created_at` inside that second partition's range — only the current-month partition is exercised by a real `INSERT`. The month-boundary arithmetic in the migration's `DO` block (`month_start`/`month_end` for `i=1`) is therefore unverified by data, only by catalog metadata. | `tests/ledger_outbox_schema.rs` — `insert_into_a_bootstrapped_partition_round_trips` only inserts at `Utc::now()` | Not worth a dedicated ticket: the boundary math is identical for both loop iterations (same formula, `i` substituted), so a bug there would almost certainly show up as a wrong partition *count* or *range* too, both of which the existing `bootstrap_partitions_exist_for_current_and_next_month` test and the manual `\d+` walkthrough already cover. Fold into T-014's own test suite when it's refined, since T-014 owns ongoing partition creation and will need this coverage anyway. |
+
+Disposition summary: 1 noted (F1). No blocking findings.
+
+cost: estimated L, actual M — the confirmed decision to ship schema-only (no Rust model/repo/CLI, since nothing consumes these tables until T-011/T-013) cut this from the multi-session effort the original `L` grade assumed to about one session.
 
 ## History
 
@@ -319,3 +338,5 @@ editing the design to match the code.
 - 2026-08-31 — TO DO → READY: plan complete
 - 2026-08-31 — READY → IN DEVELOPMENT: picked up
 - 2026-08-31 — IN DEVELOPMENT → IN REVIEW: acceptance green
+- 2026-08-31 — IN REVIEW → DONE: review clean; 1 noted (F1); no blocking findings
+- 2026-08-31 — IN REVIEW → DONE: review clean: 1 noted (F1); no blocking findings
