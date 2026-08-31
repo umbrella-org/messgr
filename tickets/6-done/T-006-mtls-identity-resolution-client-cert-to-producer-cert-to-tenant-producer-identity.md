@@ -140,10 +140,12 @@ approval. Ticket and board bookkeeping is committed on `main`, never on this bra
    introduces it** — the same non-negotiable pattern as `MockProvider` (§11.1) and dev-mode Vault
    (§7.6, `keystore::assert_tls_outside_dev`). A `dev-pki` subcommand reachable against a real
    Vault would let an operator mint a trusted producer client certificate outside the
-   registration/audit path entirely. Reuse `keystore::connect_client(profile)` (already asserts
-   TLS outside dev) for the Vault connection, and add an explicit `profile.is_dev()` check on
-   top of it before either `dev-pki` subcommand does anything — the TLS guard alone does not
-   stop a non-dev *dev-mode* Vault instance someone left reachable.
+   registration/audit path entirely. Connect Vault via `VaultKeyStore::connect(profile).client()`
+   (the same call `Command::Provision` already uses — `keystore::connect_client` itself is
+   `pub(crate)` and unreachable from `src/bin/control.rs`, a separate crate target), and add an
+   explicit `profile.is_dev()` check on top of it before either `dev-pki` subcommand does
+   anything — the TLS guard alone does not stop a non-dev *dev-mode* Vault instance someone left
+   reachable. *(Corrected during review — T-006/F1: originally named `connect_client` directly.)*
 
 7. **Dev PKI mount and role are cluster-wide, one-time bootstrap state, not per-tenant** — unlike
    the per-tenant Transit mounts T-004 creates. One `pki` mount, one root CA, one role
@@ -228,6 +230,21 @@ Add `src/producer/dev_pki.rs`, registered as `pub mod dev_pki;`:
   `pki::cert::generate(client, "pki", "producer-dev", Some(builder.common_name(common_name)))`.
 - Reuse `crate::keystore::KeyStoreError` as the error type (it already wraps `ClientError`) rather
   than inventing a third error enum for two functions.
+
+  *(Corrected during review — T-006/F2: two things the sketch above omitted, found by actually
+  running the acceptance test rather than reading the code.)* The mount's own `max_lease_ttl`
+  defaults to Vault's system default (32 days) and caps both the root CA's and every leaf cert's
+  requested TTL — with the root capped to that same ceiling, issuing a leaf even seconds later can
+  ask for a TTL that would outlive the root itself (`cannot satisfy request ... beyond the
+  expiration of the CA certificate`). `ensure_pki_mount` therefore enables the mount with an
+  explicit `max_lease_ttl` of `"87600h"` (10 years, via `EnableEngineRequest`'s `config`), and root
+  generation passes the same `ttl` explicitly. Separately, `"pki"` is one cluster-wide mount name
+  every caller of `bootstrap` shares (unlike `ensure_transit_mount`'s per-tenant paths), so the
+  list-then-enable check is a real TOCTOU race under concurrent `bootstrap` calls (hit while
+  running the two `tests/dev_pki.rs` tests together): `ensure_pki_mount` tolerates the resulting
+  `already in use` `400` as a lost-the-race success rather than a real failure. The equivalent race
+  on root-CA generation (`has_issuer` check, then `cert::ca::generate`) is **not** mitigated the
+  same way — see finding F3 in `## Review`, noted rather than fixed.
 
 #### Task 6 — `messgr-control dev-pki` subcommands
 
@@ -353,7 +370,36 @@ table DESIGN.md documents.
 
 ## Review
 
-<!-- empty until IN REVIEW -->
+Checklist:
+
+- [x] Implementation audit — acceptance test re-run, tasks & criteria verified (step 2)
+- [x] Quality audit (step 3)
+- [x] Consistency audit (step 4)
+- [x] Documentation audit — coverage, whole-tree sweep, docs build clean (step 4a)
+- [x] Docs-readability pass — skipped: no docs-readability reviewer configured in this session
+- [x] Findings recorded with severity, class, and disposition; disposition summary + cost line below (step 5)
+- [x] Ticket moved to `tickets/6-done/` or `tickets/5-rework/`; `## History` appended (step 6)
+- [x] Remaining-tickets impact sweep done (step 8) — no ticket in `1-to-do/`/`2-ready/` references T-006 yet
+- [x] Summary + commit message & MR attributes presented for approval (step 9)
+
+Re-ran the full acceptance test verbatim on `feat/T-006-mtls-identity-resolution`: `just fmt`,
+`just lint` (clean), `just test` (26/26 green across `tests/dev_pki.rs`, `tests/producer.rs`, and
+the rest of the suite), then the full CLI walkthrough independently with a fresh tenant/producer
+(`review-t006`/`review-producer`, not the ones used during implementation): register → issue a
+dev cert via `dev-pki issue-cert` → `openssl x509 -noout -subject` confirmed `CN=review-producer.internal`
+→ disable → `psql` confirmed `producer_cert.enabled = f` immediately (control-first write,
+decision 2). Project-wide `grep` for stale `T-007`/`producer_cert` references found nothing this
+branch introduced; `just docs-check` (snowball) builds clean.
+
+| id | severity | class | disposition | description | evidence | suggestion |
+|---|---|---|---|---|---|---|
+| F1 | non-blocking | stale-xref | fixed inline | Confirmed decision 6's plan prose named `keystore::connect_client(profile)` as the dev-pki CLI's Vault connection call, but `connect_client` is `pub(crate)` and unreachable from `src/bin/control.rs` (a separate crate target) — the shipped code correctly goes through `VaultKeyStore::connect(profile).client()` instead, same as `Command::Provision` | Implementation Plan, confirmed decision 6 (pre-fix); `src/bin/control.rs`'s `Command::DevPki` arm calls `VaultKeyStore::connect` | Corrected the plan prose in place to name the actual call and explain why `connect_client` isn't reachable there |
+| F2 | non-blocking | stale-xref | fixed inline | Task 5's `bootstrap` sketch (`mount::enable(client, "pki", "pki", None)`, a plain `ca::generate` call) omits two things the shipped code needed after two bugs surfaced while running the acceptance test: Vault's default 32-day mount `max_lease_ttl` caps the root CA and can make issuing a leaf even seconds later ask for a TTL past the root's own expiry; and `"pki"` is a cluster-wide mount name every `bootstrap` caller shares, so the list-then-enable check races under concurrent calls (hit running `tests/dev_pki.rs`'s two tests together) | Implementation Plan, Task 5 (pre-fix); `src/producer/dev_pki.rs`'s `PKI_MAX_LEASE_TTL` constant, the `EnableEngineDataConfigBuilder` mount tuning, and `ensure_pki_mount`'s `already in use` tolerance | Corrected the plan prose in place to describe both fixes and why they were needed |
+| F3 | non-blocking | correctness | noted | The root-CA-generation race (`has_issuer` check, then `cert::ca::generate`) is not mitigated the way F2's mount-enable race is — two concurrent `bootstrap` callers that both observe no issuer yet could each generate a root, since Vault's PKI engine allows multiple issuers per mount with no "already exists" error to catch. Didn't reproduce across three test runs in this review, but the guarantee `bootstrap`'s own doc comment states ("never mints a second root CA") isn't actually held under concurrency the way it is for the mount itself | `src/producer/dev_pki.rs`'s `bootstrap`/`has_issuer` (no equivalent of `ensure_pki_mount`'s race tolerance) | A fix mirrors `ensure_pki_mount`'s pattern (re-check `has_issuer` after a failed/redundant generate, or accept a harmless second issuer) — small, but a real code change rather than a prose correction, so left for whoever next touches `dev_pki.rs` rather than fixed during this review |
+
+Disposition summary: 2 fixed inline (F1, F2 — plan prose corrected to match shipped code), 1 noted (F3).
+
+cost: estimated M, actual M
 
 ## History
 
@@ -361,3 +407,6 @@ table DESIGN.md documents.
 - 2026-08-30 — TO DO → READY: plan complete
 - 2026-08-30 — READY → IN DEVELOPMENT: picked up
 - 2026-08-30 — IN DEVELOPMENT → IN REVIEW: acceptance green
+- 2026-08-30 — plan amended inline: corrected decision 6 and Task 5's dev-PKI prose (F1: named the wrong Vault-connect call; F2: omitted the mount-TTL and mount-race fixes the acceptance test's own failures forced) to match what actually shipped
+- 2026-08-30 — IN REVIEW → DONE: review clean; F1/F2 fixed inline (plan prose), F3 noted; no blocking findings
+- 2026-08-30 — IN REVIEW → DONE: review clean: F1/F2 fixed inline, F3 noted
