@@ -13,18 +13,18 @@ Last updated: 2026-08-31
 
 ## IN DEVELOPMENT
 
+### messgr (0/1)
+
+| id | title | depends-on |
+|---|---|---|
+
+## IN REVIEW
+
 ### messgr (1/1)
 
 | id | title | depends-on |
 |---|---|---|
 | T-011 | messgr-ingest: POST /comms, idempotency replay, ledger + outbox write, encryption | [T-006, T-008, T-009, T-010] |
-
-## IN REVIEW
-
-### messgr (0/1)
-
-| id | title | depends-on |
-|---|---|---|
 
 ## REWORK
 
