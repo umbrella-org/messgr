@@ -13,10 +13,11 @@ Last updated: 2026-08-31
 
 ## IN DEVELOPMENT
 
-### messgr (0/1)
+### messgr (1/1)
 
 | id | title | depends-on |
 |---|---|---|
+| T-010 | Template store: immutable versioned templates, approval metadata, render path | [T-009] |
 
 ## IN REVIEW
 
@@ -38,7 +39,6 @@ Last updated: 2026-08-31
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
-| T-010 | Template store: immutable versioned templates, approval metadata, render path | medium | medium | M | [T-009] | T-007 |
 
 ## TO DO (impact order, per child)
 
