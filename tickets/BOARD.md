@@ -65,7 +65,7 @@ Last updated: 2026-08-31
 | T-007 | tenant_config table + typed config loading | yes — merged to main (PR #9, 6e4bba4) — merged ahead of this review's completion; F1's fix landed in a separate direct … |
 | T-008 | Per-customer DEK lifecycle: customer_dek, LRU cache, pre-provisioning, HMAC pepper | yes — merged to main (PR #10, 73d6fa4) |
 | T-009 | Ledger + outbox schema: comms_request, outbox, comms_event, idempotency | yes — merged to main (PR #11, 65c5e70) |
-| T-010 | Template store: immutable versioned templates, approval metadata, render path | no — publish-gated |
+| T-010 | Template store: immutable versioned templates, approval metadata, render path | yes — merged to main (PR #12, 3eed5a9) |
 
 ## DROPPED
 
