@@ -45,7 +45,8 @@ const PKI_MAX_LEASE_TTL: &str = "87600h";
 /// callers (e.g. this crate's own test binary, where every `#[tokio::test]`
 /// shares one dev Vault) would otherwise each pass the check before either
 /// finishes generating, minting two roots.
-static ROOT_CA_BOOTSTRAP_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+static ROOT_CA_BOOTSTRAP_LOCK: tokio::sync::Mutex<()> =
+    tokio::sync::Mutex::const_new(());
 
 /// Panics outside `profile = dev` — see the module doc comment. Kept as a
 /// free function (not inlined into every call site) so both `bootstrap` and
