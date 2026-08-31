@@ -95,6 +95,31 @@ are optional, defaulting to DESIGN.md's own `90`/`observe`. This ticket (T-007) 
 table to the six fields above — `display_name` and the `oidc_*` columns from DESIGN.md's full
 §4.10 table arrive later, when a ticket actually reads them (OIDC: T-035).
 
+### Customer DEK pre-provisioning
+
+```
+cargo run --bin messgr-control -- customer-dek pre-provision --tenant-slug acme \
+    --customer-id 11111111-1111-1111-1111-111111111111 \
+    --customer-id 22222222-2222-2222-2222-222222222222 \
+    --actor operator@example.com
+```
+
+`customer-dek pre-provision` (DESIGN.md §7.6) ensures each given customer id has a `customer_dek`
+row, minting a fresh Vault Transit datakey for whichever don't — so a sealed or unreachable Vault
+doesn't block a new customer's first message. It takes **explicit customer ids, not a live
+customer base**: the customer projection (DESIGN.md §4.6) doesn't exist yet, so there is nothing
+for this command to query on its own. Wiring an automatic trigger from the real customer base is
+deferred to whichever future ticket has one.
+
+Safe to re-run: identical ids report `already_existed` instead of minting a second DEK. The same
+lifecycle also has a lazy path (`customer_dek::lifecycle::get_or_create_dek`) that future
+ingest/dispatcher code calls on a customer's first message — no CLI surface for that path, since
+it has no operator action to trigger.
+
+Every payload/destination this eventually encrypts uses a **bounded, zeroizing, TTL cache**
+(`key_cache::KeyCache`) of unwrapped DEKs, so steady-state sending makes no Vault calls once a
+customer's DEK is warm — Vault is only on the path for a cache miss or pre-provisioning.
+
 ### mTLS resolution and dev PKI
 
 `messgr::producer::resolve::resolve_producer(control_pool, cert_subject)` (DESIGN.md §4.9, §11.1,

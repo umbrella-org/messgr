@@ -1,8 +1,12 @@
 pub mod config;
+pub mod customer_dek;
 pub mod db;
+pub mod destination_hmac;
+pub mod key_cache;
 pub mod keystore;
 pub mod platform_audit;
 pub mod producer;
 pub mod profile;
 pub mod tenant;
 pub mod tenant_config;
+pub mod tenant_pepper;

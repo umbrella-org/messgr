@@ -10,7 +10,9 @@ use async_trait::async_trait;
 use base64::Engine as _;
 use url::Url;
 use vaultrs::api::transit::requests::DataKeyType;
-use vaultrs::client::{VaultClient, VaultClientSettings, VaultClientSettingsBuilder};
+use vaultrs::client::{
+    Client as _, VaultClient, VaultClientSettings, VaultClientSettingsBuilder,
+};
 use vaultrs::transit::{data, generate};
 use zeroize::Zeroizing;
 
@@ -101,6 +103,62 @@ impl VaultKeyStore {
     pub fn client(&self) -> &VaultClient {
         &self.client
     }
+
+    /// Authenticates as a tenant's own AppRole instead of the admin
+    /// `VAULT_TOKEN` — the seam T-004 deliberately left unwired (PLAN.md's
+    /// note under build step 0). Reads `VAULT_ROLE_ID`/`VAULT_WRAPPED_SECRET_ID`
+    /// from the environment: the RoleID and the response-wrapped SecretID a
+    /// tenant's dispatcher deployment received once, out of band, at deploy
+    /// time (§7.6). The wrapping token is single-use — calling this twice
+    /// against the same environment fails the second time (already
+    /// unwrapped elsewhere), which is correct for a one-shot startup login,
+    /// not a reusable connector.
+    pub async fn connect_as_tenant(profile: Profile) -> Result<Self, KeyStoreError> {
+        dotenvy::dotenv().ok();
+        let role_id = std::env::var("VAULT_ROLE_ID")
+            .unwrap_or_else(|_| panic!("VAULT_ROLE_ID must be set"));
+        let wrapped_secret_id = std::env::var("VAULT_WRAPPED_SECRET_ID")
+            .unwrap_or_else(|_| panic!("VAULT_WRAPPED_SECRET_ID must be set"));
+        Self::login_as_tenant(&role_id, &wrapped_secret_id, profile).await
+    }
+
+    /// Explicit-argument version of `connect_as_tenant` — `pub` (not
+    /// `pub(crate)`) so integration tests can drive it directly without
+    /// mutating process-global environment variables, the exact hazard
+    /// `assert_tls_outside_dev`'s own free-function split already avoids.
+    ///
+    /// Unwraps using a client whose own token *is* the wrapped SecretID
+    /// (`sys::wrapping::unwrap(client, None)`) rather than an admin client
+    /// with the wrapped value in the request body (`Some(&wrapped)`) — the
+    /// latter is what T-004's test used, only because a test conveniently
+    /// already had an admin client sitting around; a real tenant runtime
+    /// process must not need an admin token to log in as itself.
+    pub async fn login_as_tenant(
+        role_id: &str,
+        wrapped_secret_id: &str,
+        profile: Profile,
+    ) -> Result<Self, KeyStoreError> {
+        let mut wrapping_settings = connect_settings(profile)?;
+        wrapping_settings.token = wrapped_secret_id.to_string();
+        let wrapping_client = VaultClient::new(wrapping_settings)?;
+
+        let secret_id: vaultrs::api::auth::approle::responses::GenerateNewSecretIDResponse =
+            vaultrs::sys::wrapping::unwrap(&wrapping_client, None).await?;
+
+        let auth = vaultrs::auth::approle::login(
+            &wrapping_client,
+            "approle",
+            role_id,
+            &secret_id.secret_id,
+        )
+        .await?;
+
+        let mut scoped_settings = wrapping_client.settings().clone();
+        scoped_settings.token = auth.client_token;
+        Ok(Self {
+            client: VaultClient::new(scoped_settings)?,
+        })
+    }
 }
 
 /// Builds a Vault client from `VAULT_ADDR`/`VAULT_TOKEN` (`vaultrs`'s own
@@ -108,7 +166,9 @@ impl VaultKeyStore {
 /// `VaultKeyStore::connect` (data-plane, tenant-scoped calls) and
 /// `tenant::vault`'s admin provisioning path (T-004) — one way this
 /// codebase turns environment variables into a Vault client, not two.
-pub(crate) fn connect_client(profile: Profile) -> Result<VaultClient, KeyStoreError> {
+pub(crate) fn connect_settings(
+    profile: Profile,
+) -> Result<VaultClientSettings, KeyStoreError> {
     dotenvy::dotenv().ok();
 
     let settings: VaultClientSettings = VaultClientSettingsBuilder::default()
@@ -117,7 +177,11 @@ pub(crate) fn connect_client(profile: Profile) -> Result<VaultClient, KeyStoreEr
 
     assert_tls_outside_dev(&settings.address, profile);
 
-    Ok(VaultClient::new(settings)?)
+    Ok(settings)
+}
+
+pub(crate) fn connect_client(profile: Profile) -> Result<VaultClient, KeyStoreError> {
+    Ok(VaultClient::new(connect_settings(profile)?)?)
 }
 
 #[async_trait]

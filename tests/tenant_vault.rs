@@ -4,13 +4,12 @@
 //! (already covered by tests/keystore.rs) — on any other tenant's mount.
 
 use uuid::Uuid;
-use vaultrs::api::auth::approle::responses::GenerateNewSecretIDResponse;
 use vaultrs::api::transit::requests::DataKeyType;
-use vaultrs::client::{Client as _, VaultClient};
+use vaultrs::client::VaultClient;
 use vaultrs::transit::generate;
 
 use messgr::db;
-use messgr::keystore::VaultKeyStore;
+use messgr::keystore::{KeyStore, VaultKeyStore};
 use messgr::profile::Profile;
 use messgr::tenant::provision::provision_tenant;
 use messgr::tenant::vault as tenant_vault;
@@ -87,21 +86,6 @@ async fn drop_test_tenant(
     }
 }
 
-/// Logs in as `role_id`/`secret_id` and returns a Vault client scoped to
-/// whatever policies that AppRole login grants — not the admin client.
-async fn login_as_tenant(
-    admin: &VaultClient,
-    role_id: &str,
-    secret_id: &str,
-) -> VaultClient {
-    let auth = vaultrs::auth::approle::login(admin, "approle", role_id, secret_id)
-        .await
-        .expect("AppRole login failed");
-    let mut settings = admin.settings().clone();
-    settings.token = auth.client_token;
-    VaultClient::new(settings).expect("building scoped client failed")
-}
-
 #[tokio::test]
 async fn tenant_a_vault_credentials_cannot_read_tenant_bs_dek() {
     let control_url = control_database_url();
@@ -146,22 +130,19 @@ async fn tenant_a_vault_credentials_cannot_read_tenant_bs_dek() {
     let wrapped_a = outcome_a
         .vault_wrapped_secret_id
         .expect("a fresh provision must mint a SecretID");
-    let secret_id_a: GenerateNewSecretIDResponse =
-        vaultrs::sys::wrapping::unwrap(admin.client(), Some(&wrapped_a))
-            .await
-            .expect("unwrapping tenant A's SecretID failed");
 
-    let scoped_a = login_as_tenant(
-        admin.client(),
+    let scoped_a = VaultKeyStore::login_as_tenant(
         &outcome_a.vault_role_id,
-        &secret_id_a.secret_id,
+        &wrapped_a,
+        Profile::Dev,
     )
-    .await;
+    .await
+    .expect("AppRole login must succeed with a freshly minted RoleID/wrapped SecretID");
 
     // Tenant A, on its own mount: must succeed.
     let own_mount = format!("transit/{slug_a}");
     generate::data_key(
-        &scoped_a,
+        scoped_a.client(),
         &own_mount,
         "messgr-dek",
         DataKeyType::Plaintext,
@@ -174,7 +155,7 @@ async fn tenant_a_vault_credentials_cannot_read_tenant_bs_dek() {
     // Vault's ACL (permission denied), not merely fail for some other reason.
     let other_mount = format!("transit/{slug_b}");
     let result = generate::data_key(
-        &scoped_a,
+        scoped_a.client(),
         &other_mount,
         "messgr-dek",
         DataKeyType::Plaintext,
@@ -292,4 +273,52 @@ async fn provisioning_creates_a_mount_scoped_to_exactly_this_tenant() {
             .await;
     let _ =
         vaultrs::sys::mount::disable(admin.client(), &format!("transit/{slug}")).await;
+}
+
+#[tokio::test]
+async fn login_as_tenant_authenticates_and_can_create_a_dek_on_its_own_mount() {
+    // Proves T-008's promoted production AppRole-login path actually
+    // authenticates end to end — not just that the isolation assertions
+    // above still pass with a differently-constructed scoped client.
+    let control_url = control_database_url();
+    let control_pool = db::connect(&control_url, 5)
+        .await
+        .expect("failed to connect to control database");
+    let admin = VaultKeyStore::connect(Profile::Dev)
+        .expect("connecting to dev-mode Vault failed");
+
+    let slug = unique_name("test_tenant_approle_login");
+    let db_name = unique_name("test_db_approle_login");
+
+    let outcome = provision_tenant(
+        &control_pool,
+        &control_url,
+        &slug,
+        "eu",
+        &db_name,
+        Profile::Dev,
+        "test-actor",
+        admin.client(),
+    )
+    .await
+    .expect("provisioning failed");
+    let wrapped = outcome
+        .vault_wrapped_secret_id
+        .expect("a fresh provision must mint a SecretID");
+
+    let scoped = VaultKeyStore::login_as_tenant(
+        &outcome.vault_role_id,
+        &wrapped,
+        Profile::Dev,
+    )
+    .await
+    .expect("AppRole login must succeed with a freshly minted RoleID/wrapped SecretID");
+
+    let dek = scoped
+        .create_dek(&format!("transit/{slug}"))
+        .await
+        .expect("a tenant-scoped login must be able to create a DEK on its own mount");
+    assert_eq!(dek.plaintext.len(), 32);
+
+    drop_test_tenant(&control_pool, admin.client(), &db_name, &slug).await;
 }

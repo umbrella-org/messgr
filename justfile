@@ -134,6 +134,15 @@ tenant-config-set tenant retention_years default_timezone default_locale quota_d
 tenant-config-show tenant_slug:
     cargo run --bin {{bin}} -- tenant-config show --tenant-slug {{tenant_slug}}
 
+# Pre-provision a customer_dek row for one customer id. For more than one
+# id, invoke `cargo run --bin messgr-control -- customer-dek pre-provision`
+# directly with repeated --customer-id flags — just's fixed positional
+# parameters don't fit a variable-length list.
+[group('control-plane')]
+customer-dek-pre-provision tenant_slug customer_id actor:
+    cargo run --bin {{bin}} -- customer-dek pre-provision --tenant-slug {{tenant_slug}} \
+        --customer-id {{customer_id}} --actor {{actor}}
+
 # Bootstrap the dev-only internal PKI (Vault-backed)
 [group('control-plane')]
 dev-pki-bootstrap:

@@ -10,7 +10,7 @@ pub async fn find_by_slug(
 ) -> Result<Option<Tenant>, sqlx::Error> {
     sqlx::query_as::<_, Tenant>(
         r#"
-        SELECT id, slug, region, database_name, vault_mount, vault_role_id, webhook_token, status, created_at
+        SELECT id, slug, region, database_name, vault_mount, vault_role_id, vault_pepper_wrapped, webhook_token, status, created_at
         FROM tenant
         WHERE slug = $1
         "#,
@@ -30,6 +30,23 @@ pub async fn record_vault_role_id(
 ) -> Result<(), sqlx::Error> {
     sqlx::query("UPDATE tenant SET vault_role_id = $1 WHERE id = $2")
         .bind(vault_role_id)
+        .bind(tenant_id)
+        .execute(pool)
+        .await
+        .map(|_| ())
+}
+
+/// Persists the wrapped ciphertext of the tenant's HMAC pepper
+/// (`tenant.vault_pepper_wrapped`, T-008). The plaintext is never
+/// persisted — only handed to callers to cache in-process
+/// (`key_cache::KeyCache`).
+pub async fn record_vault_pepper_wrapped(
+    pool: &PgPool,
+    tenant_id: Uuid,
+    vault_pepper_wrapped: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE tenant SET vault_pepper_wrapped = $1 WHERE id = $2")
+        .bind(vault_pepper_wrapped)
         .bind(tenant_id)
         .execute(pool)
         .await

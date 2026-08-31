@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand};
 
 use messgr::config::Config;
+use messgr::customer_dek::lifecycle::pre_provision_for_tenant;
 use messgr::db;
 use messgr::keystore::VaultKeyStore;
 use messgr::producer::dev_pki;
@@ -62,6 +63,11 @@ enum Command {
     TenantConfig {
         #[command(subcommand)]
         command: TenantConfigCommand,
+    },
+    /// Per-customer DEK operations (DESIGN.md §7.6, T-008).
+    CustomerDek {
+        #[command(subcommand)]
+        command: CustomerDekCommand,
     },
 }
 
@@ -158,6 +164,22 @@ enum TenantConfigCommand {
     Show {
         #[arg(long = "tenant-slug")]
         tenant_slug: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum CustomerDekCommand {
+    /// Ensures each given customer id has a customer_dek row, creating one
+    /// where missing (DESIGN.md §7.6). Caller-supplied ids only — the
+    /// customer projection doesn't exist yet (see T-008's Description).
+    PreProvision {
+        #[arg(long = "tenant-slug")]
+        tenant_slug: String,
+        #[arg(long = "customer-id", required = true)]
+        customer_id: Vec<uuid::Uuid>,
+        /// Operator identity recorded on the platform_audit row.
+        #[arg(long)]
+        actor: String,
     },
 }
 
@@ -413,6 +435,37 @@ async fn main() {
                         ),
                         None => println!("not configured"),
                     }
+                }
+            }
+        }
+        Command::CustomerDek { command } => {
+            let vault_keystore = VaultKeyStore::connect(config.profile).expect(
+                "failed to connect to Vault (has VAULT_ADDR/VAULT_TOKEN been set?)",
+            );
+            match command {
+                CustomerDekCommand::PreProvision {
+                    tenant_slug,
+                    customer_id,
+                    actor,
+                } => {
+                    let outcome = pre_provision_for_tenant(
+                        &control_pool,
+                        &config.control_database_url,
+                        &tenant_slug,
+                        &vault_keystore,
+                        &customer_id,
+                        config.profile,
+                        &actor,
+                    )
+                    .await
+                    .unwrap_or_else(|err| {
+                        panic!("failed to pre-provision DEKs for tenant {tenant_slug:?}: {err}")
+                    });
+
+                    println!(
+                        "created={} already_existed={}",
+                        outcome.created, outcome.already_existed
+                    );
                 }
             }
         }
