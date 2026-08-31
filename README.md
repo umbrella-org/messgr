@@ -120,6 +120,35 @@ Every payload/destination this eventually encrypts uses a **bounded, zeroizing, 
 (`key_cache::KeyCache`) of unwrapped DEKs, so steady-state sending makes no Vault calls once a
 customer's DEK is warm — Vault is only on the path for a cache miss or pre-provisioning.
 
+### Templates
+
+```
+cargo run --bin messgr-control -- template approve --tenant-slug acme \
+    --template-id balance-alert --version 1 --channel sms --locale en-GB \
+    --body-file body.txt --actor operator@example.com
+cargo run --bin messgr-control -- template show --tenant-slug acme \
+    --template-id balance-alert --version 1 --locale en-GB
+cargo run --bin messgr-control -- template list --tenant-slug acme --template-id balance-alert
+cargo run --bin messgr-control -- template render --tenant-slug acme \
+    --template-id balance-alert --version 1 --locale en-GB \
+    --var name=Jordan --var "balance=£120.00"
+```
+
+`template` (DESIGN.md §4.4) rows are **immutable once approved** — `approve` is the only way a
+row is ever written, and it always stamps `approved_by`/`approved_at`; there is no draft state
+and no `update`. A content change is always a new `--version`: re-`approve`-ing an existing
+`(template_id, version, locale)` is rejected, not overwritten.
+
+Bodies use literal `{{key}}` placeholders (whitespace inside the braces is trimmed, so
+`{{ key }}` also matches), substituted by `template render` or, once it exists, `T-011`'s ingest
+path. A key the body references but the caller doesn't supply is a **hard render error** — a
+bank must not send customer-facing content with an unsubstituted placeholder — never sent as
+literal `{{key}}` text or blanked out.
+
+Every `approve` attempt, including a rejected one, writes a `template.approve` `platform_audit`
+row. This is the bare operator-driven surface, matching `producer`/`tenant-config` — the audited,
+role-gated admin approval workflow (§11.1, §11.3) is `T-042`'s scope, not this one's.
+
 ### mTLS resolution and dev PKI
 
 `messgr::producer::resolve::resolve_producer(control_pool, cert_subject)` (DESIGN.md §4.9, §11.1,

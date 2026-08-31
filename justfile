@@ -143,6 +143,35 @@ customer-dek-pre-provision tenant_slug customer_id actor:
     cargo run --bin {{bin}} -- customer-dek pre-provision --tenant-slug {{tenant_slug}} \
         --customer-id {{customer_id}} --actor {{actor}}
 
+# Approve a new template version (rejected if this template_id/version/locale
+# is already approved -- bump version instead)
+[group('control-plane')]
+template-approve tenant_slug template_id version channel locale body_file actor:
+    cargo run --bin {{bin}} -- template approve --tenant-slug {{tenant_slug}} \
+        --template-id {{template_id}} --version {{version}} --channel {{channel}} \
+        --locale {{locale}} --body-file {{body_file}} --actor {{actor}}
+
+# Show one approved template version/locale
+[group('control-plane')]
+template-show tenant_slug template_id version locale:
+    cargo run --bin {{bin}} -- template show --tenant-slug {{tenant_slug}} \
+        --template-id {{template_id}} --version {{version}} --locale {{locale}}
+
+# List every approved version/locale for a template_id
+[group('control-plane')]
+template-list tenant_slug template_id:
+    cargo run --bin {{bin}} -- template list --tenant-slug {{tenant_slug}} --template-id {{template_id}}
+
+# Render one approved template version/locale against a single key=value
+# variable. For more than one, invoke `cargo run --bin messgr-control --
+# template render` directly with repeated --var flags -- just's fixed
+# positional parameters don't fit a variable-length list (the same
+# customer-dek-pre-provision limitation).
+[group('control-plane')]
+template-render tenant_slug template_id version locale var:
+    cargo run --bin {{bin}} -- template render --tenant-slug {{tenant_slug}} \
+        --template-id {{template_id}} --version {{version}} --locale {{locale}} --var {{var}}
+
 # Bootstrap the dev-only internal PKI (Vault-backed)
 [group('control-plane')]
 dev-pki-bootstrap:
