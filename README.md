@@ -71,6 +71,30 @@ producer is a safe no-op.
 Every `register`/`disable` attempt, including a rejected one, writes a `platform_audit` row
 (`producer.register` / `producer.disable`).
 
+### Tenant configuration
+
+```
+cargo run --bin messgr-control -- tenant-config set --tenant-slug acme \
+    --retention-years 7 --default-timezone Europe/London --default-locale en-GB \
+    --quota-day-boundary-tz Europe/London --staleness-max-age-seconds 7200 \
+    --actor operator@example.com
+cargo run --bin messgr-control -- tenant-config show --tenant-slug acme
+```
+
+`tenant_config` (DESIGN.md §4.10) is a **singleton per tenant** — one row, in the tenant's own
+database, enforced by a `singleton boolean PRIMARY KEY` rather than by convention. A freshly
+provisioned tenant has **no** row until `tenant-config set` is run at least once: several of
+these fields (the staleness bound, the quota day-boundary timezone) have no platform-wide
+default DESIGN.md has settled on, so there is nothing sensible to seed automatically.
+
+`set` is a plain upsert — safe to re-run. Its outcome is `created` (no prior row), `updated`
+(a prior row existed with different values), or `idempotent` (identical to what's already
+there); every call, including a rejected one against an unknown `--tenant-slug`, writes a
+`tenant_config.set` `platform_audit` row. `--schedule-horizon-days` and `--verification-mode`
+are optional, defaulting to DESIGN.md's own `90`/`observe`. This ticket (T-007) scopes the
+table to the six fields above — `display_name` and the `oidc_*` columns from DESIGN.md's full
+§4.10 table arrive later, when a ticket actually reads them (OIDC: T-035).
+
 ### mTLS resolution and dev PKI
 
 `messgr::producer::resolve::resolve_producer(control_pool, cert_subject)` (DESIGN.md §4.9, §11.1,
