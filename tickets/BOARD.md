@@ -38,6 +38,7 @@ Last updated: 2026-08-31
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
+| T-007 | tenant_config table + typed config loading | medium | low | S | [T-001] |  |
 
 ## TO DO (impact order, per child)
 
@@ -45,7 +46,6 @@ Last updated: 2026-08-31
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
-| T-007 | tenant_config table + typed config loading | medium | low | S | [T-001] |  |
 | T-008 | Per-customer DEK lifecycle: customer_dek, LRU cache, pre-provisioning, HMAC pepper | critical | high | L | [T-003, T-004] | T-007 |
 | T-009 | Ledger + outbox schema: comms_request, outbox, comms_event, idempotency | critical | high | L | [T-005, T-007] | T-007 |
 | T-011 | messgr-ingest: POST /comms, idempotency replay, ledger + outbox write, encryption | critical | high | L | [T-006, T-008, T-009, T-010] | T-007 |
