@@ -38,6 +38,7 @@ Last updated: 2026-08-31
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
+| T-009 | Ledger + outbox schema: comms_request, outbox, comms_event, idempotency | critical | high | L | [T-005, T-007] | T-007 |
 
 ## TO DO (impact order, per child)
 
@@ -45,7 +46,6 @@ Last updated: 2026-08-31
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
-| T-009 | Ledger + outbox schema: comms_request, outbox, comms_event, idempotency | critical | high | L | [T-005, T-007] | T-007 |
 | T-011 | messgr-ingest: POST /comms, idempotency replay, ledger + outbox write, encryption | critical | high | L | [T-006, T-008, T-009, T-010] | T-007 |
 | T-013 | Minimal dispatcher: per-channel claim loop, LISTEN/NOTIFY wakeup, comms_event write | critical | high | L | [T-011, T-012] | T-007 |
 | T-012 | Sender trait + first SMS provider adapter + provider_config | high | medium | M | [T-007] | T-007 |
