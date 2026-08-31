@@ -13,10 +13,11 @@ Last updated: 2026-08-31
 
 ## IN DEVELOPMENT
 
-### messgr (0/1)
+### messgr (1/1)
 
 | id | title | depends-on |
 |---|---|---|
+| T-011 | messgr-ingest: POST /comms, idempotency replay, ledger + outbox write, encryption | [T-006, T-008, T-009, T-010] |
 
 ## IN REVIEW
 
@@ -38,7 +39,6 @@ Last updated: 2026-08-31
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
-| T-011 | messgr-ingest: POST /comms, idempotency replay, ledger + outbox write, encryption | critical | high | L | [T-006, T-008, T-009, T-010] | T-007 |
 
 ## TO DO (impact order, per child)
 

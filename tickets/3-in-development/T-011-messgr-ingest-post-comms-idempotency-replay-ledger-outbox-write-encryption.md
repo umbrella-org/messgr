@@ -372,3 +372,4 @@ and raise it rather than editing the design to match the code (matches `T-009`'s
 
 - 2026-08-31 — created (TO DO). source: chat: filed from PLAN.md's build-step-2 decomposition; member of the step-2 ticket family (umbrella T-007)
 - 2026-08-31 — TO DO → READY: plan complete
+- 2026-08-31 — READY → IN DEVELOPMENT: picked up
