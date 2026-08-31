@@ -5,3 +5,4 @@ pub mod platform_audit;
 pub mod producer;
 pub mod profile;
 pub mod tenant;
+pub mod tenant_config;
