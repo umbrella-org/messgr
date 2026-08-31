@@ -38,6 +38,15 @@ const DEV_ROLE: &str = "producer-dev";
 /// CA's own long TTL (set at generation, below) actually take effect.
 const PKI_MAX_LEASE_TTL: &str = "87600h";
 
+/// Serializes the has-issuer-check + generate-root section of `bootstrap`.
+/// Unlike `ensure_pki_mount`'s race (caught via Vault's "already in use"
+/// error), Vault has no such rejection for a second root CA — it mints one
+/// on every `generate` call, no questions asked. Concurrent `bootstrap`
+/// callers (e.g. this crate's own test binary, where every `#[tokio::test]`
+/// shares one dev Vault) would otherwise each pass the check before either
+/// finishes generating, minting two roots.
+static ROOT_CA_BOOTSTRAP_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 /// Panics outside `profile = dev` — see the module doc comment. Kept as a
 /// free function (not inlined into every call site) so both `bootstrap` and
 /// `issue_cert` apply it identically and neither can be added later without
@@ -62,10 +71,13 @@ pub async fn bootstrap(
 
     ensure_pki_mount(client).await?;
 
-    if !has_issuer(client).await? {
-        let mut opts = GenerateRootRequest::builder();
-        opts.common_name("messgr dev root").ttl(PKI_MAX_LEASE_TTL);
-        cert::ca::generate(client, PKI_MOUNT, "internal", Some(&mut opts)).await?;
+    {
+        let _guard = ROOT_CA_BOOTSTRAP_LOCK.lock().await;
+        if !has_issuer(client).await? {
+            let mut opts = GenerateRootRequest::builder();
+            opts.common_name("messgr dev root").ttl(PKI_MAX_LEASE_TTL);
+            cert::ca::generate(client, PKI_MOUNT, "internal", Some(&mut opts)).await?;
+        }
     }
 
     // `cert_subject` values are opaque identifiers (e.g. `CN=fraud-alerts.internal`),
