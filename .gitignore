@@ -3,6 +3,9 @@
 /dist
 /target
 
+# scripts/e2e.sh runtime state (certs, pids, logs)
+/.e2e
+
 # Rust
 *.test
 *.out
