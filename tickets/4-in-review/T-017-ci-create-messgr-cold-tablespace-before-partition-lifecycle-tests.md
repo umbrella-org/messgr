@@ -155,3 +155,4 @@ documented behavior, only makes CI actually cover what T-014's own docs already 
 - 2026-09-01 — created (TO DO). source: chat: user reported three failed GitHub Actions runs (33530977868, 33531032733, 33531095818); root-caused to T-014's tablespace-init step missing from ci.yml
 - 2026-09-01 — TO DO → READY: plan complete
 - 2026-09-01 — READY → IN DEVELOPMENT: picked up
+- 2026-09-01 — IN DEVELOPMENT → IN REVIEW: acceptance green (fmt/clippy clean, YAML valid; real CI run pending push)
