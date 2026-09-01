@@ -38,6 +38,7 @@ Last updated: 2026-09-01
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
+| T-013 | Minimal dispatcher: per-channel claim loop, LISTEN/NOTIFY wakeup, comms_event write | critical | high | L | [T-011, T-012] | T-007 |
 
 ## TO DO (impact order, per child)
 
@@ -45,7 +46,6 @@ Last updated: 2026-09-01
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
-| T-013 | Minimal dispatcher: per-channel claim loop, LISTEN/NOTIFY wakeup, comms_event write | critical | high | L | [T-011, T-012] | T-007 |
 | T-014 | Partition lifecycle: create-ahead, move to slow tablespace, detach + drop | medium | medium | M | [T-009] | T-007 |
 
 ## DONE
