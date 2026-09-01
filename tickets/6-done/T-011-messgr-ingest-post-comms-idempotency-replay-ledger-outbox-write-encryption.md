@@ -395,3 +395,4 @@ cost: estimated L, actual L
 - 2026-08-31 — READY → IN DEVELOPMENT: picked up
 - 2026-08-31 — IN DEVELOPMENT → IN REVIEW: acceptance green
 - 2026-09-01 — IN REVIEW → DONE: review clean: 2 fixed inline (F1, F2), 2 noted (F3, F4); no blocking findings
+- 2026-09-01 — merged to main (PR #13, f8fb5e5)
