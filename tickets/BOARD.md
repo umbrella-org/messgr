@@ -13,10 +13,11 @@ Last updated: 2026-09-01
 
 ## IN DEVELOPMENT
 
-### messgr (0/1)
+### messgr (1/1)
 
 | id | title | depends-on |
 |---|---|---|
+| T-015 | Customer projection + resolution at ingest | [] |
 
 ## IN REVIEW
 
@@ -38,7 +39,6 @@ Last updated: 2026-09-01
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
-| T-015 | Customer projection + resolution at ingest | high | high | L | [] |  |
 
 ## TO DO (impact order, per child)
 

@@ -416,3 +416,4 @@ longer mandatory) and its new `422`/`409` error cases.
 
 - 2026-09-01 — created (TO DO). source: chat: build-order step 3 (§14), filed after T-014 (step 2 work) landed.
 - 2026-09-01 — TO DO → READY: plan complete
+- 2026-09-01 — READY → IN DEVELOPMENT: picked up
