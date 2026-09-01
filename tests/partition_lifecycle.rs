@@ -239,6 +239,64 @@ async fn create_ahead_is_idempotent_after_provisioning() {
 }
 
 #[tokio::test]
+async fn the_next_month_bootstrap_partition_accepts_a_real_insert() {
+    // T-009/F1 (review finding) noted that its own bootstrap only ever
+    // verified the next-month partition's *existence* via `pg_inherits`,
+    // never inserted a row into it, and deferred that data-level coverage
+    // to T-014's own test suite -- this closes that gap for the create-ahead
+    // logic this ticket ships.
+    let control_url = control_database_url();
+    let control_pool = db::connect(&control_url, 5)
+        .await
+        .expect("failed to connect to control database");
+    let vault = vault_keystore();
+
+    let slug = unique_name("test_plc_next_month");
+    let db_name = unique_name("test_plc_next_month_db");
+    provision_test_tenant(&control_pool, &control_url, &vault, &slug, &db_name).await;
+
+    let tenant_pool = connect_tenant_pool(&control_url, &db_name, 5, Profile::Dev)
+        .await
+        .expect("connecting tenant pool failed");
+
+    let as_of = Utc::now();
+    lifecycle::run(&tenant_pool, as_of, None)
+        .await
+        .expect("run failed");
+
+    let next_month = month_start(as_of)
+        .checked_add_months(Months::new(1))
+        .expect("valid date");
+    let next_month_timestamp = next_month
+        .and_hms_opt(12, 0, 0)
+        .expect("valid time")
+        .and_utc();
+
+    insert_comms_request(&tenant_pool, next_month_timestamp).await;
+    insert_comms_event(&tenant_pool, next_month_timestamp).await;
+
+    let request_name = repo::partition_name("comms_request", next_month);
+    let event_name = repo::partition_name("comms_event", next_month);
+
+    let request_count: i64 =
+        sqlx::query_scalar(&format!("SELECT count(*) FROM {request_name}"))
+            .fetch_one(&tenant_pool)
+            .await
+            .expect("querying the next-month comms_request partition failed");
+    assert_eq!(request_count, 1);
+
+    let event_count: i64 =
+        sqlx::query_scalar(&format!("SELECT count(*) FROM {event_name}"))
+            .fetch_one(&tenant_pool)
+            .await
+            .expect("querying the next-month comms_event partition failed");
+    assert_eq!(event_count, 1);
+
+    tenant_pool.close().await;
+    drop_test_tenant(&control_pool, &db_name, &slug).await;
+}
+
+#[tokio::test]
 async fn a_partition_inside_the_retention_window_moves_but_is_not_dropped() {
     let control_url = control_database_url();
     let control_pool = db::connect(&control_url, 5)
