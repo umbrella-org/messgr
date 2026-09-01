@@ -421,6 +421,8 @@ Disposition summary: 2 blocking (F1, F4 — both fixed via this rework pass, com
 
 Rework fix confirmation: F1 and F4 fixed on `feat/T-015-customer-projection-resolution` (commit `caee931`); `just fmt`/`just lint`/`just test` clean, plus 5 repeated runs each of `tests/customer.rs` and `tests/ingest.rs::concurrent_identical_requests_do_not_double_send` with no failures (both races were intermittent, not deterministic).
 
+Scoped re-review (independent, fresh acceptance-test run): F1 and F4 both CONFIRMED FIXED. `ON CONFLICT (id) DO NOTHING` never raises a unique-violation under concurrent inserts (the loser blocks on the row lock, then no-ops); locking the `customer` row in `next_rank_for_update` is always acquirable (the row already exists by that point) and doesn't affect the address-only mint path, which never calls it. Stress-looped the three previously-flaky tests 10x each: 30/30 passed, 0 failures. Full fresh acceptance test (`db-up`/`control-migrate`/`vault-dev-init`/`fmt`/`lint`/`test`) green — 156 tests, 0 failed. `caee931`'s diff confirmed additive only (`tests/customer.rs` 8→9 tests, `tests/ingest.rs` untouched) — no test weakened or deleted. No new findings.
+
 cost: estimated L, actual L
 
 - [x] Implementation audit — acceptance test re-run, tasks & criteria verified (step 2)
@@ -438,3 +440,4 @@ cost: estimated L, actual L
 - 2026-09-01 — IN DEVELOPMENT → IN REVIEW: acceptance green
 - 2026-09-01 — IN REVIEW → REWORK: F1: unprotected explicit-customer_id mint race
 - 2026-09-01 — REWORK → IN REVIEW: F1 and F4 fixed
+- 2026-09-01 — IN REVIEW → DONE: scoped re-review clean, F1+F4 confirmed fixed
