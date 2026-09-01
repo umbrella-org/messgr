@@ -8,6 +8,8 @@ use messgr::db;
 use messgr::keystore::VaultKeyStore;
 use messgr::producer::dev_pki;
 use messgr::producer::register::{disable_producer, list_producers, register_producer};
+use messgr::provider_config::configure::{list_provider_config, set_provider_config};
+use messgr::provider_config::model::ProviderConfigInput;
 use messgr::template::approve::{
     approve_template, list_template_versions, render_preview, show_template,
 };
@@ -81,6 +83,13 @@ enum Command {
     Template {
         #[command(subcommand)]
         command: TemplateCommand,
+    },
+    /// Set or list a tenant's ordered per-channel provider list (DESIGN.md
+    /// §4.10, §12.1, T-012). `credential_path` and `rate_limit_per_sec` are
+    /// stored but not yet read by anything (T-012 decisions 3, 4).
+    ProviderConfig {
+        #[command(subcommand)]
+        command: ProviderConfigCommand,
     },
 }
 
@@ -273,6 +282,43 @@ enum TemplateCommand {
         /// limitation as `--customer-id`).
         #[arg(long = "var")]
         var: Vec<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum ProviderConfigCommand {
+    /// Create or overwrite one `(channel, priority)` row in a tenant's
+    /// provider list. Safe to re-run: identical inputs are an idempotent
+    /// no-op, different inputs overwrite that row.
+    Set {
+        #[arg(long = "tenant-slug")]
+        tenant_slug: String,
+        /// `sms`, `email`, or `whatsapp` (DESIGN.md §4.4) — free text, not
+        /// validated against `template::model::channel` (no shared
+        /// enforcement exists between the two tables yet).
+        #[arg(long)]
+        channel: String,
+        /// Failover order within the channel; 1 is tried first.
+        #[arg(long)]
+        priority: i16,
+        /// Free-text label — no real vendor is wired up yet (T-012 decision 1).
+        #[arg(long)]
+        provider: String,
+        /// Vault path; stored but not yet read (T-012 decision 3).
+        #[arg(long = "credential-path")]
+        credential_path: String,
+        #[arg(long = "rate-limit-per-sec")]
+        rate_limit_per_sec: i32,
+        /// Operator identity recorded on the platform_audit row.
+        #[arg(long)]
+        actor: String,
+    },
+    /// List a tenant's provider list for one channel, in failover order.
+    List {
+        #[arg(long = "tenant-slug")]
+        tenant_slug: String,
+        #[arg(long)]
+        channel: String,
     },
 }
 
@@ -716,6 +762,74 @@ async fn main() {
                 println!("{rendered}");
             }
         },
+        // No Vault client is connected here either.
+        Command::ProviderConfig { command } => match command {
+            ProviderConfigCommand::Set {
+                tenant_slug,
+                channel,
+                priority,
+                provider,
+                credential_path,
+                rate_limit_per_sec,
+                actor,
+            } => {
+                let input = ProviderConfigInput {
+                    channel,
+                    priority,
+                    provider,
+                    credential_path,
+                    rate_limit_per_sec,
+                };
+
+                let outcome = set_provider_config(
+                    &control_pool,
+                    &config.control_database_url,
+                    &tenant_slug,
+                    input,
+                    config.profile,
+                    &actor,
+                )
+                .await
+                .unwrap_or_else(|err| {
+                    panic!("failed to set provider_config for tenant {tenant_slug:?}: {err}")
+                });
+
+                println!("outcome={}", outcome.outcome);
+            }
+            ProviderConfigCommand::List {
+                tenant_slug,
+                channel,
+            } => {
+                let rows = list_provider_config(
+                    &control_pool,
+                    &config.control_database_url,
+                    &tenant_slug,
+                    &channel,
+                    config.profile,
+                )
+                .await
+                .unwrap_or_else(|err| {
+                    panic!(
+                        "failed to list provider_config for tenant {tenant_slug:?} \
+                         channel {channel:?}: {err}"
+                    )
+                });
+
+                if rows.is_empty() {
+                    println!("no provider configured for channel {channel}");
+                } else {
+                    for row in rows {
+                        println!(
+                            "priority={} provider={} credential_path={} rate_limit_per_sec={}",
+                            row.priority,
+                            row.provider,
+                            row.credential_path,
+                            row.rate_limit_per_sec,
+                        );
+                    }
+                }
+            }
+        },
     }
 }
 
@@ -819,5 +933,53 @@ mod tests {
             result.is_err(),
             "an invalid --channel value must fail to parse"
         );
+    }
+
+    #[test]
+    fn provider_config_set_parses_required_flags() {
+        let cli = Cli::try_parse_from([
+            "messgr-control",
+            "provider-config",
+            "set",
+            "--tenant-slug",
+            "acme",
+            "--channel",
+            "sms",
+            "--priority",
+            "1",
+            "--provider",
+            "generic-http",
+            "--credential-path",
+            "secret/data/acme/sms",
+            "--rate-limit-per-sec",
+            "10",
+            "--actor",
+            "operator@example.com",
+        ])
+        .expect("parsing provider-config set must succeed");
+
+        let Command::ProviderConfig {
+            command:
+                ProviderConfigCommand::Set {
+                    tenant_slug,
+                    channel,
+                    priority,
+                    provider,
+                    credential_path,
+                    rate_limit_per_sec,
+                    actor,
+                },
+        } = cli.command
+        else {
+            panic!("expected ProviderConfig::Set");
+        };
+
+        assert_eq!(tenant_slug, "acme");
+        assert_eq!(channel, "sms");
+        assert_eq!(priority, 1);
+        assert_eq!(provider, "generic-http");
+        assert_eq!(credential_path, "secret/data/acme/sms");
+        assert_eq!(rate_limit_per_sec, 10);
+        assert_eq!(actor, "operator@example.com");
     }
 }
