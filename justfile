@@ -134,6 +134,19 @@ tenant-config-set tenant retention_years default_timezone default_locale quota_d
 tenant-config-show tenant_slug:
     cargo run --bin {{bin}} -- tenant-config show --tenant-slug {{tenant_slug}}
 
+# Set (create or overwrite) one (channel, priority) row in a tenant's provider list
+[group('control-plane')]
+provider-config-set tenant channel priority provider credential_path rate_limit_per_sec actor:
+    cargo run --bin {{bin}} -- provider-config set --tenant-slug {{tenant}} \
+        --channel {{channel}} --priority {{priority}} --provider {{provider}} \
+        --credential-path {{credential_path}} --rate-limit-per-sec {{rate_limit_per_sec}} \
+        --actor {{actor}}
+
+# List a tenant's provider list for one channel, in failover order
+[group('control-plane')]
+provider-config-list tenant_slug channel:
+    cargo run --bin {{bin}} -- provider-config list --tenant-slug {{tenant_slug}} --channel {{channel}}
+
 # Pre-provision a customer_dek row for one customer id. For more than one
 # id, invoke `cargo run --bin messgr-control -- customer-dek pre-provision`
 # directly with repeated --customer-id flags — just's fixed positional

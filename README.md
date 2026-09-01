@@ -95,6 +95,30 @@ are optional, defaulting to DESIGN.md's own `90`/`observe`. This ticket (T-007) 
 table to the six fields above — `display_name` and the `oidc_*` columns from DESIGN.md's full
 §4.10 table arrive later, when a ticket actually reads them (OIDC: T-035).
 
+### Provider configuration
+
+```
+cargo run --bin messgr-control -- provider-config set --tenant-slug acme \
+    --channel sms --priority 1 --provider generic-http \
+    --credential-path secret/data/acme/sms --rate-limit-per-sec 10 \
+    --actor operator@example.com
+cargo run --bin messgr-control -- provider-config list --tenant-slug acme --channel sms
+```
+
+`provider_config` (DESIGN.md §4.10, §12.1) is an **ordered list per channel**, in the tenant's
+own database, keyed by `(channel, priority)` — even at length 1, so later multi-provider
+failover is a config change rather than a schema migration. `set` is a plain upsert on one
+`(channel, priority)` row at a time — safe to re-run, with the same `created`/`updated`/
+`idempotent` outcome and `platform_audit` trail as `tenant-config set`. `list` prints a
+channel's rows in failover order (lowest `priority` first).
+
+No real vendor is wired up yet — `provider` is a free-text label, and `HttpSender` (the first
+`Sender` implementation) speaks a small JSON-over-HTTP contract of this codebase's own design,
+proven against a local mock server rather than a committed vendor's API (DESIGN.md's own
+"provider selection" question, Still Open #5, stays open). `credential_path` (a Vault path) and
+`rate_limit_per_sec` are stored but not yet read by anything — Vault KV-secret retrieval and
+rate-limit enforcement are later tickets' work.
+
 ### Customer DEK pre-provisioning
 
 ```
