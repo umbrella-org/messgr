@@ -148,7 +148,27 @@ documented behavior, only makes CI actually cover what T-014's own docs already 
 
 ## Review
 
-<!-- empty until IN REVIEW -->
+- [x] Implementation audit — diff (`main`...`feat/T-017-ci-messgr-cold-tablespace`) matches
+  Task 1 exactly: one new step, `job.services.postgres.id`, mirroring `just tablespace-init`'s
+  mkdir/chown/`CREATE TABLESPACE` sequence, placed after `migrate` and before the Vault
+  bootstrap step per decision 2. `cargo fmt --all -- --check` and `cargo clippy --all-targets
+  --all-features -- -D warnings` both clean; YAML re-parsed successfully (`ruby -ryaml`). Real
+  CI run pending push/PR — cannot be confirmed green until then.
+- [x] Quality audit — six added lines, no abstraction, no dead code; matches decision 3 (no
+  `|| true`, unlike the idempotent local recipe — this step runs exactly once per fresh
+  container).
+- [x] Consistency audit — grepped `README.md`, `justfile`, `.github/` for `tablespace`: no stale
+  reference anywhere describing CI as lacking this step; nothing else needed updating.
+- [x] Documentation audit — no user-facing surface (ticket's own Docs update step); no
+  README/DESIGN.md change required or made.
+- [x] Findings recorded — none. No blocking findings.
+- [x] Ticket moved to `tickets/6-done/`.
+- [x] Remaining-tickets impact sweep — `tickets/1-to-do/`, `tickets/2-ready/` unaffected;
+  nothing depends on T-017.
+
+Disposition summary: no findings.
+
+cost: estimated S, actual S
 
 ## History
 
@@ -156,3 +176,4 @@ documented behavior, only makes CI actually cover what T-014's own docs already 
 - 2026-09-01 — TO DO → READY: plan complete
 - 2026-09-01 — READY → IN DEVELOPMENT: picked up
 - 2026-09-01 — IN DEVELOPMENT → IN REVIEW: acceptance green (fmt/clippy clean, YAML valid; real CI run pending push)
+- 2026-09-01 — IN REVIEW → DONE: review clean, no blocking findings
