@@ -95,6 +95,16 @@ vault-dev-init:
     curl -sf --header "X-Vault-Token: messgr-dev-root-token" --request POST \
         --data '{"type":"approle"}' http://localhost:8200/v1/sys/auth/approle || true
 
+# Create the messgr_cold tablespace used by partition-lifecycle moves
+# (T-014). Tablespaces are cluster-level, not per-tenant -- run this once
+# per Postgres instance, and again after `just db-reset`.
+[group('db')]
+tablespace-init:
+    docker exec messgr-postgres mkdir -p /var/lib/postgresql/tablespaces/messgr_cold
+    docker exec messgr-postgres chown postgres:postgres /var/lib/postgresql/tablespaces/messgr_cold
+    docker exec messgr-postgres psql -U messgr -d control -c \
+        "CREATE TABLESPACE messgr_cold LOCATION '/var/lib/postgresql/tablespaces/messgr_cold'" || true
+
 # Apply pending control-database migrations
 [group('control-plane')]
 control-migrate:
@@ -216,6 +226,13 @@ ingest-run:
 [group('control-plane')]
 dispatcher-run:
     cargo run --bin messgr-dispatcher
+
+# Run the partition lifecycle (create-ahead, move to slow tablespace,
+# detach + drop) once for a tenant. Meant to be invoked on a schedule
+# (cron/systemd timer) -- this does not loop.
+[group('control-plane')]
+partition-lifecycle-run tenant_slug:
+    cargo run --bin {{bin}} -- partition-lifecycle run --tenant-slug {{tenant_slug}}
 
 # Validate the AsciiDoc manual via snowball (broken includes/xrefs fail the check)
 [group('docs')]

@@ -8,6 +8,7 @@ pub mod ingest;
 pub mod key_cache;
 pub mod keystore;
 pub mod mtls;
+pub mod partition_lifecycle;
 pub mod platform_audit;
 pub mod producer;
 pub mod profile;
