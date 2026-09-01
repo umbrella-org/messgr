@@ -177,3 +177,4 @@ cost: estimated S, actual S
 - 2026-09-01 — READY → IN DEVELOPMENT: picked up
 - 2026-09-01 — IN DEVELOPMENT → IN REVIEW: acceptance green (fmt/clippy clean, YAML valid; real CI run pending push)
 - 2026-09-01 — IN REVIEW → DONE: review clean, no blocking findings
+- 2026-09-01 — MERGED: PR #17 (`feat/T-017-ci-messgr-cold-tablespace`, b5c66bd)
