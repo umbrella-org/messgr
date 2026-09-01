@@ -340,7 +340,28 @@ User-facing surface: the new `messgr-control provider-config` subcommands, plus 
 
 ## Review
 
-<!-- empty until IN REVIEW -->
+- [x] Implementation audit — acceptance test re-run, tasks & criteria verified (step 2)
+- [x] Quality audit (step 3)
+- [x] Consistency audit (step 4)
+- [x] Documentation audit — coverage, whole-tree sweep, docs build clean (step 4a) — README/justfile/DESIGN.md all updated and consistent; `snowball` docs build (`docs/user-manual.adoc`) untouched by this ticket's surface (same as T-007's precedent), rebuilt clean anyway
+- [x] Docs-readability pass — skipped: no docs-readability reviewer configured in this session
+- [x] Findings recorded with severity, class, and disposition; disposition summary + cost line below (step 5)
+- [x] Ticket moved to `tickets/6-done/` or `tickets/5-rework/`; `## History` appended (step 6)
+- [x] Remaining-tickets impact sweep done (step 8) — T-013 (`depends-on: [T-011, T-012]`) still describes `Sender`/first adapter accurately; T-014 does not reference T-012; no patch needed
+- [x] Summary + commit message & MR attributes presented for approval (step 9)
+
+**Re-ran the acceptance test independently** on `feat/T-012-sender-trait-provider-config`: `just fmt` (no-op diff), `just lint` (clean), `just test` (all 16 test binaries green, including the 3 `wiremock`-backed `HttpSender` unit tests, the 6 `tests/provider_config.rs` integration tests, and the new `control.rs` CLI parse test). Manually re-exercised the CLI against the `acme` tenant: `provider-config set` for `(sms, 1)` reported `idempotent` against rows already present from the implementer's own manual run, `list` showed both `(sms, 1)`/`(sms, 2)` rows in priority order, and `platform_audit` carried the full `created`/`idempotent`/`created`/`idempotent` sequence across both sessions — confirming the state persisted correctly across an intervening `just provision` re-run. Also independently confirmed the three-dot diff against `main` (`git diff main...HEAD`) touches no `tickets/` path, and every confirmed design decision (1–8) is honoured exactly as written in the plan.
+
+Project-wide search for `provider_config`/`Sender`/`HttpSender` across `*.md` found no stale reference introduced by this branch — `PLAN.md`'s T-012/T-031 rows, `tickets/T-013`, and `DESIGN.md` all already agree with the shipped shape.
+
+| id | severity | class | disposition | description | evidence | suggestion |
+|---|---|---|---|---|---|---|
+| F1 | non-blocking | design | noted | `provider-config set --channel` accepts unvalidated free text, while `template approve --channel` validates against the same three-value closed set (`template::model::channel::{SMS,EMAIL,WHATSAPP}`) via `PossibleValuesParser` — an asymmetry between two CLI surfaces that both write a `channel` column with the same intended domain | `src/bin/control.rs`, `ProviderConfigCommand::Set` vs `TemplateCommand::Approve` | Not worth a dedicated ticket — a two-line change (reuse `template::model::channel`'s constants) whenever a ticket next touches this CLI arm. A typo here is easy to spot via `provider-config list` and harms nothing at the schema level (DESIGN.md's own `provider_config.channel` is plain `text`, not FK'd to any enum) |
+| F2 | non-blocking | design | noted | `SendOutcome` derives `PartialEq` with no current caller comparing two instances for equality — every other outcome-shaped struct in the codebase (`ConfigureOutcome`, and `tenant_config`/`producer`'s equivalents) derives only `Debug` | `src/sender/mod.rs`, `SendOutcome` | Harmless now; drop the derive if a future edit touches this struct and it's still unused, or keep it if T-013's dispatcher ends up asserting on it directly |
+
+Disposition summary: 2 noted (F1, F2). No blocking findings.
+
+cost: estimated M, actual M
 
 ## History
 
@@ -348,3 +369,4 @@ User-facing surface: the new `messgr-control provider-config` subcommands, plus 
 - 2026-09-01 — TO DO → READY: plan complete
 - 2026-09-01 — READY → IN DEVELOPMENT: picked up
 - 2026-09-01 — IN DEVELOPMENT → IN REVIEW: acceptance green
+- 2026-09-01 — IN REVIEW → DONE: review clean: 2 noted (F1, F2); no blocking findings
