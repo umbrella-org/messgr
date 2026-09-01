@@ -320,3 +320,4 @@ User-facing surface: the new `messgr-control partition-lifecycle` subcommand and
 - 2026-09-01 — TO DO → READY: plan complete
 - 2026-09-01 — READY → IN DEVELOPMENT: picked up
 - 2026-09-01 — plan amended inline: Task 4's code sketch showed a flat `PartitionLifecycle { tenant_slug }` variant, contradicting decision 1 and the Acceptance test's own `partition-lifecycle run --tenant-slug` usage; implemented as nested `PartitionLifecycle { command: PartitionLifecycleCommand }` with `Run { tenant_slug }`, and wrapped tenant resolution/connection in a `lifecycle::run_for_tenant` function mirroring `set_tenant_config`'s shape, keeping `control.rs` thin like every other command
+- 2026-09-01 — IN DEVELOPMENT → IN REVIEW: acceptance green
