@@ -366,7 +366,27 @@ and raise it rather than editing the design to match the code (matches `T-009`'s
 
 ## Review
 
-<!-- empty until IN REVIEW -->
+- [x] Implementation audit — acceptance test re-run, tasks & criteria verified (step 2)
+- [x] Quality audit (step 3)
+- [x] Consistency audit (step 4)
+- [x] Documentation audit — coverage, whole-tree sweep, docs build clean (step 4a) — README/`.env.example`/justfile checked against the actual shipped code (env var names, curl flags, recipe names); `just docs-check` (snowball) clean and unaffected
+- [x] Docs-readability pass — skipped: no docs-readability reviewer configured in this session
+- [x] Findings recorded with severity, class, and disposition; disposition summary + cost line below (step 5)
+- [x] Ticket moved to `tickets/6-done/` or `tickets/5-rework/`; `## History` appended (step 6)
+- [x] Remaining-tickets impact sweep done (step 8) — re-read `T-013` (the only `1-to-do/`/`2-ready/` ticket depending on `T-011`); its Description ("T-011 ... so there is something in the outbox to claim") still holds exactly as shipped — `outbox` rows carry `comms_request_id`/`channel`/`priority`/`next_attempt_at`/`leased_until` as T-013's claim query needs. No patch needed.
+
+**Independent verification**, delegated to a fresh reviewing agent free of implementer bias: checked out `feat/T-011-messgr-ingest-post-comms`, diffed it against `main`, re-ran `just fmt`/`just lint`/`just test` (86 passed, 0 failed across 15 test binaries, including regression coverage for `tests/dev_pki.rs`/`tests/producer.rs`), and independently drove the real `messgr-ingest` binary over a real TCP/TLS connection (provisioned a tenant, registered a producer, issued dev-PKI certs, started the binary, hit it with `curl`): got `201` then `200` on idempotency replay with the identical `comms_request_id`, `final_status` `NULL` in the ledger row (no dispatcher exists yet, as scoped), `class=auth` rejected `422`, and a request presenting **no client certificate at all failed the TLS handshake** before ever reaching the app — independently confirming mandatory mTLS, not just app-level enforcement. Cross-checked all 10 confirmed design decisions against the actual shipped logic (not just doc comments claiming compliance) — all honoured. No DEK/pepper/private-key material found in any `tracing`/log/error-`Display` output. Read `src/mtls.rs`'s `WebPkiClientVerifier` construction line by line: no `allow_unauthenticated()` call, so client auth is mandatory by construction, not by convention. Read `src/ingest/repo.rs`'s claim-then-insert transaction: the `ON CONFLICT (key) DO NOTHING` inside a transaction is safe under real concurrency by Postgres's own conflict-serialization semantics — verified live afterward with a real concurrent test (F2's fix), not just by reading the code.
+
+| id | severity | class | disposition | description | evidence | suggestion |
+|---|---|---|---|---|---|---|
+| F1 | non-blocking | test-gap | fixed inline | `tests/ingest.rs`'s two `403` tests (unregistered/disabled producer) asserted only the status code — Task 8 item 4 required the two cases be "distinguishable in the response body," which the code already did (`IngestError::UnknownProducer`/`ProducerDisabled` render different messages) but the test never checked. | `tests/ingest.rs` (pre-fix), `src/ingest/model.rs:133-134` | Fixed: both tests now assert the response body's `error` field. |
+| F2 | non-blocking | test-gap | fixed inline | No test exercised the idempotency claim (`ingest::repo::insert_transactional`'s `ON CONFLICT ... DO NOTHING`) under true concurrency — only sequential replay (second request after the first already committed), leaving this ticket's central "no double-send" claim untested at the race-window level it's actually about. | `tests/ingest.rs` (pre-fix) | Fixed: added `concurrent_identical_requests_do_not_double_send`, firing two identical `POST /comms` via `tokio::join!` and asserting exactly one ledger/outbox row and one 201+one 200 across the pair. |
+| F3 | non-blocking | design | noted | `TenantRegistry::get_or_open` and `resolve_producer` never check `tenant.status` — a tenant marked `suspended`/`offboarding_*` (constants already exist, `#[allow(dead_code)]`, in `src/tenant/model.rs`) whose producer certs are still `enabled` could still submit through `messgr-ingest` and get a `201`. Not one of this ticket's confirmed decisions and no gate chain exists yet regardless (§14 step 2 scope), but `messgr-ingest` is the first live request path that could enforce tenant status and doesn't. | `src/tenant/registry.rs:118-174`, `src/producer/resolve.rs:61-76`, `src/tenant/model.rs:19-27` | Whichever future ticket owns tenant offboarding enforcement (§7.7) should check this path too. Not promoted to a ticket now — no dedicated offboarding-enforcement ticket exists yet to fold into, and filing one solely for this one call site fails the promotion test on its own. |
+| F4 | non-blocking | other | noted | `justfile`'s `ingest-run` recipe landed under `[group('control-plane')]`, not "alongside the existing build/test group" as this ticket's own docs step said — cosmetic, and arguably the more consistent placement (every other `cargo run --bin ...` recipe in this file lives in `control-plane`, not `build`). | `justfile` (`ingest-run` recipe) | No change — the plan's own docs-step wording was imprecise, not the shipped file. |
+
+Disposition summary: 2 fixed inline (F1, F2), 2 noted (F3, F4). No blocking findings.
+
+cost: estimated L, actual L
 
 ## History
 
@@ -374,3 +394,4 @@ and raise it rather than editing the design to match the code (matches `T-009`'s
 - 2026-08-31 — TO DO → READY: plan complete
 - 2026-08-31 — READY → IN DEVELOPMENT: picked up
 - 2026-08-31 — IN DEVELOPMENT → IN REVIEW: acceptance green
+- 2026-09-01 — IN REVIEW → DONE: review clean: 2 fixed inline (F1, F2), 2 noted (F3, F4); no blocking findings

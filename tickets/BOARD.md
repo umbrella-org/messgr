@@ -9,7 +9,7 @@ hand — edit the tickets. Hand-written planning notes live in [`NOTES.md`](NOTE
 **WIP limits (per child-project):**
 - `messgr`: `3-in-development/` ≤ 1 · `4-in-review/` ≤ 1
 
-Last updated: 2026-08-31
+Last updated: 2026-09-01
 
 ## IN DEVELOPMENT
 
@@ -20,11 +20,10 @@ Last updated: 2026-08-31
 
 ## IN REVIEW
 
-### messgr (1/1)
+### messgr (0/1)
 
 | id | title | depends-on |
 |---|---|---|
-| T-011 | messgr-ingest: POST /comms, idempotency replay, ledger + outbox write, encryption | [T-006, T-008, T-009, T-010] |
 
 ## REWORK
 
@@ -66,6 +65,7 @@ Last updated: 2026-08-31
 | T-008 | Per-customer DEK lifecycle: customer_dek, LRU cache, pre-provisioning, HMAC pepper | yes — merged to main (PR #10, 73d6fa4) |
 | T-009 | Ledger + outbox schema: comms_request, outbox, comms_event, idempotency | yes — merged to main (PR #11, 65c5e70) |
 | T-010 | Template store: immutable versioned templates, approval metadata, render path | yes — merged to main (PR #12, 3eed5a9) |
+| T-011 | messgr-ingest: POST /comms, idempotency replay, ledger + outbox write, encryption | no — publish-gated |
 
 ## DROPPED
 
