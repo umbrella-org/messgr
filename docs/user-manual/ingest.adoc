@@ -1,0 +1,72 @@
+= messgr-ingest: `POST /comms`
+
+`messgr-ingest` (`T-011`) is the first end-to-end send path: it terminates mTLS itself, resolves
+the client certificate to a producer via `resolve_producer` (see "mTLS resolution and dev PKI"),
+resolves the customer and address to send to (see "Customer projection" in the control-plane CLI
+chapter), and writes the ledger + outbox row in one transaction, encrypting the destination and
+rendered template body under the customer's DEK (DESIGN.md §4.1-§4.3, §7, §11). The request body
+identifies the customer one of three ways -- exactly one of `customer_id`, `external_id` +
+`external_id_system` together, or neither (resolve by `destination` alone) -- any other
+combination is rejected (`422`). No gate chain exists yet (consent, quotas, kill switches,
+suppression -- §5, §5.1, §5.2 -- are unbuilt; `T-016` is kill switches specifically, not the gate
+chain as a whole), and `class = "auth"` is rejected outright (`422`) -- OTP has its own path
+(`sms-sender`/`otp-api`, `T-047`), never this one.
+
+Requires four env vars, no defaults (`.env.example`): `INGEST_LISTEN_ADDR` (default
+`0.0.0.0:8443` if unset), `INGEST_TLS_CERT_FILE`, `INGEST_TLS_KEY_FILE`,
+`INGEST_TLS_CLIENT_CA_FILE`. Locally, mint a server identity with a DNS SAN (unlike a producer's
+own client certificate, a server's certificate _is_ hostname-checked by whatever connects to
+it):
+
+[source,bash]
+----
+just dev-pki-bootstrap
+just dev-pki-issue-server-cert messgr-ingest.internal /tmp/ingest-cert   # writes cert.pem, key.pem, ca.pem
+
+INGEST_TLS_CERT_FILE=/tmp/ingest-cert/cert.pem \
+INGEST_TLS_KEY_FILE=/tmp/ingest-cert/key.pem \
+INGEST_TLS_CLIENT_CA_FILE=/tmp/ingest-cert/ca.pem \
+just ingest-run
+----
+
+Then, with a tenant provisioned, configured, and a producer registered (see the control-plane CLI
+chapter) and a client certificate issued for it via `just dev-pki-issue-cert` (no `--server` -- a
+producer's certificate is never hostname-checked):
+
+[source,bash]
+----
+curl -sk --cert /tmp/producer-cert/cert.pem --key /tmp/producer-cert/key.pem \
+  --cacert /tmp/ingest-cert/ca.pem --resolve messgr-ingest.internal:8443:127.0.0.1 \
+  -H "Idempotency-Key: demo-1" -H "Content-Type: application/json" \
+  -d '{"customer_id":"<uuid>","destination":"+15550100","channel":"sms","class":"transactional","template_id":"balance-alert","template_version":1,"variables":{"name":"Jordan","balance":"100.00"}}' \
+  https://messgr-ingest.internal:8443/comms
+----
+
+Or identify the customer by an upstream system's own id instead of a `messgr` `customer_id`:
+
+[source,bash]
+----
+curl -sk --cert /tmp/producer-cert/cert.pem --key /tmp/producer-cert/key.pem \
+  --cacert /tmp/ingest-cert/ca.pem --resolve messgr-ingest.internal:8443:127.0.0.1 \
+  -H "Idempotency-Key: demo-2" -H "Content-Type: application/json" \
+  -d '{"external_id":"core-banking-12345","external_id_system":"core_banking","destination":"+15550100","channel":"sms","class":"transactional","template_id":"balance-alert","template_version":1,"variables":{"name":"Jordan","balance":"100.00"}}' \
+  https://messgr-ingest.internal:8443/comms
+----
+
+Returns `201` with a `comms_request_id` on the first call; repeating it with the same
+`Idempotency-Key` returns `200` with the same id rather than sending twice. Two other error cases
+are specific to resolution: an invalid combination of `customer_id`/`external_id`/
+`external_id_system` is `422`, and a `destination` already active under a _different_ customer
+than the one resolved is `409` (DESIGN.md §4.6's correction -- see "Customer projection" in the
+control-plane CLI chapter). Once `messgr-dispatcher` is running against this tenant and channel,
+the row is picked up and `final_status` moves to `sent` or `failed`.
+
+`docker compose up -d` also starts a dev-mode Vault (`VAULT_ADDR=http://localhost:8200`,
+`VAULT_TOKEN=messgr-dev-root-token`, both in `.env.example`) backing the `KeyStore` trait
+(`src/keystore.rs`) that per-customer data-encryption keys go through (DESIGN.md §7.6).
+`just vault-dev-init` is idempotent and only needs to run once per fresh Vault container -- it
+enables the Transit secrets engine and creates the `messgr-dek` key that `tests/keystore.rs`
+exercises, and now also enables the `approle` auth method that every tenant's own AppRole (one
+role per tenant, inside this single shared backend) is created under. A dev-mode Vault is for
+local development and CI only: `VaultKeyStore::connect` refuses to start against a non-TLS
+`VAULT_ADDR` outside `MESSGR_PROFILE=dev`.

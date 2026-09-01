@@ -9,10 +9,12 @@ to operate what has actually been built against that design.
 == Status
 
 {product} is a design-driven, from-scratch rebuild. Feature work is tracked as tickets against
-`DESIGN.md` (see `tickets/BOARD.md`), and only part of the design is implemented so far. The
-only binary that exists today is `messgr-control`, the control-plane CLI: tenant provisioning,
-the producer registry, and a dev-only internal PKI for issuing test client certificates. There
-is no send path, dispatcher, or query API/UI yet — those are later tickets.
+`DESIGN.md` (see `tickets/BOARD.md`), and only part of the design is implemented so far. Three
+binaries exist today: `messgr-control` (the control-plane CLI — tenant provisioning, the
+producer registry, tenant/provider configuration, templates, and a dev-only internal PKI),
+`messgr-ingest` (`POST /comms`, the first end-to-end send path), and `messgr-dispatcher` (the
+per-tenant claim loop that actually calls a provider). There is no gate chain (consent, quotas,
+kill switches, suppression) and no query API/UI yet — those are later tickets.
 
 == Tenancy
 
@@ -28,10 +30,12 @@ A *producer* is an upstream system — fraud alerts, statements, onboarding, and
 to submit messages on behalf of a tenant. `messgr-control producer` registers, disables, and
 lists producers for a tenant. Producer and tenant identity on the send path are resolved from
 the client's mTLS certificate, never from the request body; `messgr::producer::resolve` is the
-shared resolution layer, though no TLS-terminating ingest binary calls it yet.
+shared resolution layer, and `messgr-ingest` is the binary that terminates mTLS and calls it. See
+the "Control-plane CLI" chapter for the full command reference.
 
 == Dev PKI
 
 `messgr-control dev-pki` issues test client certificates from a Vault-backed PKI secrets engine,
 so producer mTLS resolution can be exercised locally without a real certificate authority. It
-refuses to run outside a `dev` profile.
+refuses to run outside a `dev` profile. See the "mTLS resolution and dev PKI" chapter for the
+full walkthrough.

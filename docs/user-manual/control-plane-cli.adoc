@@ -1,0 +1,207 @@
+= Control-plane CLI
+
+`messgr-control` is the operator CLI for everything short of the send path itself: producer
+identity, tenant configuration, provider configuration, customer DEK pre-provisioning,
+templates, and partition lifecycle. Every subcommand below assumes a tenant has already been
+provisioned (see the quickstart in the repository README).
+
+== Producers
+
+[source,bash]
+----
+cargo run --bin messgr-control -- producer register \
+    --tenant-slug acme --name fraud-alerts \
+    --cert-subject "CN=fraud-alerts.internal" \
+    --owner-team fraud --contact fraud-oncall@example.com --actor operator@example.com
+cargo run --bin messgr-control -- producer list --tenant-slug acme
+cargo run --bin messgr-control -- producer disable --tenant-slug acme --name fraud-alerts \
+    --actor operator@example.com
+----
+
+`producer register` registers an upstream system (fraud, statements, onboarding, ...) against a
+tenant (DESIGN.md §4.9): it writes both the `producer` row in the tenant's own database and the
+`producer_cert` mapping in the control database, in that order (a producer only in the tenant
+database is inert; a `producer_cert` pointing at no producer is a worse, later failure). No send
+path consumes this identity yet -- `messgr::producer::resolve` (below) is the first reader.
+
+Re-running `register` with identical inputs for the same `--name` is a safe no-op. Re-running it
+with different inputs for the same `--name`, or with a `--cert-subject` already bound to another
+producer (in this tenant or a different one), is rejected with a non-zero exit.
+
+`producer disable` sets **two** copies to disabled, control database first: `producer_cert.enabled`
+(control) -- the column mTLS resolution actually reads, since resolution never opens a tenant
+database -- and then `producer.enabled` (tenant) -- the source of truth `producer list` displays.
+Neither row is ever deleted, so a disabled producer's certificate fails resolution with a
+distinct, diagnosable "disabled" error instead of looking unregistered. Reversible by registering
+the same `--name`/`--cert-subject` again (which never re-enables `producer_cert.enabled` -- only
+`disable` and the initial `register` ever touch that column). Disabling an already-disabled
+producer is a safe no-op.
+
+Every `register`/`disable` attempt, including a rejected one, writes a `platform_audit` row
+(`producer.register` / `producer.disable`).
+
+== Tenant configuration
+
+[source,bash]
+----
+cargo run --bin messgr-control -- tenant-config set --tenant-slug acme \
+    --retention-years 7 --default-timezone Europe/London --default-locale en-GB \
+    --quota-day-boundary-tz Europe/London --staleness-max-age-seconds 7200 \
+    --actor operator@example.com
+cargo run --bin messgr-control -- tenant-config show --tenant-slug acme
+----
+
+`tenant_config` (DESIGN.md §4.10) is a **singleton per tenant** -- one row, in the tenant's own
+database, enforced by a `singleton boolean PRIMARY KEY` rather than by convention. A freshly
+provisioned tenant has **no** row until `tenant-config set` is run at least once: several of
+these fields (the staleness bound, the quota day-boundary timezone) have no platform-wide
+default DESIGN.md has settled on, so there is nothing sensible to seed automatically.
+
+`set` is a plain upsert -- safe to re-run. Its outcome is `created` (no prior row), `updated`
+(a prior row existed with different values), or `idempotent` (identical to what's already
+there); every call, including a rejected one against an unknown `--tenant-slug`, writes a
+`tenant_config.set` `platform_audit` row. `--schedule-horizon-days` and `--verification-mode`
+are optional, defaulting to DESIGN.md's own `90`/`observe`. This ticket (T-007) scopes the
+table to the six fields above -- `display_name` and the `oidc_*` columns from DESIGN.md's full
+§4.10 table arrive later, when a ticket actually reads them (OIDC: T-035).
+
+NOTE: A tenant needs a `tenant_config` row before `messgr-ingest` will serve any request against
+it -- the tenant registry rejects a send with "tenant has no tenant_config row" otherwise. Run
+`tenant-config set` right after provisioning, before exercising the ingest walkthrough.
+
+== Customer projection
+
+`messgr` is never the system of record for customer data -- `customer`, `customer_external_id`,
+`customer_address`, and `customer_alias` (DESIGN.md §4.6, `T-015`) are a narrow, read-only
+projection, held only to resolve _who to send to right now_: an id, a locale, a timezone, and a
+handful of contact points, nothing else. There is no CLI surface for these tables; every write
+to them happens inside `messgr-ingest`'s resolution path.
+
+`messgr-ingest` resolves every send to a `customer_id` + `address_id` one of three ways
+(DESIGN.md §4.7):
+
+* **`customer_id` supplied** -- used directly, after alias expansion (`customer_alias` redirects a
+  retired id from a master-system merge to its current one).
+* **`external_id` + `external_id_system` supplied** -- resolved via `customer_external_id`.
+* **Neither supplied** -- resolved via `destination`'s keyed HMAC against currently-active
+  `customer_address` rows.
+
+**Resolution never rejects a send.** Whichever of the three finds nothing mints a _provisional_
+customer (and, for address-only resolution, a provisional address) instead -- cheap, thin rows
+that get a DEK like any other customer and are reconciled into a real identity later by the event
+feed, through the same `customer_alias` merge machinery. A blocked OTP is a worse outcome than a
+missing timeline entry, so nothing here ever returns anything but a resolved id (`409` is the one
+exception -- see below -- and it's a genuine identity conflict, not an absence).
+
+Two pieces of the design are explicitly not built yet: the **event feed** that keeps the
+projection current from the master system (create/update/merge events; build-order step 10), and
+**staleness gating** (DESIGN.md §4.8 -- deferring a stale transactional/marketing send rather than
+risking delivery to an address the customer no longer holds). Until the feed exists, every
+non-provisional row in these tables was put there by a previous resolution, not by upstream
+master data.
+
+== Partition lifecycle
+
+[source,bash]
+----
+just tablespace-init   # once per Postgres instance -- creates the messgr_cold tablespace
+cargo run --bin messgr-control -- partition-lifecycle run --tenant-slug acme
+----
+
+`comms_request` and `comms_event` (DESIGN.md §4.1, T-009) are partitioned by month. This
+command (T-014) keeps them self-managing, in one run: ensures the current and next month's
+partitions exist, moves partitions older than 18 months (fixed platform-wide, §7.5) to the
+`messgr_cold` tablespace (created once per cluster by `just tablespace-init`, not by this
+command -- tablespaces are shared across every database in the instance), and detaches + drops
+partitions past the tenant's `tenant_config.retention_years` boundary. **If the tenant has no
+`tenant_config` row, the drop step is skipped entirely** -- printed as `retention: skipped
+(tenant_config not set)` -- rather than assuming a default retention on a bank's ledger data.
+Safe to re-run; meant to be invoked on a schedule (cron/systemd timer), not run continuously --
+this binary does not daemonize.
+
+== Provider configuration
+
+[source,bash]
+----
+cargo run --bin messgr-control -- provider-config set --tenant-slug acme \
+    --channel sms --priority 1 --provider generic-http \
+    --credential-path secret/data/acme/sms --rate-limit-per-sec 10 \
+    --actor operator@example.com
+cargo run --bin messgr-control -- provider-config list --tenant-slug acme --channel sms
+----
+
+`provider_config` (DESIGN.md §4.10, §12.1) is an **ordered list per channel**, in the tenant's
+own database, keyed by `(channel, priority)` -- even at length 1, so later multi-provider
+failover is a config change rather than a schema migration. `set` is a plain upsert on one
+`(channel, priority)` row at a time -- safe to re-run, with the same `created`/`updated`/
+`idempotent` outcome and `platform_audit` trail as `tenant-config set`. `list` prints a
+channel's rows in failover order (lowest `priority` first).
+
+No real vendor is wired up yet -- `provider` is a free-text label, and `HttpSender` (the first
+`Sender` implementation) speaks a small JSON-over-HTTP contract of this codebase's own design,
+proven against a local mock server rather than a committed vendor's API (DESIGN.md's own
+"provider selection" question, Still Open #5, stays open). `credential_path` (a Vault path) and
+`rate_limit_per_sec` are stored but not yet read by anything -- Vault KV-secret retrieval and
+rate-limit enforcement are later tickets' work.
+
+== Customer DEK pre-provisioning
+
+[source,bash]
+----
+cargo run --bin messgr-control -- customer-dek pre-provision --tenant-slug acme \
+    --customer-id 11111111-1111-1111-1111-111111111111 \
+    --customer-id 22222222-2222-2222-2222-222222222222 \
+    --actor operator@example.com
+----
+
+`customer-dek pre-provision` (DESIGN.md §7.6) ensures each given customer id has a `customer_dek`
+row, minting a fresh Vault Transit datakey for whichever don't -- so a sealed or unreachable Vault
+doesn't block a new customer's first message. It takes **explicit customer ids, not a live
+customer base**: the customer projection (DESIGN.md §4.6, "Customer projection" above) has no
+event feed yet (build-order step 10), so there is no live upstream source for this command to
+query on its own. Wiring an automatic trigger from the real customer base is deferred to
+whichever future ticket adds that feed.
+
+Safe to re-run: identical ids report `already_existed` instead of minting a second DEK. The same
+lifecycle also has a lazy path (`customer_dek::lifecycle::get_or_create_dek`) that future
+ingest/dispatcher code calls on a customer's first message -- no CLI surface for that path, since
+it has no operator action to trigger.
+
+Every payload/destination this eventually encrypts uses a **bounded, zeroizing, TTL cache**
+(`key_cache::KeyCache`) of unwrapped DEKs, so steady-state sending makes no Vault calls once a
+customer's DEK is warm -- Vault is only on the path for a cache miss or pre-provisioning.
+
+== Templates
+
+[source,bash]
+----
+cargo run --bin messgr-control -- template approve --tenant-slug acme \
+    --template-id balance-alert --version 1 --channel sms --locale en-GB \
+    --body-file body.txt --actor operator@example.com
+cargo run --bin messgr-control -- template show --tenant-slug acme \
+    --template-id balance-alert --version 1 --locale en-GB
+cargo run --bin messgr-control -- template list --tenant-slug acme --template-id balance-alert
+cargo run --bin messgr-control -- template render --tenant-slug acme \
+    --template-id balance-alert --version 1 --locale en-GB \
+    --var name=Jordan --var "balance=£120.00"
+----
+
+`template` (DESIGN.md §4.4) rows are **immutable once approved** -- `approve` is the only way a
+row is ever written, and it always stamps `approved_by`/`approved_at`; there is no draft state
+and no `update`. A content change is always a new `--version`: re-`approve`-ing an existing
+`(template_id, version, locale)` is rejected, not overwritten.
+
+Bodies use literal `{{key}}` placeholders (whitespace inside the braces is trimmed, so
+`{{ key }}` also matches), substituted by `template render` or by `messgr-ingest`'s own send
+path. A key the body references but the caller doesn't supply is a **hard render error** -- a
+bank must not send customer-facing content with an unsubstituted placeholder -- never sent as
+literal `{{key}}` text or blanked out.
+
+Every `approve` attempt, including a rejected one, writes a `template.approve` `platform_audit`
+row. This is the bare operator-driven surface, matching `producer`/`tenant-config` -- the audited,
+role-gated admin approval workflow (§11.1, §11.3) is `T-042`'s scope, not this one's.
+
+NOTE: The `(template_id, version, locale)` primary key does not include `channel` -- approving
+the same `template_id`/`version`/`locale` for two different channels collides. Give each channel
+its own version (or its own `template_id`) if you need channel-specific bodies at the same
+nominal version.

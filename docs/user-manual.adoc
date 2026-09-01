@@ -8,3 +8,7 @@
 include::attributes.adoc[]
 
 include::user-manual/introduction.adoc[leveloffset=+1]
+include::user-manual/control-plane-cli.adoc[leveloffset=+1]
+include::user-manual/dev-pki.adoc[leveloffset=+1]
+include::user-manual/ingest.adoc[leveloffset=+1]
+include::user-manual/dispatcher.adoc[leveloffset=+1]

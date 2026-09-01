@@ -1,0 +1,21 @@
+= mTLS resolution and dev PKI
+
+`messgr::producer::resolve::resolve_producer(control_pool, cert_subject)` (DESIGN.md §4.9, §11.1,
+T-006) is the shared layer that turns a client certificate's subject into `(tenant_id,
+producer_id)`: one control-database query, distinguishing an unknown cert from a
+known-but-disabled one. `messgr-ingest` is the binary that terminates the mTLS handshake and
+calls it.
+
+To exercise it locally without a real CA:
+
+[source,bash]
+----
+just dev-pki-bootstrap                                  # one-time: mount pki, root CA, producer-dev role
+just dev-pki-issue-cert fraud-alerts.internal /tmp/cert  # writes cert.pem, key.pem, ca.pem
+openssl x509 -noout -subject -in /tmp/cert/cert.pem      # CN=fraud-alerts.internal
+----
+
+`dev-pki bootstrap`/`dev-pki issue-cert` are backed by Vault's own PKI secrets engine (the same
+dev-mode Vault `docker compose up -d` already starts) and refuse to run outside
+`MESSGR_PROFILE=dev` -- minting a trusted producer client certificate ad hoc must never be
+reachable against a real Vault.
