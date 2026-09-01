@@ -63,6 +63,12 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo build
       - run: cargo run --bin messgr-control -- migrate
+      - name: Create messgr_cold tablespace (T-014's partition_lifecycle tests need it)
+        run: |
+          docker exec ${{ job.services.postgres.id }} mkdir -p /var/lib/postgresql/tablespaces/messgr_cold
+          docker exec ${{ job.services.postgres.id }} chown postgres:postgres /var/lib/postgresql/tablespaces/messgr_cold
+          docker exec ${{ job.services.postgres.id }} psql -U messgr -d control -c \
+            "CREATE TABLESPACE messgr_cold LOCATION '/var/lib/postgresql/tablespaces/messgr_cold'"
       - name: Bootstrap Vault Transit fixture mounts + approle auth (matches `just vault-dev-init`)
         run: |
           for i in $(seq 1 30); do curl -sf "$VAULT_ADDR/v1/sys/health" && break; sleep 1; done
