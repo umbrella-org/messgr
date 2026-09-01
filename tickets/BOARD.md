@@ -20,11 +20,10 @@ Last updated: 2026-09-01
 
 ## IN REVIEW
 
-### messgr (1/1)
+### messgr (0/1)
 
 | id | title | depends-on |
 |---|---|---|
-| T-015 | Customer projection + resolution at ingest | [] |
 
 ## REWORK
 
@@ -32,6 +31,7 @@ Last updated: 2026-09-01
 
 | id | title | open findings |
 |---|---|---|
+| T-015 | Customer projection + resolution at ingest | F1: unprotected explicit-customer_id mint race |
 
 ## READY (impact order, per child)
 
@@ -47,6 +47,7 @@ Last updated: 2026-09-01
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
 | T-016 | Kill switches | high | medium | M | [] |  |
+| T-018 | Clean up orphaned customer_dek rows from lost address-only mint races | medium | medium | M | [] |  |
 
 ## DONE
 

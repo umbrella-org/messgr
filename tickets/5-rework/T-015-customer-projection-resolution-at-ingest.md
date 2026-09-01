@@ -410,7 +410,22 @@ longer mandatory) and its new `422`/`409` error cases.
 
 ## Review
 
-<!-- empty until IN REVIEW -->
+| id | severity | class | disposition | description | evidence | suggestion |
+|---|---|---|---|---|---|---|
+| F1 | blocking | correctness | — | Explicit-`customer_id` provisional mint (`mint_provisional_customer`) is a 4th, unprotected concurrency race — decision 8 enumerates exactly three races with insert-then-refetch-on-conflict protection, but the explicit-id-unknown path uses a plain `INSERT` with no `ON CONFLICT`. Two concurrent resolutions of the same never-before-seen `customer_id` both pass `find_by_id == None` and both insert; the loser gets a raw unique-violation surfaced as a `500`, contradicting §4.7's "never reject a send because resolution failed." | `src/customer/resolve.rs:266-285` (`mint_provisional_customer`); reproduced via `tests/ingest.rs::concurrent_identical_requests_do_not_double_send`, intermittently `[201, 500]` instead of `[201, 200]` — Postgres: `duplicate key value violates unique constraint "customer_pkey"`. `cargo test --test ingest` is not reliably green. | Give `insert_customer`'s caller-supplied-id call site the same `ON CONFLICT (id) DO NOTHING` + refetch-and-compare shape decision 8's other three races got. |
+| F2 | non-blocking | design | new ticket | Lost address-only mint race leaves an orphaned `customer_dek` row: the DEK is created (and persisted) for a fresh `customer_id` *before* the transaction that inserts `customer`+`customer_address`; on a lost race the transaction rolls back but the DEK row survives, unreachable from any `customer` row and therefore invisible to §7.2's erasure sweep. Narrow race, not a golden-path bug — batched into a follow-up since the fix needs design thought (restructure vs. sweep), not a one-liner. | `src/customer/resolve.rs:338-377` (`mint_provisional_customer_and_address`); `customer_dek` has no FK to `customer` (`migrations/tenant/0003_customer_dek.sql`); precedent for DEK-before-customer already exists in `pre_provision_deks` (`src/customer_dek/lifecycle.rs:97-105`). | T-018 (spawned). |
+| F3 | non-blocking | stale-xref | fixed inline | This ticket's own docs task rewrote the `POST /comms` README paragraph but the new sentence still cited `T-016` for the whole "gate chain," reproducing the exact T-016↔gate-chain conflation the docs task itself called out as wrong when it was written into the *original* stale sentence. | `README.md:255` (pre-fix, on `feat/T-015-customer-projection-resolution`) | Corrected in place — see disposition. |
+
+Disposition summary: 1 blocking (F1, fixed via scoped rework), 1 new ticket (F2 → T-018), 1 fixed inline (F3).
+
+cost: estimated L, actual L
+
+- [x] Implementation audit — acceptance test re-run, tasks & criteria verified (step 2)
+- [x] Quality audit (step 3)
+- [x] Consistency audit (step 4)
+- [x] Documentation audit — coverage, whole-tree sweep, docs build clean (step 4a)
+- [x] Docs-readability pass: skipped — no docs-readability reviewer configured in this session (step 4b)
+- [x] Findings recorded above with severity, class, and disposition; disposition summary + cost line present (step 5)
 
 ## History
 
@@ -418,3 +433,4 @@ longer mandatory) and its new `422`/`409` error cases.
 - 2026-09-01 — TO DO → READY: plan complete
 - 2026-09-01 — READY → IN DEVELOPMENT: picked up
 - 2026-09-01 — IN DEVELOPMENT → IN REVIEW: acceptance green
+- 2026-09-01 — IN REVIEW → REWORK: F1: unprotected explicit-customer_id mint race
