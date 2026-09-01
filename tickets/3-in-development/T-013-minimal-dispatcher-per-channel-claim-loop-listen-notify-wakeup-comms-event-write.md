@@ -404,3 +404,4 @@ User-facing surface: the new `messgr-dispatcher` binary and its env vars.
 
 - 2026-08-31 — created (TO DO). source: chat: filed from PLAN.md's build-step-2 decomposition; member of the step-2 ticket family (umbrella T-007)
 - 2026-09-01 — TO DO → READY: plan complete
+- 2026-09-01 — READY → IN DEVELOPMENT: picked up
