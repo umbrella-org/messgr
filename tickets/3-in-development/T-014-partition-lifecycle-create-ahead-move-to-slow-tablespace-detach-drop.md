@@ -193,17 +193,26 @@ Extend `src/bin/control.rs` with:
 /// + drop at the tenant's retention boundary. Meant to run on a schedule
 /// (cron/systemd timer) -- this binary does not daemonize or loop.
 PartitionLifecycle {
-    #[arg(long)]
-    tenant_slug: String,
+    #[command(subcommand)]
+    command: PartitionLifecycleCommand,
 },
 ```
+with a nested `PartitionLifecycleCommand::Run { tenant_slug: String }` — nested, not flat, to
+match every other multi-word command in this file (`Producer`/`TenantConfig`/`CustomerDek`
+all nest even a single-variant subcommand) and the `partition-lifecycle run --tenant-slug`
+form this plan's decision 1 and the Acceptance test below already use.
 
-Handler: resolve `tenant_slug` via `tenant_repo::find_by_slug` (error on unknown slug, no
-`platform_audit` write — this is a read/maintenance operation, not a state change to a
-control-plane record, so it follows `Migrate`'s pattern, not `Producer`/`TenantConfig`'s
-audited-write pattern). No Vault client connected, for the same reason `Migrate` doesn't
-connect one. `connect_tenant_pool`, `tenant_config::repo::load`, call
-`partition_lifecycle::lifecycle::run(&tenant_pool, chrono::Utc::now(), loaded.as_ref())`, print
+Handler: resolution/connection/close is wrapped in a `partition_lifecycle::lifecycle::
+run_for_tenant(control_pool, base_db_url, tenant_slug, as_of, profile)` function (mirroring
+`tenant_config::configure::set_tenant_config`'s own resolve/connect/close shape) rather than
+inlined in `control.rs` — every other command in this file delegates that wiring to its domain
+module, and this one is no exception. It resolves `tenant_slug` via `tenant_repo::find_by_slug`
+(error on unknown slug via `sqlx::Error::Configuration`, matching `ConfigureError`'s
+`rejected()` helper — no `platform_audit` write, since this is a read/maintenance operation,
+not a state change to a control-plane record, so it follows `Migrate`'s no-audit precedent, not
+`Producer`/`TenantConfig`'s audited-write one). No Vault client connected in `control.rs`, for
+the same reason `Migrate` doesn't connect one. The handler calls `run_for_tenant(&control_pool,
+&config.control_database_url, &tenant_slug, chrono::Utc::now(), config.profile)` and prints
 `created=<n> moved=<n> dropped=<n>` and, when `retention_skipped`, an additional line
 `retention: skipped (tenant_config not set)`.
 
@@ -310,3 +319,4 @@ User-facing surface: the new `messgr-control partition-lifecycle` subcommand and
 - 2026-08-31 — created (TO DO). source: chat: filed from PLAN.md's build-step-2 decomposition; member of the step-2 ticket family (umbrella T-007)
 - 2026-09-01 — TO DO → READY: plan complete
 - 2026-09-01 — READY → IN DEVELOPMENT: picked up
+- 2026-09-01 — plan amended inline: Task 4's code sketch showed a flat `PartitionLifecycle { tenant_slug }` variant, contradicting decision 1 and the Acceptance test's own `partition-lifecycle run --tenant-slug` usage; implemented as nested `PartitionLifecycle { command: PartitionLifecycleCommand }` with `Run { tenant_slug }`, and wrapped tenant resolution/connection in a `lifecycle::run_for_tenant` function mirroring `set_tenant_config`'s shape, keeping `control.rs` thin like every other command
