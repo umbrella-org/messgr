@@ -134,6 +134,13 @@ enum DevPkiCommand {
         common_name: String,
         #[arg(long = "out-dir")]
         out_dir: PathBuf,
+        /// Also sets `--common-name` as a DNS SAN (`issue_server_cert`
+        /// instead of `issue_cert`) — required for a certificate a TLS
+        /// client will hostname-check, i.e. a server identity such as
+        /// `messgr-ingest`'s own cert. Producer/client certificates never
+        /// need this and should omit the flag (T-011).
+        #[arg(long = "server", action = clap::ArgAction::SetTrue)]
+        server: bool,
     },
 }
 
@@ -420,15 +427,25 @@ async fn main() {
                 DevPkiCommand::IssueCert {
                     common_name,
                     out_dir,
+                    server,
                 } => {
-                    let cert = dev_pki::issue_cert(vault_keystore.client(), config.profile, &common_name)
+                    let cert = if server {
+                        dev_pki::issue_server_cert(
+                            vault_keystore.client(),
+                            config.profile,
+                            &common_name,
+                        )
                         .await
-                        .unwrap_or_else(|err| {
-                            panic!(
-                                "failed to issue a dev certificate for {common_name:?} (has \
-                                 `messgr-control dev-pki bootstrap` been run?): {err}"
-                            )
-                        });
+                    } else {
+                        dev_pki::issue_cert(vault_keystore.client(), config.profile, &common_name)
+                            .await
+                    }
+                    .unwrap_or_else(|err| {
+                        panic!(
+                            "failed to issue a dev certificate for {common_name:?} (has \
+                             `messgr-control dev-pki bootstrap` been run?): {err}"
+                        )
+                    });
 
                     std::fs::create_dir_all(&out_dir).unwrap_or_else(|err| {
                         panic!("failed to create {out_dir:?}: {err}")

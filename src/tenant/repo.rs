@@ -20,6 +20,25 @@ pub async fn find_by_slug(
     .await
 }
 
+/// Looks up a tenant by its control-database id, the shape `resolve_producer`
+/// (T-006) hands back — `find_by_slug`'s counterpart for callers that only
+/// have `tenant_id` (T-011's tenant registry).
+pub async fn find_by_id(
+    pool: &PgPool,
+    tenant_id: Uuid,
+) -> Result<Option<Tenant>, sqlx::Error> {
+    sqlx::query_as::<_, Tenant>(
+        r#"
+        SELECT id, slug, region, database_name, vault_mount, vault_role_id, vault_pepper_wrapped, webhook_token, status, created_at
+        FROM tenant
+        WHERE id = $1
+        "#,
+    )
+    .bind(tenant_id)
+    .fetch_optional(pool)
+    .await
+}
+
 /// Persists the public AppRole RoleID Vault issued for this tenant
 /// (`tenant.vault_role_id`, T-004). Never called with a SecretID — that is
 /// never a column (DESIGN.md §7.6, this ticket's decision 2).

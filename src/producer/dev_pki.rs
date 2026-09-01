@@ -92,7 +92,12 @@ pub async fn bootstrap(
 }
 
 /// Issues a leaf certificate for `common_name` from the dev `producer-dev`
-/// role. Callers are expected to have called `bootstrap` first.
+/// role. Callers are expected to have called `bootstrap` first. No SAN is
+/// set — `common_name` is an opaque producer identifier (T-005 decision 7:
+/// "not real DNS domains"), not necessarily even legal DNS-label syntax,
+/// and client certificates never go through hostname verification anyway.
+/// For a certificate that a TLS client *will* hostname-check (a server
+/// identity — T-011), use `issue_server_cert` instead.
 pub async fn issue_cert(
     client: &VaultClient,
     profile: Profile,
@@ -102,6 +107,26 @@ pub async fn issue_cert(
 
     let mut opts = GenerateCertificateRequest::builder();
     opts.common_name(common_name);
+    Ok(cert::generate(client, PKI_MOUNT, DEV_ROLE, Some(&mut opts)).await?)
+}
+
+/// Issues a leaf certificate for a server identity: `hostname` becomes both
+/// the CN and a DNS SAN. Unlike `issue_cert`'s producer identities, a
+/// server's certificate *is* hostname-checked by every connecting TLS
+/// client, and modern clients ignore the CN entirely for that check — a
+/// SAN-less certificate fails hostname verification with an empty
+/// presented-names list, not a CN fallback match. `hostname` must be legal
+/// DNS-label syntax (Vault validates the SAN, unlike the CN under
+/// `allow_any_name`).
+pub async fn issue_server_cert(
+    client: &VaultClient,
+    profile: Profile,
+    hostname: &str,
+) -> Result<GenerateCertificateResponse, KeyStoreError> {
+    assert_dev_profile(profile);
+
+    let mut opts = GenerateCertificateRequest::builder();
+    opts.common_name(hostname).alt_names(hostname);
     Ok(cert::generate(client, PKI_MOUNT, DEV_ROLE, Some(&mut opts)).await?)
 }
 
