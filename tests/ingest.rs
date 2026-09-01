@@ -358,6 +358,34 @@ fn sample_body(customer_id: Uuid) -> serde_json::Value {
     })
 }
 
+fn sample_body_external(
+    system: &str,
+    external_id: &str,
+    destination: &str,
+) -> serde_json::Value {
+    serde_json::json!({
+        "external_id": external_id,
+        "external_id_system": system,
+        "destination": destination,
+        "channel": "sms",
+        "class": "transactional",
+        "template_id": "balance-alert",
+        "template_version": 1,
+        "variables": { "name": "Jordan", "balance": "100.00" }
+    })
+}
+
+fn sample_body_address_only(destination: &str) -> serde_json::Value {
+    serde_json::json!({
+        "destination": destination,
+        "channel": "sms",
+        "class": "transactional",
+        "template_id": "balance-alert",
+        "template_version": 1,
+        "variables": { "name": "Jordan", "balance": "100.00" }
+    })
+}
+
 #[tokio::test]
 async fn create_comms_writes_ledger_and_outbox_and_idempotency_replays() {
     let fixture = setup("en-US").await;
@@ -747,6 +775,271 @@ async fn request_validation_rejects_bad_input_before_any_write() {
         "no rejected request should write a ledger row"
     );
     tenant_pool.close().await;
+
+    teardown(&fixture, Some(&_cert_subject)).await;
+}
+
+#[tokio::test]
+async fn resolved_address_id_is_a_real_customer_address_row() {
+    let fixture = setup("en-US").await;
+    let vault = vault_keystore();
+    let (identity_pem, _cert_subject) =
+        register_test_producer(&fixture, &vault, "address-row-caller").await;
+    let client = mtls_client(
+        &fixture.server_common_name,
+        fixture.server.addr,
+        &identity_pem,
+        &fixture.server_ca_pem,
+    );
+    let url = format!(
+        "https://{}:{}/comms",
+        fixture.server_common_name,
+        fixture.server.addr.port()
+    );
+
+    let customer_id = Uuid::new_v4();
+    let response = client
+        .post(&url)
+        .header("Idempotency-Key", unique_name("idem"))
+        .json(&sample_body(customer_id))
+        .send()
+        .await
+        .expect("request failed");
+    assert_eq!(response.status(), 201);
+    let body: serde_json::Value =
+        response.json().await.expect("parsing response failed");
+    let comms_request_id: Uuid = body["comms_request_id"]
+        .as_str()
+        .expect("comms_request_id must be a string")
+        .parse()
+        .expect("comms_request_id must be a uuid");
+
+    let tenant_pool = connect_tenant_pool(
+        &fixture.control_url,
+        &fixture.database_name,
+        5,
+        Profile::Dev,
+    )
+    .await
+    .expect("connecting to tenant pool failed");
+
+    let address_id: Uuid =
+        sqlx::query_scalar("SELECT address_id FROM outbox WHERE comms_request_id = $1")
+            .bind(comms_request_id)
+            .fetch_one(&tenant_pool)
+            .await
+            .expect("outbox row must exist");
+
+    let address_customer_id: Uuid =
+        sqlx::query_scalar("SELECT customer_id FROM customer_address WHERE id = $1")
+            .bind(address_id)
+            .fetch_one(&tenant_pool)
+            .await
+            .expect("outbox.address_id must reference a real customer_address row");
+    assert_eq!(address_customer_id, customer_id);
+
+    tenant_pool.close().await;
+    teardown(&fixture, Some(&_cert_subject)).await;
+}
+
+#[tokio::test]
+async fn address_only_request_without_customer_id_or_external_id_succeeds() {
+    let fixture = setup("en-US").await;
+    let vault = vault_keystore();
+    let (identity_pem, _cert_subject) =
+        register_test_producer(&fixture, &vault, "address-only-caller").await;
+    let client = mtls_client(
+        &fixture.server_common_name,
+        fixture.server.addr,
+        &identity_pem,
+        &fixture.server_ca_pem,
+    );
+    let url = format!(
+        "https://{}:{}/comms",
+        fixture.server_common_name,
+        fixture.server.addr.port()
+    );
+
+    let response = client
+        .post(&url)
+        .header("Idempotency-Key", unique_name("idem"))
+        .json(&sample_body_address_only("+15550900"))
+        .send()
+        .await
+        .expect("request failed");
+    assert_eq!(response.status(), 201, "expected 201 Created");
+
+    let tenant_pool = connect_tenant_pool(
+        &fixture.control_url,
+        &fixture.database_name,
+        5,
+        Profile::Dev,
+    )
+    .await
+    .expect("connecting to tenant pool failed");
+    let customer_count: i64 = sqlx::query_scalar("SELECT count(*) FROM customer")
+        .fetch_one(&tenant_pool)
+        .await
+        .expect("counting customer rows failed");
+    assert_eq!(
+        customer_count, 1,
+        "an address-only request must provision exactly one customer"
+    );
+
+    tenant_pool.close().await;
+    teardown(&fixture, Some(&_cert_subject)).await;
+}
+
+#[tokio::test]
+async fn customer_id_and_external_id_together_is_rejected() {
+    let fixture = setup("en-US").await;
+    let vault = vault_keystore();
+    let (identity_pem, _cert_subject) =
+        register_test_producer(&fixture, &vault, "both-ids-caller").await;
+    let client = mtls_client(
+        &fixture.server_common_name,
+        fixture.server.addr,
+        &identity_pem,
+        &fixture.server_ca_pem,
+    );
+    let url = format!(
+        "https://{}:{}/comms",
+        fixture.server_common_name,
+        fixture.server.addr.port()
+    );
+
+    let mut body = sample_body(Uuid::new_v4());
+    body["external_id"] = serde_json::json!("cust-123");
+    body["external_id_system"] = serde_json::json!("core_banking");
+
+    let response = client
+        .post(&url)
+        .header("Idempotency-Key", unique_name("idem"))
+        .json(&body)
+        .send()
+        .await
+        .expect("request failed");
+    assert_eq!(response.status(), 422);
+    let response_body: serde_json::Value =
+        response.json().await.expect("parsing response failed");
+    assert_eq!(
+        response_body["error"],
+        "exactly one of customer_id, (external_id + external_id_system), or neither must be set"
+    );
+
+    teardown(&fixture, Some(&_cert_subject)).await;
+}
+
+#[tokio::test]
+async fn external_id_request_resolves_to_the_same_customer_on_replay() {
+    let fixture = setup("en-US").await;
+    let vault = vault_keystore();
+    let (identity_pem, _cert_subject) =
+        register_test_producer(&fixture, &vault, "external-id-caller").await;
+    let client = mtls_client(
+        &fixture.server_common_name,
+        fixture.server.addr,
+        &identity_pem,
+        &fixture.server_ca_pem,
+    );
+    let url = format!(
+        "https://{}:{}/comms",
+        fixture.server_common_name,
+        fixture.server.addr.port()
+    );
+
+    let system = "core_banking";
+    let external_id = unique_name("ext");
+
+    let response = client
+        .post(&url)
+        .header("Idempotency-Key", unique_name("idem"))
+        .json(&sample_body_external(system, &external_id, "+15551100"))
+        .send()
+        .await
+        .expect("first request failed");
+    assert_eq!(response.status(), 201);
+
+    let tenant_pool = connect_tenant_pool(
+        &fixture.control_url,
+        &fixture.database_name,
+        5,
+        Profile::Dev,
+    )
+    .await
+    .expect("connecting to tenant pool failed");
+    let customer_id: Uuid = sqlx::query_scalar(
+        "SELECT customer_id FROM customer_external_id WHERE system = $1 AND external_id = $2",
+    )
+    .bind(system)
+    .bind(&external_id)
+    .fetch_one(&tenant_pool)
+    .await
+    .expect("customer_external_id row must exist");
+
+    // A second, distinct send for the same external id must resolve to the
+    // same customer rather than minting a second one.
+    let response = client
+        .post(&url)
+        .header("Idempotency-Key", unique_name("idem"))
+        .json(&sample_body_external(system, &external_id, "+15551100"))
+        .send()
+        .await
+        .expect("second request failed");
+    assert_eq!(response.status(), 201);
+
+    let customer_count: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM customer WHERE id = $1")
+            .bind(customer_id)
+            .fetch_one(&tenant_pool)
+            .await
+            .expect("counting customer rows failed");
+    assert_eq!(customer_count, 1);
+
+    tenant_pool.close().await;
+    teardown(&fixture, Some(&_cert_subject)).await;
+}
+
+#[tokio::test]
+async fn same_destination_under_two_customer_ids_is_conflicted() {
+    let fixture = setup("en-US").await;
+    let vault = vault_keystore();
+    let (identity_pem, _cert_subject) =
+        register_test_producer(&fixture, &vault, "conflict-caller").await;
+    let client = mtls_client(
+        &fixture.server_common_name,
+        fixture.server.addr,
+        &identity_pem,
+        &fixture.server_ca_pem,
+    );
+    let url = format!(
+        "https://{}:{}/comms",
+        fixture.server_common_name,
+        fixture.server.addr.port()
+    );
+
+    let destination = "+15551000";
+    let mut first_body = sample_body(Uuid::new_v4());
+    first_body["destination"] = serde_json::json!(destination);
+    let response = client
+        .post(&url)
+        .header("Idempotency-Key", unique_name("idem"))
+        .json(&first_body)
+        .send()
+        .await
+        .expect("first request failed");
+    assert_eq!(response.status(), 201);
+
+    let mut second_body = sample_body(Uuid::new_v4());
+    second_body["destination"] = serde_json::json!(destination);
+    let response = client
+        .post(&url)
+        .header("Idempotency-Key", unique_name("idem"))
+        .json(&second_body)
+        .send()
+        .await
+        .expect("second request failed");
+    assert_eq!(response.status(), 409);
 
     teardown(&fixture, Some(&_cert_subject)).await;
 }
