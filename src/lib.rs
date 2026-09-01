@@ -10,6 +10,8 @@ pub mod mtls;
 pub mod platform_audit;
 pub mod producer;
 pub mod profile;
+pub mod provider_config;
+pub mod sender;
 pub mod template;
 pub mod tenant;
 pub mod tenant_config;
