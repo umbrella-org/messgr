@@ -1,4 +1,5 @@
 pub mod config;
+pub mod customer;
 pub mod customer_dek;
 pub mod db;
 pub mod destination_hmac;
