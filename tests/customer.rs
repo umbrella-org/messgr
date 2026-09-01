@@ -510,6 +510,51 @@ async fn concurrent_external_id_resolution_mints_exactly_one_provisional_custome
 }
 
 #[tokio::test]
+async fn concurrent_explicit_customer_id_resolution_does_not_error() {
+    // Regression for review finding F1: two concurrent Explicit(id) mints
+    // for the same never-before-seen id used to race a plain INSERT with no
+    // ON CONFLICT, so the loser hit a raw unique-violation surfaced as
+    // ResolveError::Database instead of a resolved customer.
+    let fixture = setup().await;
+    let cache = small_cache();
+    let customer_id = Uuid::new_v4();
+
+    let call_one = resolve(
+        &fixture.tenant_pool,
+        &fixture.vault,
+        &cache,
+        &fixture.mount,
+        TEST_PEPPER,
+        ResolutionInput::Explicit(customer_id),
+        "+15551200",
+        "sms",
+        DEFAULT_LOCALE,
+        DEFAULT_TIMEZONE,
+    );
+    let call_two = resolve(
+        &fixture.tenant_pool,
+        &fixture.vault,
+        &cache,
+        &fixture.mount,
+        TEST_PEPPER,
+        ResolutionInput::Explicit(customer_id),
+        "+15551200",
+        "sms",
+        DEFAULT_LOCALE,
+        DEFAULT_TIMEZONE,
+    );
+    let (result_one, result_two) = tokio::join!(call_one, call_two);
+    let result_one = result_one.expect("first concurrent resolve failed");
+    let result_two = result_two.expect("second concurrent resolve failed");
+
+    assert_eq!(result_one.customer_id, customer_id);
+    assert_eq!(result_two.customer_id, customer_id);
+    assert_eq!(customer_count(&fixture.tenant_pool, customer_id).await, 1);
+
+    fixture.teardown().await;
+}
+
+#[tokio::test]
 async fn conflicting_customer_ids_over_the_same_destination_is_rejected() {
     let fixture = setup().await;
     let cache = small_cache();

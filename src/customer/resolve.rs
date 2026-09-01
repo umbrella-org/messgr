@@ -263,6 +263,13 @@ pub async fn resolve(
     })
 }
 
+/// Two concurrent `Explicit(id)` resolutions for the same never-before-seen
+/// id can both reach this point (review finding F1): `insert_customer`'s
+/// `ON CONFLICT (id) DO NOTHING` makes the loser's insert a no-op instead of
+/// a raw unique-violation propagating as a `500`. Either way, by the time
+/// this returns, a customer row exists under `id` — which is all the caller
+/// needs, since it already holds `id` and both racers would have minted the
+/// same provisional shape (decision 6).
 async fn mint_provisional_customer(
     pool: &PgPool,
     id: Uuid,

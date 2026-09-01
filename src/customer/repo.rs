@@ -100,31 +100,49 @@ pub async fn find_active_address_for_customer(
 }
 
 /// Callable only with an open transaction: the `FOR UPDATE` row lock it
-/// takes over `customer_id`'s active address rows is what makes two
-/// concurrent inserts for two different new destinations on the same
-/// customer never collide on the same rank (decision 8, third bullet).
+/// takes is what makes two concurrent inserts for two different new
+/// destinations on the same customer never collide on the same rank
+/// (decision 8, third bullet).
+///
+/// The lock is taken on `customer_id`'s own row, not on its (possibly
+/// empty) set of active address rows: `FOR UPDATE` cannot lock a row that
+/// doesn't exist yet, so a customer's *first* address of a given `kind`
+/// would otherwise be unprotected — two concurrent resolutions converging
+/// on the same customer (e.g. two racing external-id lookups that both
+/// land on the same winner) would both see zero existing rows, both
+/// compute rank 1, and collide on `customer_address`'s
+/// `(customer_id, kind, rank)` unique index. The customer row always
+/// exists by this point (`customer_id` is already resolved), so locking it
+/// serializes every concurrent address insert under this customer,
+/// regardless of `kind` or whether any address rows exist yet.
 pub async fn next_rank_for_update(
     tx: &mut PgTransaction<'_>,
     customer_id: Uuid,
     kind: &str,
 ) -> Result<i16, sqlx::Error> {
-    // `FOR UPDATE` cannot be combined with an aggregate in the same query
-    // (Postgres: "FOR UPDATE is not allowed with aggregate functions"), so
-    // the lock and the max are two steps — the lock is still taken over
-    // every active row for this (customer_id, kind) before this function
-    // returns, which is what makes it safe to compute the next rank from.
-    let ranks: Vec<i16> = sqlx::query_scalar(
-        "SELECT rank FROM customer_address \
-         WHERE customer_id = $1 AND kind = $2 AND active_to IS NULL FOR UPDATE",
+    sqlx::query("SELECT id FROM customer WHERE id = $1 FOR UPDATE")
+        .bind(customer_id)
+        .fetch_one(&mut **tx)
+        .await?;
+
+    let max_rank: Option<i16> = sqlx::query_scalar(
+        "SELECT MAX(rank) FROM customer_address \
+         WHERE customer_id = $1 AND kind = $2 AND active_to IS NULL",
     )
     .bind(customer_id)
     .bind(kind)
-    .fetch_all(&mut **tx)
+    .fetch_one(&mut **tx)
     .await?;
 
-    Ok(ranks.into_iter().max().unwrap_or(0) + 1)
+    Ok(max_rank.unwrap_or(0) + 1)
 }
 
+/// Returns whether this call's row won the insert. `false` means a
+/// concurrent caller already claimed `id` — the only caller that can
+/// observe this is the explicit-`customer_id` mint path (decision 6),
+/// since it's the only one that inserts under a caller-supplied id rather
+/// than a freshly generated one; a fresh `Uuid::new_v4()` colliding here is
+/// not a real possibility, so the other mint paths discard the result.
 #[allow(clippy::too_many_arguments)]
 pub async fn insert_customer(
     tx: &mut PgTransaction<'_>,
@@ -134,11 +152,12 @@ pub async fn insert_customer(
     provisional: bool,
     source_updated_at: Option<DateTime<Utc>>,
     created_at: DateTime<Utc>,
-) -> Result<(), sqlx::Error> {
-    sqlx::query(
+) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query(
         r#"
         INSERT INTO customer (id, locale, timezone, provisional, source_system, source_updated_at, created_at)
         VALUES ($1, $2, $3, $4, NULL, $5, $6)
+        ON CONFLICT (id) DO NOTHING
         "#,
     )
     .bind(id)
@@ -148,8 +167,9 @@ pub async fn insert_customer(
     .bind(source_updated_at)
     .bind(created_at)
     .execute(&mut **tx)
-    .await
-    .map(|_| ())
+    .await?;
+
+    Ok(result.rows_affected() == 1)
 }
 
 /// Returns whether the row was actually inserted — `false` means a
