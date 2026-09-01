@@ -312,7 +312,29 @@ User-facing surface: the new `messgr-control partition-lifecycle` subcommand and
 
 ## Review
 
-<!-- empty until IN REVIEW -->
+- [x] Implementation audit — acceptance test re-run, tasks & criteria verified (step 2)
+- [x] Quality audit (step 3)
+- [x] Consistency audit (step 4)
+- [x] Documentation audit — coverage, whole-tree sweep, docs build clean (step 4a) — README's new "Partition lifecycle" section covers the CLI surface; `docs/user-manual.adoc` (10 lines, no CLI coverage yet — same as T-007/T-012's precedent) and `CHANGELOG.md` (never populated by any prior ticket) are untouched, consistent with established practice; `snowball build` runs clean (generated `.pdf`/`.epub` deleted after, matching the project's `.gitignore` not tracking them)
+- [x] Docs-readability pass — skipped: no docs-readability reviewer configured in this session
+- [x] Findings recorded with severity, class, and disposition; disposition summary + cost line below (step 5)
+- [x] Ticket moved to `tickets/6-done/` or `tickets/5-rework/`; `## History` appended (step 6)
+- [x] Remaining-tickets impact sweep done (step 8) — `tickets/1-to-do/` and `tickets/2-ready/` are both empty; nothing depends on T-014
+
+**Re-ran the acceptance test independently** on `feat/T-014-partition-lifecycle`: `just db-up`/`control-migrate`/`vault-dev-init`/`tablespace-init` (idempotent — tablespace already existed), `just fmt`/`lint`/`test` all green (107 tests total across 19 binaries, 6/6 in `tests/partition_lifecycle.rs` after the fix below, no regressions). Independently provisioned a fresh tenant (`acme_review014`) and ran `partition-lifecycle run` twice: both printed `created=0 moved=0 dropped=0` / `retention: skipped (tenant_config not set)`, identical — matches the plan's Acceptance test verbatim. Cleaned up the review tenant afterward.
+
+Read `lifecycle.rs`/`repo.rs`/`model.rs`/`control.rs` line-by-line against all 10 confirmed design decisions — each honoured exactly as stated (18-month threshold is a fixed constant never reading `tenant_config`; drop is skipped entirely, not defaulted, when `tenant_config` is `None`; partition age comes from name-parsing, not `pg_get_expr`; `as_of` is threaded explicitly with no internal `Utc::now()` outside the CLI handler; indexes move alongside their table; the CLI nests `Run` under `PartitionLifecycle` as the plan's own decision 1 and Acceptance test require).
+
+Project-wide search for `partition_lifecycle`/`partition-lifecycle`/`tablespace-init`/`messgr_cold` found no stale reference this branch should have updated — every hit is in this ticket's own files, `PLAN.md`'s pre-existing T-014 row (still accurate), or prior done tickets' own historical notes about T-014 (T-009, T-007, T-012, T-013 — all read, none needed patching).
+
+| id | severity | class | disposition | description | evidence | suggestion |
+|---|---|---|---|---|---|---|
+| F1 | non-blocking | test-gap | fixed inline | T-009's review (finding F1) noted its bootstrap only verified the next-month partition's *existence* via `pg_inherits`, never a real insert, and explicitly deferred that data-level coverage to "T-014's own test suite" — this ticket's own Task 5 test list didn't include it, and the delivered suite had the same gap for its own create-ahead logic | `tests/partition_lifecycle.rs` (pre-fix) — no test inserted into a next-month bootstrap partition | **FIXED.** Added `the_next_month_bootstrap_partition_accepts_a_real_insert`, inserting into both `comms_request` and `comms_event`'s next-month partitions and asserting the row round-trips; `just fmt`/`lint`/`test` re-confirmed green (commit `7e70fe0`) |
+| F2 | non-blocking | design | noted | `repo.rs` interpolates partition/index identifiers into DDL via plain Rust `format!`, with no Postgres `%I`/`%L`-style quoting — unlike T-009's own bootstrap `DO` block, which used `format(..., %I, %L)` for the identical kind of dynamic DDL. Not exploitable today: `parse_partition_month`'s strict length + all-ASCII-digit check makes injection structurally impossible for any name that survives to reach `move_to_tablespace`/`detach_and_drop`, and `create_partition`'s inputs are always one of two hardcoded table names plus a validated `NaiveDate` | `src/partition_lifecycle/repo.rs` — `create_partition`, `move_to_tablespace`, `detach_and_drop` | Not worth a dedicated ticket — the validation guard already closes the actual risk. Worth keeping in mind if that guard is ever loosened without re-adding equivalent quoting; noted here so a future reader has the pointer |
+
+Disposition summary: 1 fixed inline (F1), 1 noted (F2). No blocking findings.
+
+cost: estimated M, actual M
 
 ## History
 
@@ -321,3 +343,4 @@ User-facing surface: the new `messgr-control partition-lifecycle` subcommand and
 - 2026-09-01 — READY → IN DEVELOPMENT: picked up
 - 2026-09-01 — plan amended inline: Task 4's code sketch showed a flat `PartitionLifecycle { tenant_slug }` variant, contradicting decision 1 and the Acceptance test's own `partition-lifecycle run --tenant-slug` usage; implemented as nested `PartitionLifecycle { command: PartitionLifecycleCommand }` with `Run { tenant_slug }`, and wrapped tenant resolution/connection in a `lifecycle::run_for_tenant` function mirroring `set_tenant_config`'s shape, keeping `control.rs` thin like every other command
 - 2026-09-01 — IN DEVELOPMENT → IN REVIEW: acceptance green
+- 2026-09-01 — IN REVIEW → DONE: review clean: 1 fixed inline (F1), 1 noted (F2); no blocking findings
