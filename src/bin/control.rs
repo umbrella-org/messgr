@@ -6,6 +6,7 @@ use messgr::config::Config;
 use messgr::customer_dek::lifecycle::pre_provision_for_tenant;
 use messgr::db;
 use messgr::keystore::VaultKeyStore;
+use messgr::partition_lifecycle::lifecycle::run_for_tenant as run_partition_lifecycle;
 use messgr::producer::dev_pki;
 use messgr::producer::register::{disable_producer, list_producers, register_producer};
 use messgr::provider_config::configure::{list_provider_config, set_provider_config};
@@ -90,6 +91,15 @@ enum Command {
     ProviderConfig {
         #[command(subcommand)]
         command: ProviderConfigCommand,
+    },
+    /// Keep comms_request/comms_event partitions self-managing (DESIGN.md
+    /// §4.1, §7.2, §7.5, T-014): create-ahead, move to slow tablespace,
+    /// detach + drop at the tenant's retention boundary. Meant to run on a
+    /// schedule (cron/systemd timer) — this binary does not daemonize or
+    /// loop.
+    PartitionLifecycle {
+        #[command(subcommand)]
+        command: PartitionLifecycleCommand,
     },
 }
 
@@ -319,6 +329,19 @@ enum ProviderConfigCommand {
         tenant_slug: String,
         #[arg(long)]
         channel: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum PartitionLifecycleCommand {
+    /// Ensure current+next month partitions exist, move partitions past 18
+    /// months to the cold tablespace, and detach + drop partitions past the
+    /// tenant's `tenant_config.retention_years` boundary. Skips the drop
+    /// step entirely (never assumes a default) when the tenant has no
+    /// `tenant_config` row.
+    Run {
+        #[arg(long = "tenant-slug")]
+        tenant_slug: String,
     },
 }
 
@@ -827,6 +850,33 @@ async fn main() {
                             row.rate_limit_per_sec,
                         );
                     }
+                }
+            }
+        },
+        // No Vault client is connected here either — partition-lifecycle
+        // touches neither Transit nor AppRole.
+        Command::PartitionLifecycle { command } => match command {
+            PartitionLifecycleCommand::Run { tenant_slug } => {
+                let report = run_partition_lifecycle(
+                    &control_pool,
+                    &config.control_database_url,
+                    &tenant_slug,
+                    chrono::Utc::now(),
+                    config.profile,
+                )
+                .await
+                .unwrap_or_else(|err| {
+                    panic!("partition lifecycle run failed for tenant {tenant_slug:?}: {err}")
+                });
+
+                println!(
+                    "created={} moved={} dropped={}",
+                    report.created.len(),
+                    report.moved.len(),
+                    report.dropped.len()
+                );
+                if report.retention_skipped {
+                    println!("retention: skipped (tenant_config not set)");
                 }
             }
         },
