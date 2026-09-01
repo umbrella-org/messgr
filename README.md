@@ -253,7 +253,9 @@ transaction, encrypting the destination and rendered template body under the cus
 (DESIGN.md §4.1–§4.3, §7, §11). The request body identifies the customer one of three ways —
 exactly one of `customer_id`, `external_id` + `external_id_system` together, or neither (resolve
 by `destination` alone) — any other combination is rejected (`422`). No gate chain exists yet
-(`T-016`), and `class = "auth"` is rejected outright (`422`) — OTP has its own path
+(consent, quotas, kill switches, suppression — §5, §5.1, §5.2 — are unbuilt; `T-016` is kill
+switches specifically, not the gate chain as a whole), and `class = "auth"` is rejected outright
+(`422`) — OTP has its own path
 (`sms-sender`/`otp-api`, `T-047`), never this one.
 
 Requires four env vars, no defaults (`.env.example`): `INGEST_LISTEN_ADDR` (default
