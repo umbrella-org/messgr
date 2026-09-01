@@ -441,3 +441,4 @@ cost: estimated L, actual L
 - 2026-09-01 — IN REVIEW → REWORK: F1: unprotected explicit-customer_id mint race
 - 2026-09-01 — REWORK → IN REVIEW: F1 and F4 fixed
 - 2026-09-01 — IN REVIEW → DONE: scoped re-review clean, F1+F4 confirmed fixed
+- 2026-09-01 — MR opened: PR #18 (`feat/T-015-customer-projection-resolution`), awaiting merge
