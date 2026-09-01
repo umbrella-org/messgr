@@ -572,13 +572,12 @@ CREATE TABLE quiet_hours_policy (
 );
 
 CREATE TABLE provider_config (
-    tenant_id       uuid NOT NULL,
     channel         text NOT NULL,
     priority        smallint NOT NULL,  -- ordered list; failover order (§12.1)
     provider        text NOT NULL,      -- twilio | smtp | meta_wa | ...
     credential_path text NOT NULL,      -- Vault path, never the credential itself
     rate_limit_per_sec int NOT NULL,
-    PRIMARY KEY (tenant_id, channel, priority)
+    PRIMARY KEY (channel, priority)
 );
 ```
 
@@ -586,8 +585,13 @@ T-007 ships only `tenant_config`'s `retention_years`, `default_timezone`, `defau
 `schedule_horizon_days`, `quota_day_boundary_tz`, `verification_mode`, and `staleness_max_age` —
 `display_name` and the `oidc_*` columns are shown above as the eventual design but are not yet
 migrated; nothing reads them yet (T-035 adds the `oidc_*` columns when real OIDC lands).
-`quiet_hours_policy` and `provider_config` are unrelated tables not yet created either (later
-tickets: quiet-hours resolution, T-012's provider selection).
+`quiet_hours_policy` is an unrelated table not yet created (later ticket: quiet-hours
+resolution). `provider_config` ships in T-012, without a `tenant_id` column — corrected here to
+match the "no `tenant_id` inside a tenant-database table" convention `tenant_config` and
+`producer` already established (§2.1: the tenant is the database); the primary key is
+`(channel, priority)`. T-012 ships the table, a channel-agnostic `Sender` trait, and a generic
+HTTP adapter proven against a mock server — it does not commit to a real vendor, so "provider
+selection" (Still Open #5) remains open.
 
 **Tenants bring their own provider accounts.** The platform never resells messaging, which removes an entire category of problems: rate limits and spend are naturally per-tenant, there is no shared provider budget to arbitrate, and a tenant exhausting its Twilio credit is visibly its own problem. Credentials are referenced by Vault path, never stored in Postgres. Producer quotas (§5.1) become a governance tool for the tenant's internal teams rather than a billing mechanism for the platform.
 

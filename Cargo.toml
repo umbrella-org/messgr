@@ -48,6 +48,7 @@ rustls-pemfile = "2"
 tokio-rustls = "0.26"
 x509-parser = "0.16"
 aes-gcm = "0.10"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 
 [dev-dependencies]
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+wiremock = "0.6"
