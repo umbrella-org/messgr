@@ -13,10 +13,11 @@ Last updated: 2026-09-01
 
 ## IN DEVELOPMENT
 
-### messgr (0/1)
+### messgr (1/1)
 
 | id | title | depends-on |
 |---|---|---|
+| T-014 | Partition lifecycle: create-ahead, move to slow tablespace, detach + drop | [T-009] |
 
 ## IN REVIEW
 
@@ -38,7 +39,6 @@ Last updated: 2026-09-01
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
-| T-014 | Partition lifecycle: create-ahead, move to slow tablespace, detach + drop | medium | medium | M | [T-009] | T-007 |
 
 ## TO DO (impact order, per child)
 
