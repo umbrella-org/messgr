@@ -13,10 +13,11 @@ Last updated: 2026-09-01
 
 ## IN DEVELOPMENT
 
-### messgr (0/1)
+### messgr (1/1)
 
 | id | title | depends-on |
 |---|---|---|
+| T-012 | Sender trait + first SMS provider adapter + provider_config | [T-007] |
 
 ## IN REVIEW
 
@@ -38,7 +39,6 @@ Last updated: 2026-09-01
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
-| T-012 | Sender trait + first SMS provider adapter + provider_config | high | medium | M | [T-007] | T-007 |
 
 ## TO DO (impact order, per child)
 
