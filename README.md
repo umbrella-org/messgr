@@ -95,6 +95,37 @@ are optional, defaulting to DESIGN.md's own `90`/`observe`. This ticket (T-007) 
 table to the six fields above — `display_name` and the `oidc_*` columns from DESIGN.md's full
 §4.10 table arrive later, when a ticket actually reads them (OIDC: T-035).
 
+### Customer projection
+
+`messgr` is never the system of record for customer data — `customer`, `customer_external_id`,
+`customer_address`, and `customer_alias` (DESIGN.md §4.6, `T-015`) are a narrow, read-only
+projection, held only to resolve *who to send to right now*: an id, a locale, a timezone, and a
+handful of contact points, nothing else. There is no CLI surface for these tables; every write
+to them happens inside `messgr-ingest`'s resolution path.
+
+`messgr-ingest` resolves every send to a `customer_id` + `address_id` one of three ways
+(DESIGN.md §4.7):
+
+- **`customer_id` supplied** — used directly, after alias expansion (`customer_alias` redirects a
+  retired id from a master-system merge to its current one).
+- **`external_id` + `external_id_system` supplied** — resolved via `customer_external_id`.
+- **Neither supplied** — resolved via `destination`'s keyed HMAC against currently-active
+  `customer_address` rows.
+
+**Resolution never rejects a send.** Whichever of the three finds nothing mints a *provisional*
+customer (and, for address-only resolution, a provisional address) instead — cheap, thin rows
+that get a DEK like any other customer and are reconciled into a real identity later by the event
+feed, through the same `customer_alias` merge machinery. A blocked OTP is a worse outcome than a
+missing timeline entry, so nothing here ever returns anything but a resolved id (`409` is the one
+exception — see above — and it's a genuine identity conflict, not an absence).
+
+Two pieces of the design are explicitly not built yet: the **event feed** that keeps the
+projection current from the master system (create/update/merge events; build-order step 10), and
+**staleness gating** (DESIGN.md §4.8 — deferring a stale transactional/marketing send rather than
+risking delivery to an address the customer no longer holds). Until the feed exists, every
+non-provisional row in these tables was put there by a previous resolution, not by upstream
+master data.
+
 ### Partition lifecycle
 
 ```
@@ -149,9 +180,10 @@ cargo run --bin messgr-control -- customer-dek pre-provision --tenant-slug acme 
 `customer-dek pre-provision` (DESIGN.md §7.6) ensures each given customer id has a `customer_dek`
 row, minting a fresh Vault Transit datakey for whichever don't — so a sealed or unreachable Vault
 doesn't block a new customer's first message. It takes **explicit customer ids, not a live
-customer base**: the customer projection (DESIGN.md §4.6) doesn't exist yet, so there is nothing
-for this command to query on its own. Wiring an automatic trigger from the real customer base is
-deferred to whichever future ticket has one.
+customer base**: the customer projection (DESIGN.md §4.6, "Customer projection" above) has no
+event feed yet (build-order step 10), so there is no live upstream source for this command to
+query on its own. Wiring an automatic trigger from the real customer base is deferred to
+whichever future ticket adds that feed.
 
 Safe to re-run: identical ids report `already_existed` instead of minting a second DEK. The same
 lifecycle also has a lazy path (`customer_dek::lifecycle::get_or_create_dek`) that future
@@ -215,12 +247,14 @@ reachable against a real Vault.
 ### messgr-ingest: `POST /comms`
 
 `messgr-ingest` (`T-011`) is the first end-to-end send path: it terminates mTLS itself, resolves
-the client certificate to a producer via `resolve_producer` above, and writes the ledger +
-outbox row in one transaction, encrypting the destination and rendered template body under the
-customer's DEK (DESIGN.md §4.1–§4.3, §7, §11). No gate chain and no resolution-at-ingest exist
-yet (`T-016`/`T-017`), so the request body must supply `customer_id` and `destination` directly,
-and `class = "auth"` is rejected outright (`422`) — OTP has its own path (`sms-sender`/`otp-api`,
-`T-047`), never this one.
+the client certificate to a producer via `resolve_producer` above, resolves the customer and
+address to send to (`T-015`, next section), and writes the ledger + outbox row in one
+transaction, encrypting the destination and rendered template body under the customer's DEK
+(DESIGN.md §4.1–§4.3, §7, §11). The request body identifies the customer one of three ways —
+exactly one of `customer_id`, `external_id` + `external_id_system` together, or neither (resolve
+by `destination` alone) — any other combination is rejected (`422`). No gate chain exists yet
+(`T-016`), and `class = "auth"` is rejected outright (`422`) — OTP has its own path
+(`sms-sender`/`otp-api`, `T-047`), never this one.
 
 Requires four env vars, no defaults (`.env.example`): `INGEST_LISTEN_ADDR` (default
 `0.0.0.0:8443` if unset), `INGEST_TLS_CERT_FILE`, `INGEST_TLS_KEY_FILE`,
@@ -250,9 +284,22 @@ curl -sk --cert /tmp/producer-cert/cert.pem --key /tmp/producer-cert/key.pem \
   https://messgr-ingest.internal:8443/comms
 ```
 
+Or identify the customer by an upstream system's own id instead of a `messgr` `customer_id`:
+
+```
+curl -sk --cert /tmp/producer-cert/cert.pem --key /tmp/producer-cert/key.pem \
+  --cacert /tmp/ingest-cert/ca.pem --resolve messgr-ingest.internal:8443:127.0.0.1 \
+  -H "Idempotency-Key: demo-2" -H "Content-Type: application/json" \
+  -d '{"external_id":"core-banking-12345","external_id_system":"core_banking","destination":"+15550100","channel":"sms","class":"transactional","template_id":"balance-alert","template_version":1,"variables":{"name":"Jordan","balance":"100.00"}}' \
+  https://messgr-ingest.internal:8443/comms
+```
+
 Returns `201` with a `comms_request_id` on the first call; repeating it with the same
-`Idempotency-Key` returns `200` with the same id rather than sending twice. Once
-`messgr-dispatcher` (`T-013`, below) is running against this tenant and channel, the row is
+`Idempotency-Key` returns `200` with the same id rather than sending twice. Two other error cases
+are specific to resolution: an invalid combination of `customer_id`/`external_id`/
+`external_id_system` is `422`, and a `destination` already active under a *different* customer
+than the one resolved is `409` (DESIGN.md §4.6's correction — see "Customer projection" above).
+Once `messgr-dispatcher` (`T-013`, below) is running against this tenant and channel, the row is
 picked up and `final_status` moves to `sent` or `failed`.
 
 `docker compose up -d` also starts a dev-mode Vault (`VAULT_ADDR=http://localhost:8200`,
