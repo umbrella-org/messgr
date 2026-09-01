@@ -6,6 +6,7 @@ use axum::response::{IntoResponse, Response};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::customer::resolve::ResolveError;
 use crate::customer_dek::lifecycle::CustomerDekError;
 use crate::encryption::EncryptionError;
 use crate::keystore::KeyStoreError;
@@ -32,7 +33,9 @@ pub mod channel {
 
 #[derive(Debug, Deserialize)]
 pub struct CreateCommsRequest {
-    pub customer_id: Uuid,
+    pub customer_id: Option<Uuid>,
+    pub external_id: Option<String>,
+    pub external_id_system: Option<String>,
     pub destination: String,
     pub channel: String,
     pub class: String,
@@ -63,11 +66,32 @@ pub enum IngestError {
     InvalidClass(String),
     InvalidChannel(String),
     CampaignIdOnTransactional,
+    /// Neither `customer_id` alone, `external_id`+`external_id_system`
+    /// together, nor all three unset (decision 4) — checked before any DB
+    /// or Vault call.
+    InvalidResolutionInput,
     TemplateNotFound,
     Render(RenderError),
     Database(sqlx::Error),
     Encryption(EncryptionError),
     Vault(KeyStoreError),
+    /// The destination's `value_hmac` is already active under a different
+    /// customer (decision 9) — a real identity conflict, not resolution
+    /// finding nothing.
+    AddressConflict(Uuid),
+}
+
+impl From<ResolveError> for IngestError {
+    fn from(err: ResolveError) -> Self {
+        match err {
+            ResolveError::Database(err) => Self::Database(err),
+            ResolveError::Vault(err) => Self::Vault(err),
+            ResolveError::Encryption(err) => Self::Encryption(err),
+            ResolveError::AddressConflict {
+                existing_customer_id,
+            } => Self::AddressConflict(existing_customer_id),
+        }
+    }
 }
 
 impl From<ResolutionError> for IngestError {
@@ -141,11 +165,19 @@ impl std::fmt::Display for IngestError {
             Self::CampaignIdOnTransactional => {
                 write!(f, "campaign_id must be null for class=transactional")
             }
+            Self::InvalidResolutionInput => write!(
+                f,
+                "exactly one of customer_id, (external_id + external_id_system), or neither must be set"
+            ),
             Self::TemplateNotFound => write!(f, "template not found"),
             Self::Render(err) => write!(f, "template render failed: {err}"),
             Self::Database(err) => write!(f, "database error: {err}"),
             Self::Encryption(err) => write!(f, "encryption error: {err}"),
             Self::Vault(err) => write!(f, "vault error: {err}"),
+            Self::AddressConflict(existing_customer_id) => write!(
+                f,
+                "destination is already active under a different customer ({existing_customer_id})"
+            ),
         }
     }
 }
@@ -159,9 +191,11 @@ impl IntoResponse for IngestError {
             Self::MissingIdempotencyKey => StatusCode::BAD_REQUEST,
             Self::InvalidClass(_)
             | Self::InvalidChannel(_)
-            | Self::CampaignIdOnTransactional => StatusCode::UNPROCESSABLE_ENTITY,
+            | Self::CampaignIdOnTransactional
+            | Self::InvalidResolutionInput => StatusCode::UNPROCESSABLE_ENTITY,
             Self::TemplateNotFound => StatusCode::NOT_FOUND,
             Self::TenantNotConfigured => StatusCode::FAILED_DEPENDENCY,
+            Self::AddressConflict(_) => StatusCode::CONFLICT,
             Self::MissingPeerCertificate
             | Self::Render(_)
             | Self::Database(_)

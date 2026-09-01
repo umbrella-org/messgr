@@ -3,6 +3,7 @@ use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use uuid::Uuid;
 
+use crate::customer::resolve::{ResolutionInput, resolve};
 use crate::customer_dek::lifecycle::get_or_create_dek;
 use crate::destination_hmac;
 use crate::encryption;
@@ -31,10 +32,12 @@ pub async fn create_comms(
 
     validate_channel(&body.channel)?;
     validate_class(&body.class, body.campaign_id.as_deref())?;
+    let resolution_input = build_resolution_input(&body)?;
 
     let tenant = producer.tenant;
 
-    // Fast pre-check: skip template/DEK/encryption work for a genuine retry.
+    // Fast pre-check: skip resolution/template/DEK/encryption work for a
+    // genuine retry.
     if let Some(existing) =
         super::repo::find_idempotent_reply(&tenant.pool, &idempotency_key).await?
     {
@@ -46,9 +49,24 @@ pub async fn create_comms(
         ));
     }
 
+    let resolved = resolve(
+        &tenant.pool,
+        &*app.keystore,
+        &tenant.dek_cache,
+        &tenant.tenant.vault_mount,
+        &tenant.pepper,
+        resolution_input,
+        &body.destination,
+        &body.channel,
+        &tenant.config.default_locale,
+        &tenant.config.default_timezone,
+    )
+    .await?;
+
     let locale = body
         .locale
         .clone()
+        .or_else(|| resolved.locale.clone())
         .unwrap_or_else(|| tenant.config.default_locale.clone());
 
     let template = template_repo::find(
@@ -67,16 +85,11 @@ pub async fn create_comms(
         &*app.keystore,
         &tenant.dek_cache,
         &tenant.tenant.vault_mount,
-        body.customer_id,
+        resolved.customer_id,
     )
     .await?;
 
     let comms_request_id = Uuid::new_v4();
-    // Mints its own address_id (T-011 decision 4): no `customer_address`
-    // table exists yet (T-015), and this value is stored only in `outbox`,
-    // which is deleted on reaching a terminal state well before any future
-    // resolution path would need to reconcile it.
-    let address_id = Uuid::new_v4();
     let aad = comms_request_id.as_bytes();
 
     let destination_hmac = destination_hmac::compute(&tenant.pepper, &body.destination);
@@ -91,7 +104,7 @@ pub async fn create_comms(
         &idempotency_key,
         comms_request_id,
         tenant.tenant.id,
-        body.customer_id,
+        resolved.customer_id,
         &body.channel,
         &body.class,
         priority,
@@ -102,7 +115,7 @@ pub async fn create_comms(
         &destination_ciphertext,
         &payload_ciphertext,
         producer.producer_id,
-        address_id,
+        resolved.address_id,
     )
     .await?;
 
@@ -115,6 +128,28 @@ pub async fn create_comms(
             StatusCode::OK,
             Json(CreateCommsResponse { comms_request_id }),
         )),
+    }
+}
+
+/// Decision 4: exactly one of three shapes is legal — `customer_id` alone,
+/// `external_id` + `external_id_system` together, or all three unset
+/// (address-only resolution via `destination`). Any other combination is
+/// rejected before any DB or Vault call.
+fn build_resolution_input(
+    body: &CreateCommsRequest,
+) -> Result<ResolutionInput, IngestError> {
+    match (
+        &body.customer_id,
+        &body.external_id,
+        &body.external_id_system,
+    ) {
+        (Some(id), None, None) => Ok(ResolutionInput::Explicit(*id)),
+        (None, Some(external_id), Some(system)) => Ok(ResolutionInput::External {
+            system: system.clone(),
+            external_id: external_id.clone(),
+        }),
+        (None, None, None) => Ok(ResolutionInput::AddressOnly),
+        _ => Err(IngestError::InvalidResolutionInput),
     }
 }
 
