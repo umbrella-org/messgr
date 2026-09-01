@@ -13,18 +13,18 @@ Last updated: 2026-09-01
 
 ## IN DEVELOPMENT
 
+### messgr (0/1)
+
+| id | title | depends-on |
+|---|---|---|
+
+## IN REVIEW
+
 ### messgr (1/1)
 
 | id | title | depends-on |
 |---|---|---|
 | T-013 | Minimal dispatcher: per-channel claim loop, LISTEN/NOTIFY wakeup, comms_event write | [T-011, T-012] |
-
-## IN REVIEW
-
-### messgr (0/1)
-
-| id | title | depends-on |
-|---|---|---|
 
 ## REWORK
 
