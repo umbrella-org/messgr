@@ -45,6 +45,8 @@ Last updated: 2026-09-01
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
+| T-016 | Kill switches | high | medium | M | [] |  |
+| T-015 | Customer projection + resolution at ingest | high | high | L | [] |  |
 
 ## DONE
 
