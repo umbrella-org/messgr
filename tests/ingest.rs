@@ -482,6 +482,94 @@ async fn create_comms_writes_ledger_and_outbox_and_idempotency_replays() {
 }
 
 #[tokio::test]
+async fn concurrent_identical_requests_do_not_double_send() {
+    let fixture = setup("en-US").await;
+    let vault = vault_keystore();
+    let (identity_pem, _cert_subject) =
+        register_test_producer(&fixture, &vault, "concurrent-caller").await;
+    let client = mtls_client(
+        &fixture.server_common_name,
+        fixture.server.addr,
+        &identity_pem,
+        &fixture.server_ca_pem,
+    );
+    let url = format!(
+        "https://{}:{}/comms",
+        fixture.server_common_name,
+        fixture.server.addr.port()
+    );
+
+    let customer_id = Uuid::new_v4();
+    let idempotency_key = unique_name("idem");
+    let body = sample_body(customer_id);
+
+    // Two requests with the same Idempotency-Key, fired at the same time —
+    // this is the actual race the claim-then-insert transaction
+    // (`ingest::repo::insert_transactional`) has to close: two overlapping
+    // POSTs must never both win the claim, since that would double-send.
+    let request_one = client
+        .post(&url)
+        .header("Idempotency-Key", &idempotency_key)
+        .json(&body)
+        .send();
+    let request_two = client
+        .post(&url)
+        .header("Idempotency-Key", &idempotency_key)
+        .json(&body)
+        .send();
+    let (response_one, response_two) = tokio::join!(request_one, request_two);
+    let response_one = response_one.expect("first concurrent request failed");
+    let response_two = response_two.expect("second concurrent request failed");
+
+    let statuses = [response_one.status(), response_two.status()];
+    assert!(
+        statuses.contains(&reqwest::StatusCode::CREATED),
+        "exactly one of the two concurrent requests must observe 201: got {statuses:?}"
+    );
+    assert!(
+        statuses.contains(&reqwest::StatusCode::OK),
+        "exactly one of the two concurrent requests must observe 200 (lost the claim): got {statuses:?}"
+    );
+
+    let body_one: serde_json::Value =
+        response_one.json().await.expect("parsing response failed");
+    let body_two: serde_json::Value =
+        response_two.json().await.expect("parsing response failed");
+    assert_eq!(
+        body_one["comms_request_id"], body_two["comms_request_id"],
+        "both concurrent requests must resolve to the same comms_request_id"
+    );
+
+    let tenant_pool = connect_tenant_pool(
+        &fixture.control_url,
+        &fixture.database_name,
+        5,
+        Profile::Dev,
+    )
+    .await
+    .expect("connecting to tenant pool failed");
+    let row_count: i64 = sqlx::query_scalar("SELECT count(*) FROM comms_request")
+        .fetch_one(&tenant_pool)
+        .await
+        .expect("counting ledger rows failed");
+    assert_eq!(
+        row_count, 1,
+        "concurrent identical requests must write exactly one ledger row"
+    );
+    let outbox_count: i64 = sqlx::query_scalar("SELECT count(*) FROM outbox")
+        .fetch_one(&tenant_pool)
+        .await
+        .expect("counting outbox rows failed");
+    assert_eq!(
+        outbox_count, 1,
+        "concurrent identical requests must write exactly one outbox row"
+    );
+    tenant_pool.close().await;
+
+    teardown(&fixture, Some(&_cert_subject)).await;
+}
+
+#[tokio::test]
 async fn unregistered_client_certificate_is_rejected() {
     let fixture = setup("en-US").await;
     let vault = vault_keystore();
@@ -515,6 +603,9 @@ async fn unregistered_client_certificate_is_rejected() {
         .await
         .expect("request failed");
     assert_eq!(response.status(), 403);
+    let body: serde_json::Value =
+        response.json().await.expect("parsing response failed");
+    assert_eq!(body["error"], "unregistered producer certificate");
 
     teardown(&fixture, None).await;
 }
@@ -557,6 +648,9 @@ async fn disabled_producer_certificate_is_rejected() {
         .await
         .expect("request failed");
     assert_eq!(response.status(), 403);
+    let body: serde_json::Value =
+        response.json().await.expect("parsing response failed");
+    assert_eq!(body["error"], "producer is disabled");
 
     teardown(&fixture, Some(&_cert_subject)).await;
 }
