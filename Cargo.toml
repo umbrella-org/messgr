@@ -15,6 +15,10 @@ path = "src/bin/control.rs"
 name = "messgr-ingest"
 path = "src/bin/ingest.rs"
 
+[[bin]]
+name = "messgr-dispatcher"
+path = "src/bin/dispatcher.rs"
+
 [dependencies]
 tokio = { version = "1", features = ["full"] }
 clap = { version = "4", features = ["derive"] }
