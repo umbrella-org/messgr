@@ -233,8 +233,9 @@ curl -sk --cert /tmp/producer-cert/cert.pem --key /tmp/producer-cert/key.pem \
 ```
 
 Returns `201` with a `comms_request_id` on the first call; repeating it with the same
-`Idempotency-Key` returns `200` with the same id rather than sending twice. Nothing dispatches
-the row yet — `final_status` stays `NULL` until `T-013`'s dispatcher exists.
+`Idempotency-Key` returns `200` with the same id rather than sending twice. Once
+`messgr-dispatcher` (`T-013`, below) is running against this tenant and channel, the row is
+picked up and `final_status` moves to `sent` or `failed`.
 
 `docker compose up -d` also starts a dev-mode Vault (`VAULT_ADDR=http://localhost:8200`,
 `VAULT_TOKEN=messgr-dev-root-token`, both in `.env.example`) backing the `KeyStore` trait
@@ -246,6 +247,35 @@ role per tenant, inside this single shared backend) is created under. A dev-mode
 local development and CI only: `VaultKeyStore::connect` refuses to start against a non-TLS
 `VAULT_ADDR` outside `MESSGR_PROFILE=dev`.
 
+### messgr-dispatcher
+
+`messgr-dispatcher` (`T-013`) is the first real send path: a per-channel claim loop (`SKIP
+LOCKED` leases, `LISTEN`/`NOTIFY` wakeup via a trigger on `outbox` inserts with a 1s poll
+fallback) that calls the `Sender` trait (`T-012`) and writes exactly one `comms_event` row plus
+one `comms_request.final_status` update per outbox row, deleting it on completion (DESIGN.md
+§4.1, §4.2, §4.4, §9). One process per tenant, one attempt per message — no leader election, no
+retry/backoff, and no rate-limit enforcement yet; those are later build-order steps.
+
+Requires `DISPATCHER_TENANT_SLUG` (which tenant this process serves), `VAULT_ROLE_ID` /
+`VAULT_WRAPPED_SECRET_ID` (this tenant's own AppRole — printed by `just provision` on a fresh
+provisioning run), and, per channel in `DISPATCHER_CHANNELS` (default `sms`),
+`DISPATCHER_<CHANNEL>_BASE_URL` / `DISPATCHER_<CHANNEL>_API_KEY` — a dev stand-in `Sender`
+credential, since `provider_config` has no `base_url` column and its `credential_path` has no
+Vault KV reader yet (T-012 decisions 3–4). With a tenant provisioned (its `vault_wrapped_secret_id`
+copied from that output), configured, and a message already sitting in its `outbox` (the
+`messgr-ingest` walkthrough above):
+
+```
+DISPATCHER_TENANT_SLUG=acme DISPATCHER_CHANNELS=sms \
+DISPATCHER_SMS_BASE_URL=http://localhost:9091 DISPATCHER_SMS_API_KEY=dev-key \
+VAULT_ROLE_ID=<from just provision> VAULT_WRAPPED_SECRET_ID=<from just provision> \
+just dispatcher-run
+```
+
+Within about a second (the poll fallback; a `NOTIFY` on insert makes it near-instant),
+`comms_request.final_status` moves to `sent` (or `failed`, on a non-2xx/unreachable provider), a
+matching `comms_event` row appears, and the `outbox` row is gone.
+
 Run `just --list` for the rest of the available recipes (build, test, lint, db-shell, ...).
 
 ## Status
@@ -254,6 +284,7 @@ Design-driven, from-scratch rebuild in progress against `DESIGN.md`. Ticket `T-0
 establishes the control database, tenant registry, and this provisioning CLI — the
 foundation everything else (producer identity, the ledger, dispatchers) builds on.
 
- Two binaries exist so far: messgr-control (provisioning/admin CLI, run with cargo run --bin
-messgr-control -- <subcommand>) and messgr-ingest (T-011's POST /comms service, run with
-cargo run --bin messgr-ingest or `just ingest-run`).
+Three binaries exist so far: messgr-control (provisioning/admin CLI, run with cargo run --bin
+messgr-control -- <subcommand>), messgr-ingest (T-011's POST /comms service, run with cargo run
+--bin messgr-ingest or `just ingest-run`), and messgr-dispatcher (T-013's per-tenant claim loop,
+run with cargo run --bin messgr-dispatcher or `just dispatcher-run`).

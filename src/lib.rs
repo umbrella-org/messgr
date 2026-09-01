@@ -2,6 +2,7 @@ pub mod config;
 pub mod customer_dek;
 pub mod db;
 pub mod destination_hmac;
+pub mod dispatcher;
 pub mod encryption;
 pub mod ingest;
 pub mod key_cache;
