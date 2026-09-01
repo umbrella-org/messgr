@@ -209,6 +209,14 @@ dev-pki-issue-server-cert common_name out_dir:
 ingest-run:
     cargo run --bin messgr-ingest
 
+# Run messgr-dispatcher: a single tenant's claim loop. Requires
+# DISPATCHER_TENANT_SLUG, VAULT_ROLE_ID/VAULT_WRAPPED_SECRET_ID, and
+# DISPATCHER_<CHANNEL>_BASE_URL/_API_KEY per channel to be set (see
+# .env.example); DISPATCHER_CHANNELS defaults to "sms".
+[group('control-plane')]
+dispatcher-run:
+    cargo run --bin messgr-dispatcher
+
 # Validate the AsciiDoc manual via snowball (broken includes/xrefs fail the check)
 [group('docs')]
 docs-check:
