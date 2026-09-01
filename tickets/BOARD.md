@@ -20,11 +20,10 @@ Last updated: 2026-09-01
 
 ## IN REVIEW
 
-### messgr (1/1)
+### messgr (0/1)
 
 | id | title | depends-on |
 |---|---|---|
-| T-013 | Minimal dispatcher: per-channel claim loop, LISTEN/NOTIFY wakeup, comms_event write | [T-011, T-012] |
 
 ## REWORK
 
@@ -66,6 +65,7 @@ Last updated: 2026-09-01
 | T-010 | Template store: immutable versioned templates, approval metadata, render path | yes — merged to main (PR #12, 3eed5a9) |
 | T-011 | messgr-ingest: POST /comms, idempotency replay, ledger + outbox write, encryption | yes — merged to main (PR #13, f8fb5e5) |
 | T-012 | Sender trait + first SMS provider adapter + provider_config | yes — merged to main (PR #14, 3da5802) |
+| T-013 | Minimal dispatcher: per-channel claim loop, LISTEN/NOTIFY wakeup, comms_event write | no — publish-gated |
 
 ## DROPPED
 

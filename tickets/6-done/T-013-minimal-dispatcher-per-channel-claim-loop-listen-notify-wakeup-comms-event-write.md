@@ -398,7 +398,35 @@ User-facing surface: the new `messgr-dispatcher` binary and its env vars.
 
 ## Review
 
-<!-- empty until IN REVIEW -->
+- [x] Implementation audit — acceptance test re-run, tasks & criteria verified (step 2)
+- [x] Quality audit (step 3)
+- [x] Consistency audit (step 4)
+- [x] Documentation audit — coverage, whole-tree sweep, docs build clean (step 4a) — README/.env.example/justfile all updated and consistent; `just docs-check` (snowball) clean and unaffected, matching T-011/T-012's precedent
+- [x] Docs-readability pass — skipped: no docs-readability reviewer configured in this session
+- [x] Findings recorded with severity, class, and disposition; disposition summary + cost line below (step 5)
+- [x] Ticket moved to `tickets/6-done/` or `tickets/5-rework/`; `## History` appended (step 6)
+- [x] Remaining-tickets impact sweep done (step 8) — only `T-014` sits in `1-to-do/`/`2-ready/`; it `depends-on: [T-009]`, not `T-013`, and does not reference it. No patch needed.
+- [x] Summary + commit message & MR attributes presented for approval (step 9)
+
+**Re-ran the acceptance test** on `feat/T-013-minimal-dispatcher`: `just fmt` (no-op diff), `just lint`
+(clean), `just test` (all green, including all 5 `tests/dispatcher.rs` cases — success, terminal
+failure, `SKIP LOCKED` concurrency, leased/not-due filtering, and the notify-trigger test), and
+`just docs-check` (clean). Read every task and confirmed decision (1–10) against the actual shipped
+code (`src/dispatcher/{model,repo,worker}.rs`, `src/bin/dispatcher.rs`,
+`migrations/tenant/0007_outbox_notify.sql`) line by line, not just doc comments claiming compliance
+— all ten decisions honoured exactly as written, and every task's file/shape matches the plan.
+Project-wide search for `T-013`/`messgr-dispatcher` across `*.md` found no stale reference this
+branch introduced — `PLAN.md`'s T-013 row, `DESIGN.md` §4.1/§4.2/§9, and every other ticket already
+agree with the shipped shape.
+
+| id | severity | class | disposition | description | evidence | suggestion |
+|---|---|---|---|---|---|---|
+| F1 | non-blocking | spec-unclear | noted | The plan's Task 5 specifies `try_process`/`DispatchError` as private (no `pub`), but Task 8 requires `tests/dispatcher.rs` — a separate crate — to drive `try_process` directly. The plan's own two tasks are unsatisfiable together as literally written; the implementer correctly resolved this by making both `pub`, with a doc comment explaining why, rather than routing around the requirement. | `src/dispatcher/worker.rs` (`pub async fn try_process`, `pub enum DispatchError`) vs plan Task 5's "A private `DispatchError` enum" / "`async fn try_process`" | No code change — record the resolution here so a future reader isn't confused by the plan text disagreeing with the shipped visibility. |
+| F2 | non-blocking | design | noted | `run_channel_loop` calls `.expect(...)` on `repo::claim`'s result — a transient DB error (brief connection blip) panics that channel's `tokio::spawn`ed task permanently, with only a swallowed panic (`let _ = handle.await` in `main`) and no restart, unlike a message-level `Sender` failure which is handled and logged. Not required by this ticket's scope (supervision/retry is step 7), but worth a future robustness ticket's attention. | `src/dispatcher/worker.rs:206-208` (`run_channel_loop`), `src/bin/dispatcher.rs:103-105` (`main`'s silent `let _ = handle.await`) | Not worth a dedicated ticket now — fold into whichever step-7 HA/retry ticket adds process-level resiliency; note there that the claim query itself, not just the per-message send, needs a retry/backoff wrapper. |
+
+Disposition summary: 2 noted (F1, F2). No blocking findings.
+
+cost: estimated L, actual L
 
 ## History
 
@@ -406,3 +434,5 @@ User-facing surface: the new `messgr-dispatcher` binary and its env vars.
 - 2026-09-01 — TO DO → READY: plan complete
 - 2026-09-01 — READY → IN DEVELOPMENT: picked up
 - 2026-09-01 — IN DEVELOPMENT → IN REVIEW: acceptance green
+- 2026-09-01 — IN REVIEW → DONE: review clean: 2 noted (F1, F2); no blocking findings
+- 2026-09-01 — IN REVIEW → DONE: review clean: 2 noted (F1, F2); no blocking findings
