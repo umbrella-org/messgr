@@ -95,6 +95,24 @@ are optional, defaulting to DESIGN.md's own `90`/`observe`. This ticket (T-007) 
 table to the six fields above — `display_name` and the `oidc_*` columns from DESIGN.md's full
 §4.10 table arrive later, when a ticket actually reads them (OIDC: T-035).
 
+### Partition lifecycle
+
+```
+just tablespace-init   # once per Postgres instance -- creates the messgr_cold tablespace
+cargo run --bin messgr-control -- partition-lifecycle run --tenant-slug acme
+```
+
+`comms_request` and `comms_event` (DESIGN.md §4.1, T-009) are partitioned by month. This
+command (T-014) keeps them self-managing, in one run: ensures the current and next month's
+partitions exist, moves partitions older than 18 months (fixed platform-wide, §7.5) to the
+`messgr_cold` tablespace (created once per cluster by `just tablespace-init`, not by this
+command — tablespaces are shared across every database in the instance), and detaches + drops
+partitions past the tenant's `tenant_config.retention_years` boundary. **If the tenant has no
+`tenant_config` row, the drop step is skipped entirely** — printed as `retention: skipped
+(tenant_config not set)` — rather than assuming a default retention on a bank's ledger data.
+Safe to re-run; meant to be invoked on a schedule (cron/systemd timer), not run continuously —
+this binary does not daemonize.
+
 ### Provider configuration
 
 ```
