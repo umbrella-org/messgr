@@ -163,6 +163,81 @@ Three measures, all in place before tenant ten:
 
 This is the genuine operational cost of database-per-tenant, and the thing most likely to bite around tenant fifteen.
 
+### 2.4 End-to-end send walkthrough
+
+The diagram above shows the topology; this traces one message through it, tying together
+sections that are otherwise scattered. Two paths — everything through the queue, and OTP's
+bypass of it.
+
+**1. Ingest.** A producer POSTs `/comms` (or `/comms/bulk`) over mTLS. The certificate resolves
+to `(tenant_id, producer_id)` before anything else happens (§4.9, §11) — identity is never taken
+from the request body. `ingest-api` then, in order: applies the admission rate limit (`429` if
+breached, before touching Postgres — §5.1), checks `idempotency` for a replay and returns the
+existing `comms_request_id` if found (§4.3), resolves `customer_id` and `address_id` from
+whatever the caller supplied — explicit id, external id, address, or nothing resolvable, in
+which case a provisional customer is minted (§4.7) — and, for bulk campaign submissions only,
+runs a non-authoritative consent pre-filter so obviously-suppressed rows never reach the queue
+(§5). An OTP request skips resolution entirely: the destination must be supplied explicitly, or
+the request is rejected (§4.8).
+
+**2. Write.** `comms_request` (the ledger row, `final_status` still NULL) and `outbox` (the
+queue row) are written in the same transaction. A row in one without the other is not a state
+this system has — the outbox entry is deleted on completion (§4.2) and the ledger row is what
+survives for seven years, so if the transaction fails, neither exists and the producer's retry
+lands on the idempotency key. `next_attempt_at` is `now()` for an immediate send, or a future
+instant for `scheduled_for` / `scheduled_local` (§6.2) — either way it is the same row and the
+same claim index, just sorted later.
+
+**3. Wake.** The insert fires `NOTIFY` on the outbox-wakeup channel; an idle dispatcher for that
+tenant picks it up immediately, with a 1-second poll as the correctness fallback if the
+notification is missed (§4.2). A scheduled row simply sits in the claim index, invisible to
+`WHERE next_attempt_at <= now()`, until its time comes — no scheduler process exists separately
+from this.
+
+**4. Claim.** The tenant's active dispatcher (leader-elected via advisory lock, §2.3, §9) runs
+one claim loop per channel, `UPDATE ... SET leased_until ... FOR UPDATE SKIP LOCKED ... ORDER BY
+priority, next_attempt_at`, so transactional rows are always claimed ahead of marketing ones
+(§4.2, §8). A crashed dispatcher's leases simply expire and the standby (or a recovered leader)
+reclaims the rows — no reaper.
+
+**5. Gate chain.** Every claimed row is evaluated against the full chain **at this moment**, not
+against the state that existed at ingest: expiry, kill switch, producer quota, verification,
+consent, suppression, staleness, quiet hours, then the provider-side rate limit (§5). Auth-class
+messages never reach this step at all (§3). A block either ends the message in a terminal
+`final_status` (`expired`, `suppressed_consent`, `suppressed_list`, `unverified_address`), defers
+it to a later `next_attempt_at` (quota, staleness, rate limit, quiet hours — with jitter, §6.1),
+or holds it under an active kill switch (§5.2). Immediately before the provider call the
+dispatcher re-reads `outbox.cancelled_at`, because a `DELETE /comms/{id}` may have landed while
+the lease was held (§6.2).
+
+**6. Dispatch.** A message that clears every gate goes to the provider through the channel's
+`Sender` adapter, inside that provider's in-process circuit breaker and token bucket (§9). The
+outcome — `sent` or a provider-level failure — is appended to `comms_event`, `producer_usage` is
+incremented in-process (flushed every few seconds, §5.1), and on a terminal outcome the outbox
+row is deleted and `comms_request.final_status` is set in the one permitted ledger mutation
+(§4.1). A retryable provider failure instead bumps `attempts` and reschedules `next_attempt_at`
+with backoff and jitter; the row stays in the outbox.
+
+**7. Receipt.** The provider's asynchronous delivery webhook lands on `webhook-api` in the DMZ,
+routed by opaque per-tenant token rather than tenant slug, verified against the provider's
+signature, and appended to `comms_event` — deduplicated on the natural key, tolerant of
+out-of-order and pre-commit arrival, orphaned to a side table if the `provider_ref` is not yet
+known (§10). This does not touch `comms_request.final_status`; that column reflects the
+*dispatch* outcome, not delivery — a `sent` message can still later bounce, and the event stream
+carries that, not the ledger's summary column.
+
+**8. Read.** `query-api` answers "everything sent to this customer" with one index scan on
+`(customer_id, created_at DESC)` against the replica, no join to the customer projection and no
+dependency on the event feed being up (§4.1, §11.2). Message detail joins in `comms_event` for
+full history. None of this touches the primary, so a compliance search cannot compete with
+ingestion for write capacity.
+
+**The OTP path replaces steps 1–7 entirely.** `sms-sender` (or `otp-api` in cloud) calls the
+provider synchronously and returns; the ledger write happens afterward, asynchronously and
+best-effort, with no gate chain, no outbox row, and no dependency on Postgres or Vault being
+reachable at all (§3, §3.1). It rejoins the read path at step 8 — the same UI and API show it —
+but nothing upstream of that row's existence is shared with the queue.
+
 ---
 
 ## 3. The OTP question
@@ -429,6 +504,7 @@ CREATE TABLE customer_address (
     source_updated_at timestamptz NOT NULL
 );
 CREATE UNIQUE INDEX ON customer_address (customer_id, kind, rank) WHERE active_to IS NULL;
+CREATE UNIQUE INDEX ON customer_address (kind, value_hmac) WHERE active_to IS NULL;
 CREATE INDEX ON customer_address (value_hmac, active_from);
 CREATE INDEX ON customer_address (customer_id) WHERE active_to IS NULL;
 
@@ -444,6 +520,8 @@ CREATE TABLE customer_alias (               -- master-system merges; ledger stay
 **Contact values are encrypted, not plaintext.** §7 encrypts message payloads and HMACs destinations; leaving the highest-value PII in the system sitting in a plaintext column would contradict that and leave contact details fully readable after an erasure request. Encrypted under the same customer DEK, so crypto-shredding covers them for free. The lookup hash is a *keyed* HMAC with a Vault-held pepper — the phone-number space is ~10¹⁰, so an unkeyed SHA-256 is brute-forceable in seconds.
 
 **Address rows are append-only.** An update closes the current interval (`active_to`) and inserts a new row. This exists for two narrow jobs: backfilling attribution on historical sends, and answering "who held this number in 2023" during an investigation. It is *not* load-bearing for the customer timeline — the ledger already carries `customer_id` and the destination (§4.1). Telcos recycle disconnected numbers after ~90 days, so over a 7-year window the same `value_hmac` legitimately belongs to more than one person; intervals are what keep those apart.
+
+**Correction, found during T-015's refinement.** The `(kind, value_hmac)` unique index above was missing from the original draft of this schema. Without it, address-only resolution (§4.7: caller supplies a destination with no `customer_id`/external id) has a genuine race — two concurrent sends to a never-seen number can each fail to find an existing address row and each mint a *separate* provisional customer for the same number, with nothing to stop it. `active_to IS NULL` scopes the constraint to the currently-active row per `(kind, value_hmac)`, which is exactly the set address-only resolution searches; closing an interval and inserting a successor (the append-only update path above) still works, since only one row per `(kind, value_hmac)` is ever active at a time. Kept as a plain unique index, not a broader rework, because the failure mode is narrow and this closes it completely.
 
 ### 4.7 Resolution at ingest
 
@@ -1234,6 +1312,7 @@ Steps 1–7 are the minimum viable system. Everything after 11 can ship incremen
 | 24 | Provider payloads encrypted, `customer_id` denormalized onto `comms_event` | Delivery receipts echo the recipient address in third-party JSON. Left plain it sat outside both erasure modes for 7 years (§4.4, §7.2). |
 | 21 | Backup policy uniform per region | Per-tenant *message* retention is configurable; per-tenant *backup* retention is not, because WAL is cluster-wide. Conflicting requirements mean separate clusters, decided at onboarding (§7.3). |
 | 22 | Multi-jurisdiction tenants do not merge | One tenant per region, timelines do not span. Stated product limitation with a compliance rationale, not an implementation gap (§2.2). |
+| 25 | End-to-end send walkthrough documented (§2.4) | Not itself an architecture decision — a canonical step-by-step trace through ingest, gate chain, dispatch, and receipt, cross-referencing §§2–11 so the request path stops being reassembled by hand from scattered subsections. Keep it in sync whenever a cited mechanic (claim query, gate order, write atomicity) changes. |
 
 ## Still open
 
