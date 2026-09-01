@@ -65,7 +65,7 @@ Last updated: 2026-09-01
 | T-011 | messgr-ingest: POST /comms, idempotency replay, ledger + outbox write, encryption | yes — merged to main (PR #13, f8fb5e5) |
 | T-012 | Sender trait + first SMS provider adapter + provider_config | yes — merged to main (PR #14, 3da5802) |
 | T-013 | Minimal dispatcher: per-channel claim loop, LISTEN/NOTIFY wakeup, comms_event write | yes — merged to main (PR #15, e6a5b8e) |
-| T-014 | Partition lifecycle: create-ahead, move to slow tablespace, detach + drop | no — publish-gated |
+| T-014 | Partition lifecycle: create-ahead, move to slow tablespace, detach + drop | yes — merged to main (PR #16, 10f6a88) |
 
 ## DROPPED
 
