@@ -20,11 +20,10 @@ Last updated: 2026-09-02
 
 ## IN REVIEW
 
-### messgr (1/1)
+### messgr (0/1)
 
 | id | title | depends-on |
 |---|---|---|
-| T-028 | messgr-control: stats subcommand for per-tenant message volume | [] |
 
 ## REWORK
 
@@ -32,6 +31,7 @@ Last updated: 2026-09-02
 
 | id | title | open findings |
 |---|---|---|
+| T-028 | messgr-control: stats subcommand for per-tenant message volume | F1/F2: CI clippy (all-targets) and fmt checks fail |
 
 ## READY (impact order, per child)
 

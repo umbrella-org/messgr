@@ -47,6 +47,13 @@ strings actually exist), but the Docs task and the acceptance test's synthetic d
 present the full aspirational list as current behaviour — use `sent`/`failed`/`expired`/
 `pending` for both.
 
+**Corrected again at review (T-028/F3, fixed inline).** The claim above was still incomplete:
+`src/dispatcher/drain.rs`'s `write_discarded` (the kill-switch engage-and-discard path, T-016,
+merged before this ticket) also writes `final_status = "discarded"`. The actual current
+vocabulary is `sent | failed | expired | discarded`, plus `pending` for `NULL`. Docs corrected
+in the same review pass; the query and test behaviour are unaffected (group-by is
+value-agnostic).
+
 **Why this doesn't need auth.** `messgr-control`'s trust boundary is already "whoever can
 run this binary has DB/Vault access" — same as every other subcommand it has today. No
 listener, no new attack surface, no exception to record against §11.1 (that guard is about
@@ -291,7 +298,50 @@ Run `just docs-check` and fix anything it flags.
 
 ## Review
 
-<!-- empty until IN REVIEW -->
+**Reviewer independence (step 0):** delegated. The orchestrating reviewer authored the
+`feat/T-028-messgr-control-stats-subcommand` branch in this same session, so audits (steps
+2-4a) were run by an independent, freshly-spawned sub-agent, briefed adversarially with the
+ticket, the branch, and `AGENTS.md`/`review-addendum.md`. Every finding it returned was
+independently re-verified by hand before being recorded below (ran the exact commands
+myself; mutation-tested F4; read the cited code myself) — delegation buys independence, not
+accuracy.
+
+| id | severity | class | disposition | description | evidence | suggestion |
+|---|---|---|---|---|---|---|
+| F1 | blocking | correctness | — | `cargo clippy --all-targets --all-features -- -D warnings` (CI's actual clippy job) fails: `needless_lifetimes` in `tests/stats.rs`'s `count_of`. `just lint` doesn't lint test targets, so this passed local verification while failing CI. | `.github/workflows/ci.yml:29`; reproduced: `error: could not compile messgr (test "stats")` at `tests/stats.rs:170` | Elide the lifetime: `fn count_of(rows: &[...], ...)`. |
+| F2 | blocking | correctness | — | `cargo fmt --all -- --check` (CI's actual fmt job) fails on this branch's new code — unformatted diffs in `src/bin/control.rs:914` and three call sites in `tests/stats.rs`. | `.github/workflows/ci.yml:19`; reproduced diff via `cargo fmt --all -- --check` | Run `cargo fmt --all` and commit the result. |
+| F3 | non-blocking | docs-gap | fixed inline | Ticket's Description and the new docs section both claimed `final_status` is only ever `sent`/`failed`/`expired` today. `src/dispatcher/drain.rs`'s `write_discarded` (kill-switch discard path, T-016, predates this ticket) also writes `"discarded"`. Verified by reading `drain.rs:187-198,271` and grepping every `write_terminal`/`write_discarded`/`write_expired` call site in the tree. | `src/dispatcher/drain.rs:187-198`, called from the kill-switch drain loop at `:271` | Corrected `docs/user-manual/control-plane-cli.adoc` (commit `9d12234` on the feature branch) and this ticket's Description (above) to name `discarded`. No behaviour change — the query is value-agnostic. |
+| F4 | non-blocking | test-gap | noted | The acceptance test's own stated criterion ("`--since` filtering is exact at the boundary") is not actually exercised — both test rows are hours away from the midnight boundary the `since` filter tests against. Mutation-tested: changing `created_at >= $1` to `created_at > $1` in `src/stats.rs` still passes both tests. | `tests/stats.rs:213-262`; mutation test run and reverted (`git diff --stat src/stats.rs` clean after) | A future strengthening could insert a row at exactly `since_ts` and one at `since_ts - 1µs`. Not scheduled now — too small to be its own ticket. |
+| F5 | non-blocking | design | folded → T-025 | `tenant_message_stats` returns bare `Result<_, sqlx::Error>` for the unknown-tenant-slug case, unlike every other same-shaped "resolve slug → connect → act" function (`partition_lifecycle::run_for_tenant`, `producer::register`, `provider_config::configure`, `tenant_config::configure`), which wrap it in a domain error type. Functionally harmless (the `Configuration` variant's `Display` still surfaces a clear message). | `src/stats.rs:31` vs `src/partition_lifecycle/lifecycle.rs:75` | Folded into T-025 item 10 (same "pick one error-handling policy" theme as its items 3/6) rather than fixed ad hoc. |
+| F6 | non-blocking | design | noted | No index covers `channel` or `(channel, created_at)` on `comms_request`; the new query is a sequential scan over the tenant's ledger. Explicitly out of this ticket's stated scope (a read-only, operator-invoked reporting command, not a hot path), and messgr-control commands are not called per-request, so this doesn't clear the "would actually be scheduled" bar on its own today. | `migrations/tenant/0004_ledger_outbox_schema.sql:32` (only `(final_status, created_at DESC)` and the partial `campaign_id` index exist) | Revisit if `stats` is ever called on a schedule/frequently, or once ledger sizing (T-019) gives a concrete per-tenant row-count number to judge against. |
+
+Areas the independent audit checked with no defect: all five plan tasks present as specified;
+all five confirmed design decisions honoured (no `outbox`/`comms_event` join, `whatsapp`
+excluded with no `--channel` flag, no new binary/listener — grepped for
+`TcpListener`/`axum`/`actix`/`bind`, `--since` optional/unbounded, plain `println!` output);
+`src/lib.rs` module ordering; no SQL injection (parameterized throughout, explicit
+`$1::timestamptz` cast avoids sqlx's type-inference failure); no connection-pool leak
+(`tenant_pool.close().await` runs on every path; the unknown-slug path never opens one); no
+message content or secrets read; schema match confirmed against
+`migrations/tenant/0004_ledger_outbox_schema.sql`; docs placement/content otherwise correct
+including a `cargo run --bin messgr-control -- stats --help` cross-check; review-addendum's
+NULL-index/Vault-secrets/lease-release/new-column items not applicable (no table, index,
+column, secret, or lease added); board/ticket bookkeeping correctly on `main`, code on the
+feature branch.
+
+Re-ran the full acceptance test plus build/lint/docs commands myself after independent
+verification: `just build` (exit 0), `just test` — full suite, no regressions (exit 0),
+`cargo test --test stats` (exit 0 — the ticket's literal `just test --test stats` does not
+exist as a recipe; `justfile`'s `test` recipe doesn't forward args, itself worth noting but
+not blocking this ticket), `just lint` (exit 0, but does not catch F1 — see above),
+`just docs-check` (exit 0). `cargo clippy --all-targets --all-features -- -D warnings` and
+`cargo fmt --all -- --check` (CI's actual jobs) both fail, per F1/F2.
+
+**Disposition summary:** 2 blocking (F1, F2) → `5-rework/`. 4 non-blocking: 1 fixed inline
+(F3), 1 noted (F4), 1 folded into T-025 (F5), 1 noted (F6).
+
+cost: estimated S, actual S — the two blocking findings are one `cargo fmt --all` run and a
+one-line lifetime elision; no scope growth.
 
 ## History
 
@@ -309,3 +359,4 @@ Run `just docs-check` and fix anything it flags.
 - 2026-09-02 — TO DO → READY: plan complete
 - 2026-09-02 — READY → IN DEVELOPMENT: picked up
 - 2026-09-02 — IN DEVELOPMENT → IN REVIEW: acceptance green
+- 2026-09-02 — IN REVIEW → REWORK: F1/F2: CI clippy (all-targets) and fmt checks fail
