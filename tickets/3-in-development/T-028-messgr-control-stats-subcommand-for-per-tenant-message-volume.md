@@ -30,13 +30,22 @@ ticket gets the same numbers a much cheaper way: a `stats` subcommand on the exi
 **Corrected against the actual schema (refinement).** The original filing mentioned joining
 `outbox`/`comms_event` for "dispatched/delivered/failed." Re-reading
 `migrations/tenant/0004_ledger_outbox_schema.sql`: `comms_request.final_status` already
-holds the terminal outcome directly (`NULL` while in flight, else one of
-`delivered | failed | bounced | expired | cancelled | suppressed_consent | suppressed_list |
-unverified_address` — §4.1/§4.4) and `channel` is `sms | email | whatsapp` on the same row.
-So one query against `comms_request` alone gives channel + status + count; `outbox` and
-`comms_event` are not needed for this ticket. Also dropped the `--channel` filter flag
-floated in the original filing — the query always reports both `sms` and `email` (never
-`whatsapp`) broken out, so there is nothing a filter would add for a two-value set.
+holds the terminal outcome directly (`NULL` while in flight) and `channel` is
+`sms | email | whatsapp` on the same row. So one query against `comms_request` alone gives
+channel + status + count; `outbox` and `comms_event` are not needed for this ticket. Also
+dropped the `--channel` filter flag floated in the original filing — the query always
+reports both `sms` and `email` (never `whatsapp`) broken out, so there is nothing a filter
+would add for a two-value set.
+
+**Amended inline at pickup (applicability gate finding, non-blocking).** The column's
+documented full vocabulary (`delivered | bounced | cancelled | suppressed_consent |
+suppressed_list | unverified_address`) is aspirational — the dispatcher (`src/dispatcher/
+worker.rs`, `src/dispatcher/drain.rs`, via `repo::write_terminal`) only ever writes `"sent"`,
+`"failed"`, or `"expired"` today; the rest belong to the gate-chain/webhook-receipt work
+still in T-020/T-021/build step 12. The query itself is unaffected (it groups by whatever
+strings actually exist), but the Docs task and the acceptance test's synthetic data must not
+present the full aspirational list as current behaviour — use `sent`/`failed`/`expired`/
+`pending` for both.
 
 **Why this doesn't need auth.** `messgr-control`'s trust boundary is already "whoever can
 run this binary has DB/Vault access" — same as every other subcommand it has today. No
@@ -228,9 +237,10 @@ provisioning against the local stack via `provision_tenant`, no mocks; its own c
 helpers — this project does not share test helpers across files). Insert `comms_request`
 rows directly (extend `ledger_outbox_schema.rs`'s `insert_comms_request` helper shape to
 also take `channel: &str` and `final_status: Option<&str>`), then assert
-`tenant_message_stats` returns the expected `(channel, status, count)` triples: e.g. 2
-`sms`/`delivered`, 1 `sms`/`pending` (`final_status = NULL`), 1 `email`/`failed`, and 1
-`whatsapp`/`delivered` row inserted but **not** present in the result (channel filter
+`tenant_message_stats` returns the expected `(channel, status, count)` triples using only
+values the dispatcher actually writes today (`sent`, `failed`, `expired`) plus `NULL` →
+`pending`: e.g. 2 `sms`/`sent`, 1 `sms`/`pending` (`final_status = NULL`), 1 `email`/`failed`,
+and 1 `whatsapp`/`sent` row inserted but **not** present in the result (channel filter
 proven). Also assert `--since` in the future excludes everything and `--since` in the past
 includes everything, using two rows with distinct `created_at` values.
 
@@ -255,8 +265,11 @@ non-empty output with no panic against the local dev stack.
 Add a `== Message stats` section to `docs/user-manual/control-plane-cli.adoc` (after `==
 Partition lifecycle`, matching its style: a `[source,bash]` example line, then prose
 explaining what `total`/`status=`/`count=` mean, that `whatsapp` is intentionally excluded,
-and that this reads `comms_request` directly with no join). Run `just docs-check` and fix
-anything it flags.
+and that this reads `comms_request` directly with no join). Document the status values as
+they exist **today** — `sent`, `failed`, `expired`, `pending` (`final_status IS NULL`) — not
+the full aspirational vocabulary in DESIGN.md §4.4; note that `delivered`/`bounced` and the
+gate-outcome statuses land once the webhook-receipt path and T-020/T-021's gate chain ship.
+Run `just docs-check` and fix anything it flags.
 
 ### Finish (mandatory)
 
@@ -286,4 +299,12 @@ anything it flags.
   wrong shape for the actual need) was dropped in favor of this cheaper CLI-only
   alternative that reuses `connect_tenant_pool` and stays inside §11.4's metadata-only
   boundary.
+- 2026-09-02 — TO DO → READY: plan complete.
+- 2026-09-02 — plan amended inline: applicability-gate audit (independent agent) found the
+  Description/Docs/Acceptance-test steps used `final_status` values (`delivered`, `bounced`,
+  etc.) that DESIGN.md §4.4 documents but the dispatcher does not yet write — only `sent`,
+  `failed`, `expired` exist today. Corrected the Description, the Docs task, and the
+  acceptance test's synthetic data to use the real current vocabulary; the query logic
+  itself was unaffected (group-by is value-agnostic).
 - 2026-09-02 — TO DO → READY: plan complete
+- 2026-09-02 — READY → IN DEVELOPMENT: picked up
