@@ -60,7 +60,6 @@ The core structural decision in this design is to **keep these separate**. Confl
                                            │   verification       │                  │
                                            │   consent            │                  │
                                            │   suppression        │                  │
-                                           │   staleness          │                  │
                                            │   quiet hours        │                  │
                                            │   rate limit         │                  │
                                            └──────────┬───────────┘                  │
@@ -204,10 +203,10 @@ reclaims the rows — no reaper.
 
 **5. Gate chain.** Every claimed row is evaluated against the full chain **at this moment**, not
 against the state that existed at ingest: expiry, kill switch, producer quota, verification,
-consent, suppression, staleness, quiet hours, then the provider-side rate limit (§5). Auth-class
+consent, suppression, quiet hours, then the provider-side rate limit (§5). Auth-class
 messages never reach this step at all (§3). A block either ends the message in a terminal
 `final_status` (`expired`, `suppressed_consent`, `suppressed_list`, `unverified_address`), defers
-it to a later `next_attempt_at` (quota, staleness, rate limit, quiet hours — with jitter, §6.1),
+it to a later `next_attempt_at` (quota, rate limit, quiet hours — with jitter, §6.1),
 or holds it under an active kill switch (§5.2). Immediately before the provider call the
 dispatcher re-reads `outbox.cancelled_at`, because a `DELETE /comms/{id}` may have landed while
 the lease was held (§6.2).
@@ -268,6 +267,8 @@ In cloud that is not available: the tenant's auth service is on their infrastruc
 - Synchronous: authenticate the tenant by mTLS, look up the provider credential, call the provider, return. No queue, no gate chain, no Postgres write on the request path.
 - The audit record is written asynchronously and best-effort, exactly as on-prem — a Postgres outage delays the log, never the OTP.
 - Independently deployable and independently scalable, so a messgr release never touches the auth path without an explicit decision to do so.
+
+**Correction: "look up the provider credential" is doing the same job Vault-independence needs for the message path, and it was never given the same mechanism.** §2.4 and the end of §3.1 claim OTP has no dependency on Vault being reachable — but `otp-api`'s provider credential comes from Vault (§13: "all secrets come from Vault"), and unlike a message's DEK, no cache, TTL, or pre-provisioning is specified for it here. As written, "look up the provider credential" reads as a per-request or startup-time Vault call with nothing said about what happens when Vault is sealed. Fixed by stating the same discipline §7.6 already applies to DEKs: `otp-api` fetches its provider credential from Vault at startup and holds it in memory for the life of the process, refreshed on a background timer rather than per request, so a sealed or unreachable Vault degrades nothing on the OTP request path — it only delays picking up a credential *rotation* until Vault recovers.
 
 This is weaker than the on-prem story — a network hop and a shared regional service now sit between the tenant and their SMS provider, where on-prem there was neither. It is worth being explicit with cloud tenants about that difference rather than presenting the two deployments as equivalent. Tenants for whom OTP latency and availability are paramount should be told they can keep auth on-premise while using the cloud service for everything else; the ledger accepts backfilled auth records from either source.
 
@@ -573,12 +574,13 @@ Provisional shells are cheap (a handful of thin rows), get a DEK like any custom
 
 **Merges.** When the master system merges two customers, ledger rows for the retired id are *never rewritten* — rewriting an audit ledger is precisely what you do not do. `customer_alias` redirects, and timeline queries expand the id set through the alias chain. Splits generally require manual adjudication; flag them for a human rather than guessing.
 
-### 4.8 Staleness and the OTP carve-out
+### 4.8 What the projection resolves, and what it never does
 
-The projection is a cache, and a stale contact point is not a display bug — sending an OTP to a number the customer replaced last week is account-takeover-adjacent.
+The projection resolves **identity** — which `customer_id` a request belongs to (§4.7) — and nothing else. It never resolves the **destination**: `POST /comms` requires `destination` on every request, for every class, and that caller-supplied value is what the message is sent to, always. "Address-only" resolution (§4.7) uses the supplied destination to look up or mint the owning customer; it does not go the other way and hand back a different, stored address for the caller to send to instead.
 
-- **OTP callers always supply the destination explicitly.** The auth service holds authoritative data. messgr must never resolve a phone number for an auth-class message. This is a hard rule, enforced at the API boundary: an auth-class request without an explicit destination is rejected.
-- **Transactional and marketing may resolve via the projection**, subject to a staleness bound — if `source_updated_at` is older than the configured threshold, the send is deferred and an alert raised, rather than delivered to a possibly-dead address.
+**Correction: a staleness gate was specified here, in the gate chain (§5), and in `tenant_config`, and it could never fire.** The reasoning at the time was that transactional and marketing messages "resolve via the projection" for their destination, so a stale `customer_address.source_updated_at` needed a defer-and-alert gate to stop a send from reaching a number the customer no longer holds. That premise was wrong for every class, not just auth: the API has never accepted a request without an explicit `destination`, so there was never a code path where a projection-resolved address reached the provider without the caller having supplied it fresh on the same request. A gate guarding a path the API cannot take is not a defense-in-depth measure — it is untestable, and untested code guarding nothing is worse than no code, because it looks like a control. Removed: the gate chain row (§5), `tenant_config.staleness_max_age` (§4.10), and Still-open's staleness-threshold question. `source_updated_at` stays on `customer_address` and `customer` — it remains useful for support and investigation ("was this the address on file at the time") even with no gate reading it.
+
+**OTP's real distinguishing property is not the explicit destination — every class has that.** It is that auth-class messages skip resolution and the gate chain entirely (§3, §5): the destination the caller supplies is used as-is, with no projection lookup, no `customer_id` linkage beyond what the auth service already knows, and no gate evaluated against it.
 
 **Feed mechanism: event feed** from the master system (customer created/updated, address added/changed/verified/removed). Batch reconciliation runs nightly as a safety net against missed events, comparing checksums rather than replaying everything.
 
@@ -668,7 +670,6 @@ CREATE TABLE tenant_config (
     schedule_horizon_days int NOT NULL DEFAULT 90,
     quota_day_boundary_tz text NOT NULL,
     verification_mode   text NOT NULL DEFAULT 'observe',  -- enforce | observe (§5)
-    staleness_max_age   interval NOT NULL,                -- projection freshness bound (§4.8)
     oidc_issuer         text,                   -- the tenant's own IdP (§11.1) — not yet created, added by T-035
     oidc_client_id      text,                   -- not yet created, added by T-035
     oidc_group_claim    text,                   -- not yet created, added by T-035
@@ -696,16 +697,23 @@ CREATE TABLE provider_config (
 **Correction: `quiet_hours_policy`'s primary key could not represent its own `default` scope.** `scope_key` was nullable, and the `default` scope (institution-wide fallback, per §6.1's resolution order `customer tz -> segment policy -> institution default`) is exactly the row with no natural key — but a `PRIMARY KEY` column is implicitly `NOT NULL`, so a `default`-scope row could never be inserted at all under the schema as originally written. Same fix as `kill_switch` above, adapted to a primary key rather than a partial unique index (which cannot itself wrap an expression): `scope_key` is `NOT NULL DEFAULT ''`, with `''` reserved for the scope that has no key.
 
 T-007 ships only `tenant_config`'s `retention_years`, `default_timezone`, `default_locale`,
-`schedule_horizon_days`, `quota_day_boundary_tz`, `verification_mode`, and `staleness_max_age` —
+`schedule_horizon_days`, `quota_day_boundary_tz`, and `verification_mode` —
 `display_name` and the `oidc_*` columns are shown above as the eventual design but are not yet
 migrated; nothing reads them yet (T-035 adds the `oidc_*` columns when real OIDC lands).
+
+**Correction: T-007 also shipped `staleness_max_age`, and it is now dead in the shipped
+schema, not just cut from the design above.** §4.8 explains why the gate it backed could never
+fire — every request supplies its own `destination`, so nothing ever reads a projection-resolved
+address closely enough to check its staleness. The column still exists in
+`migrations/tenant/0002_tenant_config.sql`; dropping it is a schema migration, not a documentation
+change, and is tracked as part of the ledger/queue schema remediation ticket rather than done here.
 `quiet_hours_policy` is an unrelated table not yet created (later ticket: quiet-hours
 resolution). `provider_config` ships in T-012, without a `tenant_id` column — corrected here to
 match the "no `tenant_id` inside a tenant-database table" convention `tenant_config` and
 `producer` already established (§2.1: the tenant is the database); the primary key is
 `(channel, priority)`. T-012 ships the table, a channel-agnostic `Sender` trait, and a generic
 HTTP adapter proven against a mock server — it does not commit to a real vendor, so "provider
-selection" (Still Open #5) remains open.
+selection" (Still Open #4) remains open.
 
 **Tenants bring their own provider accounts.** The platform never resells messaging, which removes an entire category of problems: rate limits and spend are naturally per-tenant, there is no shared provider budget to arbitrate, and a tenant exhausting its Twilio credit is visibly its own problem. Credentials are referenced by Vault path, never stored in Postgres. Producer quotas (§5.1) become a governance tool for the tenant's internal teams rather than a billing mechanism for the platform.
 
@@ -793,7 +801,7 @@ Suppression deliberately keys on the raw `destination_hmac` instead. It is fail-
 
 **The verification gate needs an explicit mode, because its input may not exist.** Whether the master system publishes per-address verification state on the event feed is still an open question. A gate whose input is always NULL either blocks every send or silently passes every send, and the second is what happens by accident. So `tenant_config.verification_mode` is explicit: `enforce` blocks unverified addresses; `observe` allows them but records the outcome and reports a count. A tenant whose feed carries no verification data runs in `observe` **visibly**, rather than believing a control is active when it is not.
 
-Auth class skips verification, consent, and staleness entirely — an OTP goes to a destination the caller supplied and vouched for (§4.8).
+Auth class skips verification and consent entirely — an OTP goes to a destination the caller supplied and vouched for (§4.8).
 
 Ingestion also runs a **consent pre-filter** on bulk campaign submissions — not for correctness (the send-time gate is authoritative) but to avoid enqueueing hundreds of thousands of rows that will be discarded.
 
@@ -836,13 +844,19 @@ Uplift for campaign days goes through `producer_quota_override` — time-boxed, 
 
 Hold is the default because most incidents end with "resume". Discard exists because sometimes they don't — a six-hour-old flash-sale blast firing after the sale ended is worse than never sending it.
 
+**Correction: "held" was never given a representation, and the obvious one spins.** A row under an active switch cannot be left exactly as claim-eligible as any other: if the claim query (§4.2) simply leases it, finds the gate chain blocking it on kill switch, and drops the lease again, that row gets re-claimed the moment the lease's own timeout passes — repeatedly, for as long as the switch stays engaged, burning a claim-and-check cycle per lease interval for every held row. That is not "held", it is a busy-wait dressed up as one. The dispatcher must check kill-switch state **before** claiming, not after: it keeps the current set of engaged scopes cached in-process (refreshed by the same `NOTIFY`/30-second-poll pair described below) and excludes matching channels, producers, or campaigns from the claim query's candidate set entirely while a switch is active. A row genuinely held then sits untouched — no lease taken, no gate re-evaluation, no spin — until the switch releases and the drain-rate ramp below picks it up deliberately.
+
+**Correction: ingest-side rejection (point 1 above) has no propagation mechanism that can reach it.** The `NOTIFY`-based propagation described below is read by the dispatcher, which holds a **direct** connection to Postgres (§2.3). `ingest-api` does not — it connects through PgBouncer in transaction mode, and §2.3's own table states plainly that `LISTEN` registration silently never fires under transaction pooling. So the mechanism that makes kill-switch propagation "seconds, not minutes" for the dispatcher cannot be the mechanism for ingest rejecting new requests; the design specified point 1 without specifying how `ingest-api` learns a switch fired at all. Fixed by giving `ingest-api` its own poll, independent of `LISTEN`: each instance re-reads `kill_switch` on its pooled connection every few seconds, caches the active set in-process, and rejects matching ingests against that cache rather than querying `kill_switch` per request. This is slower than the dispatcher's `NOTIFY` path and that is acceptable — a few seconds of ingest lag before a bad campaign starts being rejected is a different, looser bound than "dispatch stops within seconds", and the two were never the same requirement.
+
 **Release is the dangerous half, and it is easy to overlook.** Disable a marketing producer for four hours, re-enable, and 500k held messages become dispatchable in the same instant. Release therefore ramps: the dispatcher drains a released backlog at a configured rate rather than at full speed. The `expires_at` check (§6.2) runs first, so genuinely stale held messages drop rather than arriving hours late.
 
 **Auth is structurally immune, and the panel must say so.** A global kill switch does not stop OTP, because OTP does not go through the dispatcher at all (§3). This is correct behaviour — you do not want an operator locking every customer out of the bank during a marketing incident — but an operator who believes "global kill" stopped *everything* is operating on a false model. The admin panel states explicitly that auth traffic continues, and disabling the auth path is a separate control requiring **two-person approval**.
 
 **Propagation must be seconds, not minutes.** Dispatchers cache config, so a switch fires `NOTIFY kill_switch` — a **separate channel** from the outbox wakeup of §4.2, with a separate 30-second fallback re-read rather than that path's 1-second poll. Two channels, two intervals, deliberately: queue wakeup optimises latency on every message, config re-read optimises nothing in steady state and only needs to be fast during an incident. A missed notification costs seconds, not correctness. A kill switch that takes effect on the next config reload is not a kill switch.
 
-**Where the auth kill switch actually lives.** §3 puts OTP outside the dispatcher entirely, so it cannot read `kill_switch` — which would make the two-person-approval auth control above unimplementable as described. It lives instead in `sms-sender` / `otp-api`, which re-reads a dedicated `auth_enabled` flag from the control database on a short interval and fails closed only for that flag. It is deliberately a different mechanism in a different place, because the whole point of §3 is that the auth path shares nothing with the queue.
+**Where the auth kill switch actually lives.** §3 puts OTP outside the dispatcher entirely, so it cannot read `kill_switch` — which would make the two-person-approval auth control above unimplementable as described. It lives instead in `sms-sender` / `otp-api`, which re-reads a dedicated `auth_enabled` flag from the control database on a short interval. It is deliberately a different mechanism in a different place, because the whole point of §3 is that the auth path shares nothing with the queue.
+
+**Correction: "fails closed only for that flag" directly contradicted §3's central promise, and it is worth saying plainly why this was wrong.** §3 exists so that "a marketing incident cannot stop customers logging in" (AGENTS.md hard invariant 1) — the whole design of the OTP path is that it has no dependency on Postgres or Vault being reachable (§2.4 step, restated at the end of §3.1). A flag that fails *closed* when the control database is unreachable reintroduces exactly the dependency §3 was built to remove: a control-database outage — unrelated to any marketing incident, unrelated to any intentional switch — would now silently disable customer login. That is a worse outcome than the flag not existing at all. The flag must fail **open** (auth stays enabled) on a read failure or timeout, with alerting on the failure itself so an unreachable control database is visible and gets fixed — and fail exactly to whatever value it last successfully read otherwise. Two-person approval governs *engaging* the flag deliberately; it was never meant to govern what happens when nobody engaged anything and the database is just having a bad day.
 
 **Every engage and release is audited** — who, when, why, and how many messages were held or discarded. In a bank this is the first thing asked about after the incident.
 
@@ -1218,7 +1232,7 @@ Centralizing communications creates a single point of failure. The mitigations m
 | Producer floods with a runaway loop | Admission rate limit rejects at ingest (`429`) before the DB is touched; send quota caps what actually reaches customers. Operator can engage a producer-scoped kill switch within seconds (§5.2). Other producers unaffected. |
 | Kill switch released onto a large backlog | Drain-rate limiting ramps dispatch rather than firing everything at once; `expires_at` drops genuinely stale held messages first (§5.2). |
 | Dispatcher restart mid-quota-window | In-process counters rebuild from `producer_usage` on startup, so a restart does not silently reset a producer's daily allowance (§5.1). |
-| Customer event feed down | Ledger, timeline, and UI unaffected — none of them read the projection (§4.1). Sending continues for callers that supply destinations explicitly, including all OTP. Projection-resolved sends hit the staleness gate once the threshold passes and defer rather than deliver to possibly-dead addresses. |
+| Customer event feed down | Ledger, timeline, and UI unaffected — none of them read the projection (§4.1). Sending is entirely unaffected too: every request supplies its own destination (§4.8), so a stale or stopped feed degrades only identity resolution — a provisional customer may persist longer than it should — never delivery. |
 | Vault sealed or unreachable | Sending continues normally on cached and pre-provisioned DEKs (§7.6). Degrades only for customers whose DEK is neither cached nor pre-provisioned, and for UI payload decryption on cache miss. Metadata-only views stay fully functional. Alert fires immediately — a sealed Vault needs three keyholders, so time-to-recover is human-bound. |
 
 **Delivery semantics are at-least-once.** A crash between provider acknowledgement and DB commit will resend. Provider-side idempotency keys are used where the provider supports them; otherwise a small duplicate rate is accepted for transactional and marketing. This is why OTP does not use this path.
@@ -1332,7 +1346,7 @@ Steps 1–7 are the minimum viable system. Everything after 11 can ship incremen
 | 4 | Single provider acceptable for now | Accepted for queued traffic; flagged as a tier-0 risk on the OTP path, with mitigations (§12.1). |
 | 5 | Vault as root of trust, no HSM | Transit engine for DEK wrapping; Vault also owns provider credentials and internal PKI. Cost: Shamir manual unseal, 3 keyholders per restart — mitigated by 3-node Raft and DEK caching (§7.6). |
 | 6 | Wrapped DEKs stored in Postgres | Vault stays off the read path. Erasure bounded by the DB backup window for both modes (§7.3); compliance reporting states the date rather than claiming instant deletion. Revisit only if a regulator challenges erasure timeliness. |
-| 7 | Customer data is a projection only | Never system of record. OTP callers must supply destinations explicitly; other classes resolve through the projection behind a staleness gate (§4.8). |
+| 7 | Customer data is a projection only | Never system of record. It resolves identity only, never the destination — every class supplies `destination` explicitly on the request, so there is no gate needed against a stale, projection-resolved address (§4.8). |
 | 8 | Fed by event feed | Nightly checksum reconciliation as safety net. Feed outage degrades resolution only — never the ledger, timeline, or OTP (§12). |
 | 9 | Consent per contact point | Keyed on `customer_address.id`, so recycled numbers cannot inherit the previous owner's opt-in (§5). Requires the projection to land before the gates (§14). |
 | 10 | Producers are registered, mTLS-identified | `producer_id` replaces free-text `source_system` on the ledger (§4.9). Quota and kill-switch scoping cannot rest on a caller-asserted string. |
@@ -1355,18 +1369,17 @@ Steps 1–7 are the minimum viable system. Everything after 11 can ship incremen
 ## Still open
 
 1. **Backup retention window** — sets `erasure_request.backups_clear_at` and therefore the date the bank can truthfully report physical erasure as complete. (§7.3)
-2. **Staleness threshold** — the value for `tenant_config.staleness_max_age`. Depends on the event feed's observed lag. (§4.8)
-3. **Quiet-hours policy content** — the actual windows per region, and the institution-wide default for customers with unknown timezone. (§6)
-4. **OIDC group-to-role claim mapping** — needed only when real OIDC replaces the mock, but determines whether the four roles in §11.1 map cleanly onto existing directory groups.
-5. **Provider selection** per channel, and whether the chosen SMS provider supports idempotency keys (affects duplicate rates under at-least-once delivery). (§12)
-6. **Identifier systems** — which upstream systems (core banking CIF, CRM, digital, cards) will appear in `customer_external_id.system`, and which is canonical for the event feed. (§4.6)
-7. **Verification semantics** — does the master system publish per-address verification state on the feed? Until answered, the launch tenant runs `verification_mode = 'observe'`, which is now explicit rather than an accidental always-pass (§5).
-8. **Initial quota values** per producer, and the day-boundary timezone for the daily window. Needs the producer list and their expected volumes. (§5.1)
-9. **Maximum scheduling horizon** — 90 days is the proposed default. Confirm, and decide who may hold an override. (§6.2)
-10. **Two-person approval mechanism** for the auth kill switch — built into the panel, or an out-of-band process the panel merely records? (§5.2)
-11. **Launch regions** and their jurisdictions — determines how many independent stacks, Vault clusters, and keyholder sets exist on day one. (§2.2)
-12. **Vault edition** — confirm open-source with per-tenant mounts is acceptable, or whether an Enterprise licence is already held and namespaces are preferred. (§7.6)
-13. **Cloud OTP posture** — will cloud tenants accept `otp-api` with its network hop, or should on-prem auth alongside cloud comms be the recommended pattern for tenants with strict auth SLAs? (§3.1)
-14. **Tenant offboarding SLA** — how quickly must data become unreadable after termination? Key destruction is immediate; `DROP DATABASE` and backup expiry are not. Same §7.3 backup-window caveat applies per tenant. Also: is terminate-and-archive (§7.7) offered commercially, and at what price? It carries multi-year key-custody obligations after the relationship ends.
-15. **Regional backup policy** — one window per region, so it must satisfy the strictest tenant on that cluster. Sets the erasure-completion date quoted to all of them (§7.3).
-16. **Single-tenant restore RTO** — what recovery time can be quoted, given it requires a full-cluster restore to a side instance? Depends on cluster size and whether spare capacity stands by (§13). **Unresolved prerequisite: no per-tenant storage estimate exists anywhere in this document.** The ledger holds rendered bodies (§7) for seven years across a 50× volume range (100k–5M messages/day per tenant, §1), so an email-heavy tenant's `payload_ciphertext` dominates its size and therefore the cluster's. Size one tenant first; cluster size — and with it this RTO, the slow-storage migration point (§7.5), and how many tenants can reasonably share a cluster (§2.1) — all follow from that number.
+2. **Quiet-hours policy content** — the actual windows per region, and the institution-wide default for customers with unknown timezone. (§6)
+3. **OIDC group-to-role claim mapping** — needed only when real OIDC replaces the mock, but determines whether the four roles in §11.1 map cleanly onto existing directory groups.
+4. **Provider selection** per channel, and whether the chosen SMS provider supports idempotency keys (affects duplicate rates under at-least-once delivery). (§12)
+5. **Identifier systems** — which upstream systems (core banking CIF, CRM, digital, cards) will appear in `customer_external_id.system`, and which is canonical for the event feed. (§4.6)
+6. **Verification semantics** — does the master system publish per-address verification state on the feed? Until answered, the launch tenant runs `verification_mode = 'observe'`, which is now explicit rather than an accidental always-pass (§5).
+7. **Initial quota values** per producer, and the day-boundary timezone for the daily window. Needs the producer list and their expected volumes. (§5.1)
+8. **Maximum scheduling horizon** — 90 days is the proposed default. Confirm, and decide who may hold an override. (§6.2)
+9. **Two-person approval mechanism** for the auth kill switch — built into the panel, or an out-of-band process the panel merely records? (§5.2)
+10. **Launch regions** and their jurisdictions — determines how many independent stacks, Vault clusters, and keyholder sets exist on day one. (§2.2)
+11. **Vault edition** — confirm open-source with per-tenant mounts is acceptable, or whether an Enterprise licence is already held and namespaces are preferred. (§7.6)
+12. **Cloud OTP posture** — will cloud tenants accept `otp-api` with its network hop, or should on-prem auth alongside cloud comms be the recommended pattern for tenants with strict auth SLAs? (§3.1)
+13. **Tenant offboarding SLA** — how quickly must data become unreadable after termination? Key destruction is immediate; `DROP DATABASE` and backup expiry are not. Same §7.3 backup-window caveat applies per tenant. Also: is terminate-and-archive (§7.7) offered commercially, and at what price? It carries multi-year key-custody obligations after the relationship ends.
+14. **Regional backup policy** — one window per region, so it must satisfy the strictest tenant on that cluster. Sets the erasure-completion date quoted to all of them (§7.3).
+15. **Single-tenant restore RTO** — what recovery time can be quoted, given it requires a full-cluster restore to a side instance? Depends on cluster size and whether spare capacity stands by (§13). **Unresolved prerequisite: no per-tenant storage estimate exists anywhere in this document.** The ledger holds rendered bodies (§7) for seven years across a 50× volume range (100k–5M messages/day per tenant, §1), so an email-heavy tenant's `payload_ciphertext` dominates its size and therefore the cluster's. Size one tenant first; cluster size — and with it this RTO, the slow-storage migration point (§7.5), and how many tenants can reasonably share a cluster (§2.1) — all follow from that number.
