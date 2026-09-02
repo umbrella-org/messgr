@@ -134,9 +134,10 @@ omitting it reports all-time counts.
 
 Output is one `total=` line per channel followed by one `status=`/`count=` line per distinct
 status seen for that channel. A `NULL final_status` (still in flight) is reported as
-`status=pending`. As of this writing the only other values the dispatcher actually writes are
-`sent`, `failed`, and `expired` -- DESIGN.md §4.4 documents a larger eventual vocabulary
-(`delivered`, `bounced`, `cancelled`, `suppressed_consent`, `suppressed_list`,
+`status=pending`. As of this writing the other values the dispatcher actually writes are
+`sent`, `failed`, `expired`, and `discarded` (a row swept by an engaged kill switch --
+`src/dispatcher/drain.rs`'s `write_discarded`) -- DESIGN.md §4.4 documents a larger eventual
+vocabulary (`delivered`, `bounced`, `cancelled`, `suppressed_consent`, `suppressed_list`,
 `unverified_address`), but those depend on the webhook-receipt path and gate-chain work that
 hasn't shipped yet (T-020, T-021); this command will report them as soon as the dispatcher
 starts writing them, with no code change required here.
