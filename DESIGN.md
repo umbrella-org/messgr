@@ -297,7 +297,6 @@ CREATE TABLE comms_request (
     destination_hmac       bytea       NOT NULL,   -- keyed HMAC, pepper in Vault; indexed lookup
     destination_ciphertext bytea       NOT NULL,   -- under customer DEK; the address as actually used
     payload_ciphertext     bytea,                  -- NULL for auth class; see §7
-    dek_id                 uuid,
     producer_id            uuid        NOT NULL,   -- registered caller (§4.9)
     scheduled_for          timestamptz,            -- NULL = send immediately (§6.2)
     expires_at             timestamptz,            -- drop rather than send late (§6.2)
@@ -309,7 +308,12 @@ CREATE TABLE comms_request (
 CREATE INDEX ON comms_request (customer_id, created_at DESC);
 CREATE INDEX ON comms_request (final_status, created_at DESC);
 CREATE INDEX ON comms_request (campaign_id, created_at) WHERE campaign_id IS NOT NULL;
+CREATE INDEX ON comms_request (destination_hmac, created_at DESC);
 ```
+
+**Correction: a `dek_id uuid` column was removed from this table.** It shipped in T-009, always written NULL, referencing nothing, and read by no code. The DEK for a row is never row-scoped in the first place — encryption is per **customer** (§7.6), so `customer_id` already resolves the key via `customer_dek`. A column that names no reader and no writer is dead weight on a partitioned 7-year table; if a future need for per-message key versioning arises, add the column with a stated reader at that time.
+
+**Correction: `destination_hmac` had no index, despite §11.2 promising one.** The address-scoped query pattern ("who did we contact on this number") is documented as an index scan on `destination_hmac`, but no such index existed on `comms_request` — only `customer_id`, `final_status`, and `campaign_id` were indexed. Added above as `(destination_hmac, created_at DESC)`, matching the shape of the other lookup indexes on this table.
 
 **`final_status` is the one permitted mutation of a ledger row**, and it needs justifying because "append-only" is otherwise the whole point.
 
@@ -347,7 +351,11 @@ CREATE TABLE outbox (
 
 CREATE INDEX outbox_claim ON outbox (channel, priority, next_attempt_at)
     WHERE leased_until IS NULL;
+CREATE INDEX ON outbox (producer_id, next_attempt_at);
+CREATE INDEX ON outbox (campaign_id, next_attempt_at) WHERE campaign_id IS NOT NULL;
 ```
+
+**Correction: the admin panel's scheduled-queue view (§11.3) had no supporting index.** "Pending future-dated messages by producer, campaign, and due window" needs `(producer_id, next_attempt_at)` and `(campaign_id, next_attempt_at)` — the claim index alone (keyed on `channel`) cannot serve either. Added above.
 
 `priority` is a stored integer rather than a `class_rank(class)` function call, so the index can actually serve the `ORDER BY`. An expression the planner has to evaluate per row cannot, which would turn every claim into a sort over the whole ready set.
 
@@ -369,6 +377,8 @@ RETURNING *;
 
 Leases (rather than a `status = 'processing'` column) mean a crashed dispatcher's work becomes claimable automatically once the lease expires. No reaper job.
 
+**Correction: the claim predicate and the retry path were never reconciled, and the gap is load-bearing.** `outbox_claim` is a partial index `WHERE leased_until IS NULL` — a leased row is invisible to it until the lease's own timeout passes, regardless of `next_attempt_at`. §2.4 step 6 describes a retryable provider failure as bumping `attempts` and rescheduling `next_attempt_at` "with backoff and jitter; the row stays in the outbox" — but says nothing about `leased_until`. If the retry path leaves the existing lease in place, the row is unclaimable until that lease's fixed 2-minute timeout expires regardless of the computed backoff, silently overriding whatever backoff was intended; if instead nothing ever clears `leased_until` at all, a row that fails once **before** reaching a terminal write is stranded forever, since only a terminal write (step 6, `sent` or a non-retryable failure) or the lease's own expiry ever frees it. The design must state this explicitly: a retryable failure clears `leased_until` to `NULL` in the same statement that reschedules `next_attempt_at`, so the outbox's one release mechanism is "write a terminal state" **or** "explicitly clear the lease on a rescheduled retry" — never a bare timeout race between the two.
+
 `LISTEN`/`NOTIFY` on insert wakes an idle dispatcher immediately; a 1-second poll is the fallback, so a missed notification costs latency but never correctness. This is the queue-wakeup channel only — kill-switch propagation uses a separate channel with a slower fallback (§5.2).
 
 ### 4.3 Idempotency
@@ -377,13 +387,17 @@ Global uniqueness cannot be enforced on the partitioned ledger — PostgreSQL re
 
 ```sql
 CREATE TABLE idempotency (
-    key               text        PRIMARY KEY,
+    producer_id       uuid        NOT NULL,
+    key               text        NOT NULL,
     comms_request_id  uuid        NOT NULL,
-    expires_at        timestamptz NOT NULL
+    expires_at        timestamptz NOT NULL,
+    PRIMARY KEY (producer_id, key)
 );
 ```
 
-Retained 30 days, swept nightly. A retried POST returns the original `comms_request_id` with `200`, not a duplicate send.
+Retained 30 days, swept nightly (the sweep job itself is not yet built — track it against one ticket, not two; see build order). A retried POST returns the original `comms_request_id` with `200`, not a duplicate send.
+
+**Correction: the key was a bare `PRIMARY KEY (key)`, scoped to nobody.** Idempotency keys are caller-supplied (§2.4 step 1). A bare `text PRIMARY KEY` means two different producers who happen to choose the same key — a sequential counter, a UUID library seeded the same way, a copy-pasted test value — collide on each other's rows: the second producer's request silently returns the *first* producer's `comms_request_id`. Idempotency is a per-producer contract, not a platform-wide namespace; the key is now `(producer_id, key)`, matching how quotas and kill switches already scope to the authenticated caller (§4.9).
 
 ### 4.4 Events, consent, templates
 
@@ -395,12 +409,25 @@ CREATE TABLE comms_event (              -- partitioned monthly, append-only
     event_type        text        NOT NULL,
       -- queued | sent | delivered | failed | bounced | read | complaint
       -- | expired | cancelled | suppressed_consent | suppressed_list | unverified_address
-    provider_ref      text,
+    provider_ref      text        NOT NULL DEFAULT '',  -- '' for dispatch-internal events; see below
     provider_status   text,                  -- normalized code, safe to keep in clear
     provider_payload_ciphertext bytea,       -- raw provider JSON, under customer DEK — see below
     UNIQUE (occurred_at, comms_request_id, event_type, provider_ref)
 ) PARTITION BY RANGE (occurred_at);
 CREATE INDEX ON comms_event (customer_id, occurred_at);
+
+CREATE TABLE orphan_event (              -- §10: a receipt for a provider_ref not yet known
+    id                          uuid        PRIMARY KEY,
+    received_at                 timestamptz NOT NULL,
+    provider                    text        NOT NULL,
+    provider_ref                text        NOT NULL,
+    occurred_at                 timestamptz NOT NULL,
+    event_type                  text        NOT NULL,
+    provider_status             text,
+    provider_payload_raw        jsonb,      -- see below: plaintext, deliberately, and only here
+    reconcile_attempts          smallint    NOT NULL DEFAULT 0
+);
+CREATE INDEX ON orphan_event (provider_ref);
 
 CREATE TABLE consent (
     address_id   uuid NOT NULL REFERENCES customer_address(id),   -- per contact point, not per person
@@ -434,6 +461,10 @@ CREATE TABLE template (
 > Fixed by encrypting the raw payload under the same customer DEK and denormalizing `customer_id` onto the event so erasure can locate the rows. `provider_status` stays in clear because operational queries ("how many `SMS_UNREACHABLE` from this gateway today") must not require decryption.
 >
 > The general lesson for review: every new table needs asking *what PII lands here, and which erasure path reaches it*. Third-party payloads are the easiest place to miss, because nobody chose their contents.
+
+**Correction: `comms_event`'s dedup constraint was inert for exactly the events that need it most.** `UNIQUE (occurred_at, comms_request_id, event_type, provider_ref)` relies on Postgres unique-index semantics — but Postgres treats every NULL as distinct from every other NULL, so two rows with the same `(occurred_at, comms_request_id, event_type)` and both `provider_ref IS NULL` do **not** collide. `provider_ref` is NULL for every event this system generates itself rather than receives from a provider — gate-chain terminal outcomes (`expired`, `suppressed_consent`, and the rest) and dispatch-internal events (`queued`, `sent`, `failed`) all have no provider reference. §10's "inserts use `ON CONFLICT DO NOTHING`; duplicates are free" is true only for provider-sourced events keyed by a real `provider_ref` — a retried write of a gate outcome (a crash between the `comms_event` insert and the `comms_request.final_status` update, then a safe retry of the whole transaction) inserts a second, indistinguishable row instead of no-opping. Fixed by giving every event a value to dedupe on regardless of source: `provider_ref` becomes `NOT NULL DEFAULT ''`, with providers supplying the real reference and dispatch-internal events writing `''` — an empty string is not NULL, so the unique index now catches both cases uniformly.
+
+**Correction: `orphan_event` (§10) was named but never given a schema.** Added above. Its payload is deliberately **not** encrypted under a customer DEK, unlike `comms_event` — the whole reason a receipt lands here is that `comms_request_id` (and therefore `customer_id`) isn't known yet, so there is no DEK to encrypt under. This is a genuine, narrow exception to "PII is always written encrypted" (hard invariant 7's spirit, if not its letter, since no customer is yet identified to scope a key to), and it must stay narrow: reconciliation is a "short delay" per §10, and `reconcile_attempts` exists so a row that fails to reconcile past a small bound (config, not hardcoded) pages someone rather than accumulating as a permanent plaintext-PII table. A row that reconciles is deleted from `orphan_event` once re-inserted into `comms_event` proper, encrypted, under the now-known customer's DEK.
 
 Templates are **immutable once approved**; changes create a new version. Every `comms_request` pins `template_version`, so "what exactly did we send this customer in 2021" remains answerable years later. Approval metadata is captured because a bank will need to show who signed off on customer-facing content.
 
