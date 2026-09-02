@@ -343,6 +343,16 @@ not blocking this ticket), `just lint` (exit 0, but does not catch F1 — see ab
 cost: estimated S, actual S — the two blocking findings are one `cargo fmt --all` run and a
 one-line lifetime elision; no scope growth.
 
+### Rework fix record — round 1 (commit db1257e)
+
+Fixed F1 (elided the needless lifetime in `tests/stats.rs`'s `count_of`) and F2 (ran
+`cargo fmt --all`, formatting `src/bin/control.rs`'s `channels` collect line and three
+`insert_comms_request` call sites in `tests/stats.rs`). Re-ran and confirmed clean:
+`just build`, `cargo test --test stats`, `just test` (full suite, no regressions),
+`just lint`, `just docs-check`, plus CI's actual jobs —
+`cargo clippy --all-targets --all-features -- -D warnings` and `cargo fmt --all -- --check`
+— both exit 0. No other findings touched; F3/F4/F5/F6 stand as recorded above.
+
 ## History
 
 - 2026-09-02 — created (TO DO). source: review: T-027 (unauthenticated new web binary,
@@ -360,3 +370,5 @@ one-line lifetime elision; no scope growth.
 - 2026-09-02 — READY → IN DEVELOPMENT: picked up
 - 2026-09-02 — IN DEVELOPMENT → IN REVIEW: acceptance green
 - 2026-09-02 — IN REVIEW → REWORK: F1/F2: CI clippy (all-targets) and fmt checks fail
+- 2026-09-02 — REWORK → IN REVIEW: findings fixed
+- 2026-09-02 — IN REVIEW → DONE: review clean after rework; 4 non-blocking findings all dispositioned (1 fixed inline, 1 folded into T-025, 2 noted)
