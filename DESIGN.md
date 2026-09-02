@@ -275,7 +275,7 @@ This is weaker than the on-prem story — a network hop and a shared regional se
 
 ## 4. Data model
 
-Everything below lives in a **tenant database** (§2.1). One convention applies throughout and is not repeated on each table: `tenant_id uuid NOT NULL` is the first column. It is a plain column — no RLS, no policies (§2.1 explains why isolation rests on the database boundary plus a `current_database()` assertion instead).
+Everything below lives in a **tenant database** (§2.1) — that is, the tenant boundary is the database itself, not a column. **Correction: an earlier draft of this paragraph claimed `tenant_id uuid NOT NULL` was a repeated first column on every table below.** It is not, and every table shown from here on is correct as written, with a single deliberate exception: `comms_request` alone carries `tenant_id`, kept there as a tripwire and a consolidation path if the business ever pivots to a shared schema (§2.1) — not as an isolation mechanism, since a query inside one tenant's database has no other tenant's rows to filter out. No other table needs it, and adding it elsewhere would misstate what actually enforces isolation: the database boundary plus the `current_database()` assertion (§2.1), not a column. `quiet_hours_policy`'s `tenant_id` column, present in an earlier draft of that table, is removed for the same reason — it was the one other table that had drifted from this convention.
 
 The control database (§4.11) is separate and holds no customer data.
 
@@ -676,12 +676,11 @@ CREATE TABLE tenant_config (
 );
 
 CREATE TABLE quiet_hours_policy (
-    tenant_id   uuid NOT NULL,
     scope       text NOT NULL,          -- region | segment | default
     scope_key   text NOT NULL DEFAULT '',  -- '' for the institution-wide default row
     start_local time NOT NULL,
     end_local   time NOT NULL,
-    PRIMARY KEY (tenant_id, scope, scope_key)
+    PRIMARY KEY (scope, scope_key)
 );
 
 CREATE TABLE provider_config (
