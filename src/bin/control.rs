@@ -11,6 +11,7 @@ use messgr::producer::dev_pki;
 use messgr::producer::register::{disable_producer, list_producers, register_producer};
 use messgr::provider_config::configure::{list_provider_config, set_provider_config};
 use messgr::provider_config::model::ProviderConfigInput;
+use messgr::stats::tenant_message_stats;
 use messgr::template::approve::{
     approve_template, list_template_versions, render_preview, show_template,
 };
@@ -100,6 +101,17 @@ enum Command {
     PartitionLifecycle {
         #[command(subcommand)]
         command: PartitionLifecycleCommand,
+    },
+    /// Message-volume counts by channel and status for one tenant (DESIGN.md
+    /// §11.4: counts/metadata only, never payload content). Reads
+    /// `comms_request.final_status` directly. T-028.
+    Stats {
+        #[arg(long = "tenant-slug")]
+        tenant_slug: String,
+        /// Only count requests created on or after this date (UTC). Omit for
+        /// all-time.
+        #[arg(long)]
+        since: Option<chrono::NaiveDate>,
     },
 }
 
@@ -889,6 +901,35 @@ async fn main() {
                 }
             }
         },
+        Command::Stats { tenant_slug, since } => {
+            let rows = tenant_message_stats(
+                &control_pool,
+                &config.control_database_url,
+                &tenant_slug,
+                since,
+                config.profile,
+            )
+            .await
+            .unwrap_or_else(|err| {
+                panic!("failed to compute stats for tenant {tenant_slug:?}: {err}")
+            });
+
+            let mut channels: Vec<&str> = rows.iter().map(|r| r.channel.as_str()).collect();
+            channels.sort_unstable();
+            channels.dedup();
+
+            for channel in channels {
+                let total: i64 = rows
+                    .iter()
+                    .filter(|r| r.channel == channel)
+                    .map(|r| r.count)
+                    .sum();
+                println!("{channel} total={total}");
+                for row in rows.iter().filter(|r| r.channel == channel) {
+                    println!("{channel} status={} count={}", row.status, row.count);
+                }
+            }
+        }
     }
 }
 

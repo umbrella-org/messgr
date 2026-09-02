@@ -2,8 +2,8 @@
 
 `messgr-control` is the operator CLI for everything short of the send path itself: producer
 identity, tenant configuration, provider configuration, customer DEK pre-provisioning,
-templates, and partition lifecycle. Every subcommand below assumes a tenant has already been
-provisioned (see the quickstart in the repository README).
+templates, partition lifecycle, and message-volume stats. Every subcommand below assumes a
+tenant has already been provisioned (see the quickstart in the repository README).
 
 == Producers
 
@@ -118,6 +118,32 @@ partitions past the tenant's `tenant_config.retention_years` boundary. **If the 
 (tenant_config not set)` -- rather than assuming a default retention on a bank's ledger data.
 Safe to re-run; meant to be invoked on a schedule (cron/systemd timer), not run continuously --
 this binary does not daemonize.
+
+== Message stats
+
+[source,bash]
+----
+cargo run --bin messgr-control -- stats --tenant-slug acme
+cargo run --bin messgr-control -- stats --tenant-slug acme --since 2026-08-01
+----
+
+Per-tenant message-volume counts, by channel (`sms`, `email` only -- `whatsapp` rows are never
+included) and by `comms_request.final_status`, read directly with no join to `outbox` or
+`comms_event` (T-028). `--since` restricts to requests created on or after that UTC date;
+omitting it reports all-time counts.
+
+Output is one `total=` line per channel followed by one `status=`/`count=` line per distinct
+status seen for that channel. A `NULL final_status` (still in flight) is reported as
+`status=pending`. As of this writing the only other values the dispatcher actually writes are
+`sent`, `failed`, and `expired` -- DESIGN.md §4.4 documents a larger eventual vocabulary
+(`delivered`, `bounced`, `cancelled`, `suppressed_consent`, `suppressed_list`,
+`unverified_address`), but those depend on the webhook-receipt path and gate-chain work that
+hasn't shipped yet (T-020, T-021); this command will report them as soon as the dispatcher
+starts writing them, with no code change required here.
+
+This reads Postgres directly, the same trust boundary as every other `messgr-control`
+subcommand (whoever can run the binary already has database access) -- no new authentication
+surface, and no message content (`payload_ciphertext`, `destination_ciphertext`) is ever read.
 
 == Provider configuration
 
