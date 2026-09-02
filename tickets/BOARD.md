@@ -49,10 +49,10 @@ Last updated: 2026-09-02
 | T-021 | Outbox lease lifecycle and dispatcher retry with backoff | critical | high | L | [] |  |
 | T-019 | Size one tenant's ledger and derive cluster limits | high | low | S | [] |  |
 | T-016 | Kill switches | high | medium | M | [] |  |
+| T-018 | Fix the two open races on customer_address's (kind, value_hmac) index | high | medium | M | [] |  |
 | T-022 | Apply ledger and queue schema corrections to migrations | high | medium | M | [] |  |
 | T-023 | Read provider credentials from Vault instead of environment variables | high | medium | M | [] |  |
 | T-024 | CI check that every PII-holding table is covered by erasure or a named exemption | high | medium | M | [] |  |
-| T-018 | Clean up orphaned customer_dek rows from lost address-only mint races | medium | medium | M | [] |  |
 | T-025 | Operability and error-handling cleanup across CLI and services | medium | low | M | [] |  |
 | T-026 | Fix check-then-act races in CLI write paths | medium | medium | M | [] |  |
 

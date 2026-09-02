@@ -1,21 +1,30 @@
 ---
 id: T-018
-title: Clean up orphaned customer_dek rows from lost address-only mint races
+title: Fix the two open races on customer_address's (kind, value_hmac) index
 project: messgr
 depends-on: []
 spawned-by: [T-015]
-impact: medium
+impact: high
 complexity: medium
 cost: M
 ---
 
-# T-018 — Clean up orphaned customer_dek rows from lost address-only mint races
+# T-018 — Fix the two open races on customer_address's (kind, value_hmac) index
 
 ## Outcome
 
 A lost address-only provisional-mint race no longer leaves a permanent, unreferenced
 `customer_dek` row (and its live Vault Transit datakey) behind — either the row never gets
-created for the losing attempt, or it is swept up after the fact.
+created for the losing attempt, or it is swept up after the fact. Separately, resolving a
+send against a destination already active under a different customer no longer rejects the
+send — it is resolved to an outcome, per §4.7's "never reject a send because resolution
+failed," matching how every other resolution path in `src/customer/resolve.rs` already
+handles a lost race.
+
+**Scope widened during the 2026-09-02 design/implementation audit** — see the second
+Description section below. Both problems are consequences of the same `(kind, value_hmac)
+WHERE active_to IS NULL` unique index added during T-015's own refinement, so they belong in
+one ticket rather than being split and re-discovering the shared context twice.
 
 ## Description
 
@@ -48,6 +57,34 @@ The race is narrow (only two concurrent first-time resolutions of the exact same
 never-before-seen destination), so this is a hygiene/compliance-completeness fix, not a
 golden-path bug — nothing about resolution itself misbehaves.
 
+### Second problem, folded in from the design/implementation audit: `AddressConflict` rejects a send
+
+`resolve()`'s `Explicit`/`External` path (`src/customer/resolve.rs`, around line 250) hits the
+same `(kind, value_hmac) WHERE active_to IS NULL` index when a caller supplies a `customer_id`
+or external id together with a destination that is *already* the active address of a
+*different* customer. Unlike every other lost-race path in this same function — which all
+re-fetch the winner and return it as a normal `Resolved` — this one returns
+`Err(ResolveError::AddressConflict { existing_customer_id })`, which `src/ingest/model.rs`
+maps to `409 Conflict` and rejects the send outright.
+
+This contradicts DESIGN.md §4.7 directly: "**Never reject a send because resolution
+failed.** A missing timeline entry is bad; a blocked OTP is worse." An `AddressConflict` is
+not evidence of a resolution *failure* — it is evidence that the caller's asserted identity
+disagrees with what the address index already knows, which is a real, meaningful signal,
+but a signal at least worth recording rather than one that should block the send it arrived
+on. Options to weigh at refinement, not decided here:
+
+- Send under the caller-supplied `customer_id`/external id, using the winner's `address_id`
+  (a customer's message still goes out under the identity the caller vouched for) — records
+  the conflict as a `comms_event`-adjacent note or a dedicated audit row rather than blocking.
+- Send under the winning `customer_id` instead (identity resolution defers to the address
+  index, since two customers cannot legitimately share one currently-active destination) —
+  same effect as every other lost-race path in this function already has.
+
+Either resolves the contradiction; which one is a product decision (does the caller's
+asserted identity or the address index win a genuine conflict), not an implementation detail,
+so it needs a decision recorded during this ticket's refinement rather than picked silently.
+
 ## Implementation Plan
 
 <!-- empty until refined; must meet the READY gate before moving to 2-ready/ -->
@@ -59,3 +96,4 @@ golden-path bug — nothing about resolution itself misbehaves.
 ## History
 
 - 2026-09-01 — created (TO DO). source: review: T-015's review (F2) found a lost address-only mint race leaves an orphaned, unreachable `customer_dek` row — narrow but genuine, batched here since it needs design thought (restructure vs. sweep), not a one-line fix.
+- 2026-09-02 — scope widened, retitled (TO DO). source: audit: design/implementation audit found `resolve()`'s AddressConflict path rejects a send, contradicting DESIGN.md §4.7's "never reject a send because resolution failed" — same `(kind, value_hmac)` index as this ticket's existing scope, folded in rather than filed separately.
