@@ -336,7 +336,30 @@ to `dispatcher.adoc` and `ingest.adoc` (Task 8).
 
 ## Review
 
-<!-- empty until IN REVIEW -->
+Reviewer independence (step 0): **independent** — this session had no hand in `feat/T-016-kill-switches` (started fresh, `/clear`d, no memory of authoring the branch). Audits run directly, not delegated.
+
+Checklist:
+- [x] Reviewer independence settled: independent (see above)
+- [x] Implementation audit — acceptance test re-run (`just build`, `just lint`, `just test`, `just docs-check`), all green; every task and confirmed decision checked against the actual diff (steps 1, 2)
+- [x] Quality audit (step 3) — idiomatic, DESIGN.md-cited throughout; one gap found, see F1
+- [x] Consistency audit (step 4) — no stale `§N` cross-references found; `tenant_id`-in-tenant-db-table convention respected (no new column); DESIGN.md corrections (decisions 28/29, kill_switch NULL-key fix, Still Open #9) already landed on `main` during refinement, not deferred
+- [x] Documentation audit (step 4a) — `kill-switches.adoc` registered in `user-manual.adoc`; `dispatcher.adoc`/`ingest.adoc` updated; `just docs-check` clean
+- [x] Docs-readability pass (step 4b) — conscious skip: no docs-readability reviewer available in this session
+- [x] Findings recorded below with severity, class, disposition; cost line present (step 5)
+
+### Implementation audit (step 2)
+
+Re-ran verbatim: `just build` (clean), `just lint` (`cargo clippy -- -D warnings`, clean), `just test` (all 12 integration-test binaries green, including the new `tests/kill_switch.rs`'s 6 tests and the two new suspended-tenant tests in `tests/producer.rs`/`tests/ingest.rs`), `just docs-check` (clean). All 11 confirmed decisions and all 8 tasks are implemented where the plan says: `kill_switch` schema + corrected unique index + notify trigger (Task 1), the cache module (Task 2), dispatcher claim-exclusion + `claim_for_scope` (Task 3), `kill_switch_release_rate` end-to-end through the CLI (Task 4), ingest-side rejection (Task 5), tenant-status enforcement closing T-011/F3 (Task 6), `auth_enabled` schema-only (Task 7), docs (Task 8). Auth/OTP path confirmed untouched: `validate_class` in `src/ingest/handler.rs` rejects `class = "auth"` outright, so the new kill-switch/tenant-status checks in `create_comms` never see auth traffic (AGENTS.md hard invariant 1 intact).
+
+### Findings
+
+| id | severity | class | disposition | description | evidence | suggestion |
+|---|---|---|---|---|---|---|
+| F1 | blocking | correctness | — | A DB error mid-sweep in either kill-switch drain task is treated as if the sweep finished, permanently losing the safety guarantee for whatever backlog remained | `src/dispatcher/drain.rs:44-59` (`drain_released_scope` logs and `return`s on a `claim_for_scope` error, ending the task); `src/dispatcher/drain.rs:112-119` (`run_release_drain` awaits every per-channel handle and unconditionally removes the scope from `draining` once they all return, whether by completion or by this early error return — nothing distinguishes the two); `src/dispatcher/drain.rs:134-168` (`discard_engaged_scope` does the same on a `claim_for_scope` error, and also on a per-row `write_terminal` error inside its loop, which it just logs and continues past). No test exercises a DB error mid-drain or mid-discard. | Once the scope drops out of `draining`/the engaged set, the normal claim loop (which no longer excludes it) claims whatever backlog remains at full, unthrottled speed — for a `hold` switch this is exactly the stampede DESIGN.md decision 12 exists to prevent ("Release is the dangerous half... 500k held messages become dispatchable in the same instant"); for a `discard` switch, the un-swept remainder is never terminal-written `discarded` — it sits excluded until the switch eventually releases, then gets dispatched and sent for real, the opposite of what engaging `on_queued = 'discard'` asked for. Contrast with the pre-existing `run_channel_loop`'s claim call (`src/dispatcher/worker.rs`), which `.expect()`s and crashes the process on the same class of error, forcing a full state rebuild on restart — these two new tasks should not silently swallow the same failure and call it done. Fix: on a `claim_for_scope`/`write_terminal` error, retry (with backoff) rather than returning, or propagate the failure so the caller does not clear `draining`/consider the scope finished until the backlog is actually confirmed empty. |
+
+Disposition summary: 1 blocking (F1), 0 non-blocking.
+
+cost: estimated L, actual L
 
 ## History
 
@@ -359,3 +382,4 @@ to `dispatcher.adoc` and `ingest.adoc` (Task 8).
   unaffected — it only ever reads the shared cache's *engaged* set, so a release still unblocks
   new sends immediately regardless of how long the dispatcher's drain takes.
 - 2026-09-02 — IN DEVELOPMENT → IN REVIEW: acceptance green
+- 2026-09-02 — IN REVIEW → REWORK: F1 blocking: kill-switch drain/discard tasks silently treat a mid-sweep DB error as completion, losing the release-ramp/discard guarantee
