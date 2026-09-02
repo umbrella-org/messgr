@@ -496,3 +496,4 @@ fixes stayed small and scoped)
 - 2026-09-02 — REWORK → IN REVIEW: findings fixed
 - 2026-09-02 — IN REVIEW → DONE: F1 and F2 fixed and verified; no new findings
 - 2026-09-02 — MR opened: PR #19 (`feat/T-016-kill-switches`), awaiting merge
+- 2026-09-02 — MERGED: PR #19 (`6059a13`)
