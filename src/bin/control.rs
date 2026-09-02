@@ -914,7 +914,8 @@ async fn main() {
                 panic!("failed to compute stats for tenant {tenant_slug:?}: {err}")
             });
 
-            let mut channels: Vec<&str> = rows.iter().map(|r| r.channel.as_str()).collect();
+            let mut channels: Vec<&str> =
+                rows.iter().map(|r| r.channel.as_str()).collect();
             channels.sort_unstable();
             channels.dedup();
 

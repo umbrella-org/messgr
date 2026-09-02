@@ -167,8 +167,8 @@ async fn insert_comms_request(
     .map(|_| ())
 }
 
-fn count_of<'a>(
-    rows: &'a [messgr::stats::ChannelStatusCount],
+fn count_of(
+    rows: &[messgr::stats::ChannelStatusCount],
     channel: &str,
     status: &str,
 ) -> Option<i64> {
@@ -182,21 +182,45 @@ async fn stats_reports_channel_and_status_counts_excluding_whatsapp() {
     let tenant = TestTenant::provision("counts").await;
     let now = Utc::now();
 
-    insert_comms_request(&tenant.tenant_pool, Uuid::new_v4(), now, "sms", Some("sent"))
-        .await
-        .expect("insert sms/sent #1 failed");
-    insert_comms_request(&tenant.tenant_pool, Uuid::new_v4(), now, "sms", Some("sent"))
-        .await
-        .expect("insert sms/sent #2 failed");
+    insert_comms_request(
+        &tenant.tenant_pool,
+        Uuid::new_v4(),
+        now,
+        "sms",
+        Some("sent"),
+    )
+    .await
+    .expect("insert sms/sent #1 failed");
+    insert_comms_request(
+        &tenant.tenant_pool,
+        Uuid::new_v4(),
+        now,
+        "sms",
+        Some("sent"),
+    )
+    .await
+    .expect("insert sms/sent #2 failed");
     insert_comms_request(&tenant.tenant_pool, Uuid::new_v4(), now, "sms", None)
         .await
         .expect("insert sms/pending failed");
-    insert_comms_request(&tenant.tenant_pool, Uuid::new_v4(), now, "email", Some("failed"))
-        .await
-        .expect("insert email/failed failed");
-    insert_comms_request(&tenant.tenant_pool, Uuid::new_v4(), now, "whatsapp", Some("sent"))
-        .await
-        .expect("insert whatsapp/sent failed");
+    insert_comms_request(
+        &tenant.tenant_pool,
+        Uuid::new_v4(),
+        now,
+        "email",
+        Some("failed"),
+    )
+    .await
+    .expect("insert email/failed failed");
+    insert_comms_request(
+        &tenant.tenant_pool,
+        Uuid::new_v4(),
+        now,
+        "whatsapp",
+        Some("sent"),
+    )
+    .await
+    .expect("insert whatsapp/sent failed");
 
     let rows = tenant_message_stats(
         &tenant.control_pool,
@@ -237,12 +261,24 @@ async fn stats_since_filter_is_exact_at_the_day_boundary() {
     let today = Utc::now();
     let tomorrow = today + Duration::days(1);
 
-    insert_comms_request(&tenant.tenant_pool, Uuid::new_v4(), today, "sms", Some("sent"))
-        .await
-        .expect("insert today's row failed");
-    insert_comms_request(&tenant.tenant_pool, Uuid::new_v4(), tomorrow, "sms", Some("sent"))
-        .await
-        .expect("insert tomorrow's row failed");
+    insert_comms_request(
+        &tenant.tenant_pool,
+        Uuid::new_v4(),
+        today,
+        "sms",
+        Some("sent"),
+    )
+    .await
+    .expect("insert today's row failed");
+    insert_comms_request(
+        &tenant.tenant_pool,
+        Uuid::new_v4(),
+        tomorrow,
+        "sms",
+        Some("sent"),
+    )
+    .await
+    .expect("insert tomorrow's row failed");
 
     let all_time = tenant_message_stats(
         &tenant.control_pool,
