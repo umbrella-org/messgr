@@ -308,3 +308,4 @@ Run `just docs-check` and fix anything it flags.
   itself was unaffected (group-by is value-agnostic).
 - 2026-09-02 — TO DO → READY: plan complete
 - 2026-09-02 — READY → IN DEVELOPMENT: picked up
+- 2026-09-02 — IN DEVELOPMENT → IN REVIEW: acceptance green
