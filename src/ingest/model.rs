@@ -68,7 +68,9 @@ pub enum IngestError {
     /// `(channel, producer_id, campaign_id)` (DESIGN.md §5.2, T-016).
     /// Temporary and distinct from every existing 4xx rejection — `503`,
     /// not a generic `500` — since the switch may release at any moment.
-    KillSwitchEngaged { scope: String },
+    KillSwitchEngaged {
+        scope: String,
+    },
     TenantNotConfigured,
     MissingIdempotencyKey,
     InvalidClass(String),

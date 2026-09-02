@@ -241,9 +241,15 @@ pub async fn run_channel_loop(ctx: Arc<DispatcherContext>, channel: String) {
     loop {
         let leased_until = Utc::now() + LEASE_DURATION;
         let exclusion = ctx.claim_exclusion(&channel).await;
-        let claimed = repo::claim(&ctx.pool, &channel, CLAIM_BATCH_SIZE, leased_until, &exclusion)
-            .await
-            .expect("dispatcher: claim query failed");
+        let claimed = repo::claim(
+            &ctx.pool,
+            &channel,
+            CLAIM_BATCH_SIZE,
+            leased_until,
+            &exclusion,
+        )
+        .await
+        .expect("dispatcher: claim query failed");
 
         if claimed.is_empty() {
             tokio::select! {

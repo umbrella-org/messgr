@@ -56,7 +56,11 @@ pub async fn create_comms(
     // (`LISTEN` never fires over this process's PgBouncer connection, §2.3).
     if let Some(scope) = tenant
         .kill_switches
-        .blocking_scope(&body.channel, producer.producer_id, body.campaign_id.as_deref())
+        .blocking_scope(
+            &body.channel,
+            producer.producer_id,
+            body.campaign_id.as_deref(),
+        )
         .await
     {
         return Err(IngestError::KillSwitchEngaged { scope });

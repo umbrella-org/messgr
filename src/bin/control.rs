@@ -569,7 +569,8 @@ async fn main() {
                             days: 0,
                             microseconds: staleness_max_age_seconds * 1_000_000,
                         },
-                        kill_switch_release_rate: kill_switch_release_rate.unwrap_or(500),
+                        kill_switch_release_rate: kill_switch_release_rate
+                            .unwrap_or(500),
                     };
 
                     let outcome = set_tenant_config(

@@ -108,7 +108,8 @@ pub async fn claim_for_scope(
             qb.push_bind(producer_id);
         }
         scope::PRODUCER_CHANNEL => {
-            let Some((producer_id, switch_channel)) = kill_switch.producer_channel_parts()
+            let Some((producer_id, switch_channel)) =
+                kill_switch.producer_channel_parts()
             else {
                 return Ok(Vec::new());
             };

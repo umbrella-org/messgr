@@ -30,7 +30,9 @@ use messgr::ingest::handler::create_comms;
 use messgr::ingest::repo::insert_transactional;
 use messgr::key_cache::KeyCache;
 use messgr::keystore::{KeyStore, VaultKeyStore};
-use messgr::kill_switch::cache::{ChannelExclusion, KillSwitchCache, exclusion_for_channel};
+use messgr::kill_switch::cache::{
+    ChannelExclusion, KillSwitchCache, exclusion_for_channel,
+};
 use messgr::kill_switch::model::{KillSwitch, on_queued, scope};
 use messgr::mtls::{self, ClientCertAcceptor};
 use messgr::producer::cert_repo;
@@ -165,9 +167,10 @@ async fn provision_test_tenant(vault: &VaultKeyStore) -> TestTenant {
     .await
     .expect("provisioning test tenant failed");
 
-    let tenant_pool = connect_tenant_pool(&control_url, &database_name, 5, Profile::Dev)
-        .await
-        .expect("connecting tenant pool failed");
+    let tenant_pool =
+        connect_tenant_pool(&control_url, &database_name, 5, Profile::Dev)
+            .await
+            .expect("connecting tenant pool failed");
 
     TestTenant {
         control_pool,
@@ -195,23 +198,30 @@ async fn write_outbox_row(
     campaign_id: Option<&str>,
     destination: &str,
 ) -> Uuid {
-    let tenant_id = messgr::tenant::repo::find_by_slug(&tenant.control_pool, &tenant.slug)
-        .await
-        .expect("tenant lookup failed")
-        .expect("tenant must exist")
-        .id;
+    let tenant_id =
+        messgr::tenant::repo::find_by_slug(&tenant.control_pool, &tenant.slug)
+            .await
+            .expect("tenant lookup failed")
+            .expect("tenant must exist")
+            .id;
 
     let customer_id = Uuid::new_v4();
-    let dek = get_or_create_dek(&tenant.tenant_pool, vault, cache, &tenant.mount, customer_id)
-        .await
-        .expect("get_or_create_dek failed");
+    let dek = get_or_create_dek(
+        &tenant.tenant_pool,
+        vault,
+        cache,
+        &tenant.mount,
+        customer_id,
+    )
+    .await
+    .expect("get_or_create_dek failed");
 
     let comms_request_id = Uuid::new_v4();
     let aad = comms_request_id.as_bytes();
     let destination_ciphertext = encryption::encrypt(&dek, aad, destination.as_bytes())
         .expect("encrypting destination failed");
-    let payload_ciphertext =
-        encryption::encrypt(&dek, aad, b"hello there").expect("encrypting payload failed");
+    let payload_ciphertext = encryption::encrypt(&dek, aad, b"hello there")
+        .expect("encrypting payload failed");
 
     insert_transactional(
         &tenant.tenant_pool,
@@ -237,7 +247,10 @@ async fn write_outbox_row(
     comms_request_id
 }
 
-async fn outbox_leased_until(pool: &PgPool, comms_request_id: Uuid) -> Option<DateTime<Utc>> {
+async fn outbox_leased_until(
+    pool: &PgPool,
+    comms_request_id: Uuid,
+) -> Option<DateTime<Utc>> {
     sqlx::query_scalar("SELECT leased_until FROM outbox WHERE comms_request_id = $1")
         .bind(comms_request_id)
         .fetch_one(pool)
@@ -265,12 +278,26 @@ async fn engaged_producer_switch_excludes_only_that_producers_rows() {
 
     let blocked_producer = Uuid::new_v4();
     let other_producer = Uuid::new_v4();
-    let blocked_id =
-        write_outbox_row(&tenant, &vault, &cache, "sms", blocked_producer, None, "+15550100")
-            .await;
-    let other_id =
-        write_outbox_row(&tenant, &vault, &cache, "sms", other_producer, None, "+15550101")
-            .await;
+    let blocked_id = write_outbox_row(
+        &tenant,
+        &vault,
+        &cache,
+        "sms",
+        blocked_producer,
+        None,
+        "+15550100",
+    )
+    .await;
+    let other_id = write_outbox_row(
+        &tenant,
+        &vault,
+        &cache,
+        "sms",
+        other_producer,
+        None,
+        "+15550101",
+    )
+    .await;
 
     let switch = engage_switch(
         &tenant.tenant_pool,
@@ -291,7 +318,8 @@ async fn engaged_producer_switch_excludes_only_that_producers_rows() {
     .await
     .expect("claim failed");
 
-    let claimed_ids: Vec<Uuid> = claimed.iter().map(|row| row.comms_request_id).collect();
+    let claimed_ids: Vec<Uuid> =
+        claimed.iter().map(|row| row.comms_request_id).collect();
     assert!(
         !claimed_ids.contains(&blocked_id),
         "a row from the blocked producer must not be claimable"
@@ -316,11 +344,29 @@ async fn global_switch_excludes_every_channel() {
     let cache = small_cache();
 
     let producer_id = Uuid::new_v4();
-    write_outbox_row(&tenant, &vault, &cache, "sms", producer_id, None, "+15550100").await;
-    write_outbox_row(&tenant, &vault, &cache, "email", producer_id, None, "jordan@example.com")
-        .await;
+    write_outbox_row(
+        &tenant,
+        &vault,
+        &cache,
+        "sms",
+        producer_id,
+        None,
+        "+15550100",
+    )
+    .await;
+    write_outbox_row(
+        &tenant,
+        &vault,
+        &cache,
+        "email",
+        producer_id,
+        None,
+        "jordan@example.com",
+    )
+    .await;
 
-    let switch = engage_switch(&tenant.tenant_pool, scope::GLOBAL, None, on_queued::HOLD).await;
+    let switch =
+        engage_switch(&tenant.tenant_pool, scope::GLOBAL, None, on_queued::HOLD).await;
 
     for channel in ["sms", "email"] {
         let exclusion = cache_exclusion(std::slice::from_ref(&switch), channel);
@@ -337,7 +383,10 @@ async fn global_switch_excludes_every_channel() {
         )
         .await
         .expect("claim failed");
-        assert!(claimed.is_empty(), "{channel} must claim nothing under a global switch");
+        assert!(
+            claimed.is_empty(),
+            "{channel} must claim nothing under a global switch"
+        );
     }
 
     tenant.cleanup().await;
@@ -389,12 +438,11 @@ async fn release_ramp_admits_at_most_release_rate_rows_per_batch() {
         "one drain batch must never exceed the configured release rate"
     );
 
-    let remaining: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM outbox WHERE leased_until IS NULL",
-    )
-    .fetch_one(&tenant.tenant_pool)
-    .await
-    .expect("counting unleased rows failed");
+    let remaining: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM outbox WHERE leased_until IS NULL")
+            .fetch_one(&tenant.tenant_pool)
+            .await
+            .expect("counting unleased rows failed");
     assert_eq!(
         remaining, 3,
         "rows beyond one batch must remain unleased until the next tick"
@@ -411,10 +459,26 @@ async fn drain_sends_every_row_and_marks_an_already_expired_one_expired_instead(
     let cache = small_cache();
 
     let producer_id = Uuid::new_v4();
-    let fresh_id =
-        write_outbox_row(&tenant, &vault, &cache, "sms", producer_id, None, "+15550300").await;
-    let expired_id =
-        write_outbox_row(&tenant, &vault, &cache, "sms", producer_id, None, "+15550301").await;
+    let fresh_id = write_outbox_row(
+        &tenant,
+        &vault,
+        &cache,
+        "sms",
+        producer_id,
+        None,
+        "+15550300",
+    )
+    .await;
+    let expired_id = write_outbox_row(
+        &tenant,
+        &vault,
+        &cache,
+        "sms",
+        producer_id,
+        None,
+        "+15550301",
+    )
+    .await;
     sqlx::query("UPDATE outbox SET expires_at = now() - interval '1 hour' WHERE comms_request_id = $1")
         .bind(expired_id)
         .execute(&tenant.tenant_pool)
@@ -456,9 +520,14 @@ async fn drain_sends_every_row_and_marks_an_already_expired_one_expired_instead(
 
     drain_released_scope(ctx, "sms".to_string(), released_switch, 10).await;
 
-    assert_eq!(final_status(&tenant.tenant_pool, fresh_id).await.as_deref(), Some("sent"));
     assert_eq!(
-        final_status(&tenant.tenant_pool, expired_id).await.as_deref(),
+        final_status(&tenant.tenant_pool, fresh_id).await.as_deref(),
+        Some("sent")
+    );
+    assert_eq!(
+        final_status(&tenant.tenant_pool, expired_id)
+            .await
+            .as_deref(),
         Some("expired"),
         "a row whose expires_at had already passed by drain time must not be sent"
     );
@@ -525,7 +594,8 @@ impl TestServer {
         let cert_path = cert_dir.join("server-cert.pem");
         let key_path = cert_dir.join("server-key.pem");
         let ca_path = cert_dir.join("client-ca.pem");
-        std::fs::write(&cert_path, server_cert_pem).expect("writing server cert failed");
+        std::fs::write(&cert_path, server_cert_pem)
+            .expect("writing server cert failed");
         std::fs::write(&key_path, server_key_pem).expect("writing server key failed");
         std::fs::write(&ca_path, client_ca_pem).expect("writing client CA failed");
 
@@ -751,7 +821,8 @@ fn sample_body(customer_id: Uuid, destination: &str) -> serde_json::Value {
 async fn teardown(fixture: &Fixture, cert_subjects: &[&str]) {
     fixture.server.shutdown();
     for cert_subject in cert_subjects {
-        let _ = cert_repo::delete_producer_cert(&fixture.control_pool, cert_subject).await;
+        let _ =
+            cert_repo::delete_producer_cert(&fixture.control_pool, cert_subject).await;
     }
     let _ = std::fs::remove_dir_all(&fixture.cert_dir);
     drop_test_tenant(

@@ -176,8 +176,14 @@ impl TenantRegistry {
         let poll_pool = pool.clone();
         let poll_cache = kill_switches.clone();
         tokio::spawn(async move {
-            run_refresh_loop(poll_cache, poll_pool, None, KILL_SWITCH_POLL_INTERVAL, |_| {})
-                .await;
+            run_refresh_loop(
+                poll_cache,
+                poll_pool,
+                None,
+                KILL_SWITCH_POLL_INTERVAL,
+                |_| {},
+            )
+            .await;
         });
 
         let context = Arc::new(TenantContext {

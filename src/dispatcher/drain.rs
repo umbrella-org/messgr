@@ -234,25 +234,34 @@ async fn write_discarded(pool: &PgPool, row: &ClaimedOutbox) {
 /// engaged, so a row this task gives up on gets dispatched and sent for
 /// real if the switch is later released, the opposite of what engaging
 /// `on_queued = 'discard'` asked for.
-pub async fn discard_engaged_scope(pool: PgPool, kill_switch: KillSwitch, batch_size: i64) {
+pub async fn discard_engaged_scope(
+    pool: PgPool,
+    kill_switch: KillSwitch,
+    batch_size: i64,
+) {
     loop {
         let leased_until = Utc::now() + LEASE_DURATION;
-        let batch =
-            match repo::claim_for_scope(&pool, None, &kill_switch, batch_size, leased_until)
-                .await
-            {
-                Ok(rows) => rows,
-                Err(err) => {
-                    tracing::error!(
-                        kill_switch_id = %kill_switch.id,
-                        %err,
-                        "kill-switch discard: claim failed, retrying — this scope's backlog \
-                         is not considered discarded until this succeeds"
-                    );
-                    tokio::time::sleep(RETRY_DELAY).await;
-                    continue;
-                }
-            };
+        let batch = match repo::claim_for_scope(
+            &pool,
+            None,
+            &kill_switch,
+            batch_size,
+            leased_until,
+        )
+        .await
+        {
+            Ok(rows) => rows,
+            Err(err) => {
+                tracing::error!(
+                    kill_switch_id = %kill_switch.id,
+                    %err,
+                    "kill-switch discard: claim failed, retrying — this scope's backlog \
+                     is not considered discarded until this succeeds"
+                );
+                tokio::time::sleep(RETRY_DELAY).await;
+                continue;
+            }
+        };
 
         if batch.is_empty() {
             return;

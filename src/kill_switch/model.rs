@@ -49,7 +49,12 @@ impl KillSwitch {
     /// Whether an outbox row on `channel`, from `producer_id`, in
     /// `campaign_id`, falls under this switch's scope — used by ingest's
     /// per-request check and by the dispatcher's claim-exclusion builder.
-    pub fn matches(&self, channel: &str, producer_id: Uuid, campaign_id: Option<&str>) -> bool {
+    pub fn matches(
+        &self,
+        channel: &str,
+        producer_id: Uuid,
+        campaign_id: Option<&str>,
+    ) -> bool {
         match self.scope.as_str() {
             scope::GLOBAL => true,
             scope::CHANNEL => self.scope_key.as_deref() == Some(channel),
@@ -57,7 +62,9 @@ impl KillSwitch {
             scope::PRODUCER_CHANNEL => self
                 .producer_channel_parts()
                 .is_some_and(|(id, ch)| id == producer_id && ch == channel),
-            scope::CAMPAIGN => campaign_id.is_some() && self.scope_key.as_deref() == campaign_id,
+            scope::CAMPAIGN => {
+                campaign_id.is_some() && self.scope_key.as_deref() == campaign_id
+            }
             _ => false,
         }
     }
@@ -66,7 +73,9 @@ impl KillSwitch {
     /// `None` if it doesn't parse (a malformed row from outside the runbook —
     /// treated as matching nothing rather than panicking).
     pub fn producer_id(&self) -> Option<Uuid> {
-        self.scope_key.as_deref().and_then(|k| Uuid::parse_str(k).ok())
+        self.scope_key
+            .as_deref()
+            .and_then(|k| Uuid::parse_str(k).ok())
     }
 
     /// The `(producer_id, channel)` pair a `producer_channel`-scope switch's

@@ -25,13 +25,19 @@ pub struct ResolvedIdentity {
 #[derive(Debug)]
 pub enum ResolutionError {
     UnknownCert,
-    Disabled { tenant_id: Uuid, producer_id: Uuid },
+    Disabled {
+        tenant_id: Uuid,
+        producer_id: Uuid,
+    },
     /// `tenant.status != 'active'` (T-016, closes T-011/F3). Allowlisting
     /// `active` — rather than blocklisting `suspended`/`offboarding_*` —
     /// also rejects a stray request against a still-`provisioning` tenant,
     /// which is strictly safer and free: no producer cert should exist for
     /// one yet.
-    TenantNotActive { tenant_id: Uuid, producer_id: Uuid },
+    TenantNotActive {
+        tenant_id: Uuid,
+        producer_id: Uuid,
+    },
     Database(sqlx::Error),
 }
 
@@ -54,7 +60,9 @@ impl std::error::Error for ResolutionError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Database(err) => Some(err),
-            Self::UnknownCert | Self::Disabled { .. } | Self::TenantNotActive { .. } => None,
+            Self::UnknownCert
+            | Self::Disabled { .. }
+            | Self::TenantNotActive { .. } => None,
         }
     }
 }
