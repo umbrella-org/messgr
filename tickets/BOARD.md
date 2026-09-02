@@ -54,6 +54,7 @@ Last updated: 2026-09-02
 | T-024 | CI check that every PII-holding table is covered by erasure or a named exemption | high | medium | M | [] |  |
 | T-025 | Operability and error-handling cleanup across CLI and services | medium | low | M | [] |  |
 | T-026 | Fix check-then-act races in CLI write paths | medium | medium | M | [] |  |
+| T-027 | messgr-query — serve command and htmx traffic-overview screen | medium | medium | M | [] |  |
 
 ## DONE
 
