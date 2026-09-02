@@ -78,7 +78,7 @@ Last updated: 2026-09-02
 | T-015 | Customer projection + resolution at ingest | yes — MERGED: PR #18 (`feat/T-015-customer-projection-resolution`, 83f73aa) |
 | T-016 | Kill switches | yes — MERGED: PR #19 (`6059a13`) |
 | T-017 | CI: create messgr_cold tablespace before partition-lifecycle tests | yes — MERGED: PR #17 (`feat/T-017-ci-messgr-cold-tablespace`, b5c66bd) |
-| T-028 | messgr-control: stats subcommand for per-tenant message volume | no — publish-gated |
+| T-028 | messgr-control: stats subcommand for per-tenant message volume | yes — merged to main (PR #20, ed46117) |
 
 ## DROPPED
 

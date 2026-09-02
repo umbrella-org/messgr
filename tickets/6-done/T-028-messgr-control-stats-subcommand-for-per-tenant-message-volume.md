@@ -373,3 +373,4 @@ Fixed F1 (elided the needless lifetime in `tests/stats.rs`'s `count_of`) and F2 
 - 2026-09-02 — REWORK → IN REVIEW: findings fixed
 - 2026-09-02 — IN REVIEW → DONE: review clean after rework; 4 non-blocking findings all dispositioned (1 fixed inline, 1 folded into T-025, 2 noted)
 - 2026-09-02 — MR #20 opened (`feat/T-028-messgr-control-stats-subcommand`), awaiting merge
+- 2026-09-02 — merged to main (PR #20, ed46117)
