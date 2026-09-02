@@ -38,6 +38,7 @@ Last updated: 2026-09-02
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
+| T-028 | messgr-control: stats subcommand for per-tenant message volume | medium | low | S | [] |  |
 
 ## TO DO (impact order, per child)
 
@@ -52,7 +53,6 @@ Last updated: 2026-09-02
 | T-022 | Apply ledger and queue schema corrections to migrations | high | medium | M | [] |  |
 | T-023 | Read provider credentials from Vault instead of environment variables | high | medium | M | [] |  |
 | T-024 | CI check that every PII-holding table is covered by erasure or a named exemption | high | medium | M | [] |  |
-| T-028 | messgr-control: stats subcommand for per-tenant message volume | medium | low | S | [] |  |
 | T-025 | Operability and error-handling cleanup across CLI and services | medium | low | M | [] |  |
 | T-026 | Fix check-then-act races in CLI write paths | medium | medium | M | [] |  |
 
