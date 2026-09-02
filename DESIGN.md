@@ -1379,6 +1379,7 @@ Steps 1–7 are the minimum viable system. Everything after 11 can ship incremen
 | 26 | `tenant_id` lives on `comms_request` only, not on every tenant-database table | Matches §2.1's actual isolation mechanism (the database boundary), not a column. Corrects a preamble claim in §4 that had drifted from every table shown beneath it, and a `quiet_hours_policy` column that had drifted the other way (§4, §4.10). |
 | 27 | Staleness gate cut | `POST /comms` has always required an explicit `destination`, on every class, so a gate guarding a projection-resolved address guarded a path the API cannot take. Removed from the gate chain, `tenant_config`, and Still-open (§4.8, §5). |
 | 28 | Kill-switch "held" state is checked before claim, not after | The obvious alternative — claim, get gate-blocked, lease expires, re-claim — is a busy-wait for the life of the switch. The dispatcher excludes matching rows from the claim query's candidate set while a switch is cached active (§5.2). |
+| 29 | Auth kill switch's two-person approval is out-of-band for now | `auth_enabled` ships as a control-database column with no enforcing tool (T-016): an operator flips it via a documented `psql` runbook and records both approvers in `platform_audit`. Nothing mechanically requires two distinct people yet, because neither the admin panel (step 14) nor `otp-api` (step 17) — the flag's only reader — exists to build real dual control against (§5.2). |
 
 ## Still open
 
@@ -1390,7 +1391,7 @@ Steps 1–7 are the minimum viable system. Everything after 11 can ship incremen
 6. **Verification semantics** — does the master system publish per-address verification state on the feed? Until answered, the launch tenant runs `verification_mode = 'observe'`, which is now explicit rather than an accidental always-pass (§5).
 7. **Initial quota values** per producer, and the day-boundary timezone for the daily window. Needs the producer list and their expected volumes. (§5.1)
 8. **Maximum scheduling horizon** — 90 days is the proposed default. Confirm, and decide who may hold an override. (§6.2)
-9. **Two-person approval mechanism** for the auth kill switch — built into the panel, or an out-of-band process the panel merely records? (§5.2)
+9. ~~Two-person approval mechanism for the auth kill switch~~ — resolved for build-order step 4 (T-016, decision 29): out-of-band, recorded in `platform_audit`, not tool-enforced. Still open for step 14: should the admin panel enforce dual control mechanically, or continue to just record an off-tool process? (§5.2)
 10. **Launch regions** and their jurisdictions — determines how many independent stacks, Vault clusters, and keyholder sets exist on day one. (§2.2)
 11. **Vault edition** — confirm open-source with per-tenant mounts is acceptable, or whether an Enterprise licence is already held and namespaces are preferred. (§7.6)
 12. **Cloud OTP posture** — will cloud tenants accept `otp-api` with its network hop, or should on-prem auth alongside cloud comms be the recommended pattern for tenants with strict auth SLAs? (§3.1)
