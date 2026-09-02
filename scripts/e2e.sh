@@ -51,6 +51,20 @@ state_set() {
     echo "${key}=${value}" >> "$STATE_FILE"
 }
 
+customer_id_for_e2e() {
+    # A destination (phone/email) binds permanently to the first customer_id
+    # that sends to it (DESIGN.md Sec.5 -- consent keys on customer_address.id,
+    # which is append-only). This fixture always sends to the same two
+    # destinations, so re-run it as the same customer instead of minting a
+    # fresh one per call, which would conflict on the 2nd send onward.
+    require_state
+    if [[ -z "${CUSTOMER_ID:-}" ]]; then
+        CUSTOMER_ID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
+        state_set CUSTOMER_ID "$CUSTOMER_ID"
+    fi
+    echo "$CUSTOMER_ID"
+}
+
 kill_pidfile() {
     local pidfile="$1"
     if [[ -f "$pidfile" ]]; then
@@ -230,12 +244,21 @@ step_2_setup_env() {
     log "setup-env done -- tenant_id=$tenant_id"
 }
 
+MAX_CONCURRENT_SENDS=50
+
 send_comms() {
-    # send_comms CHANNEL DESTINATION TEMPLATE_VERSION -> prints comms_request_id
+    # send_comms CHANNEL DESTINATION TEMPLATE_VERSION [CUSTOMER_ID] -> prints comms_request_id
+    # CUSTOMER_ID defaults to a fresh uuid; pass the same one across calls
+    # sharing a DESTINATION, since a destination binds to one customer_id
+    # (DESIGN.md Sec.5 -- consent keys on customer_address.id).
     local channel="$1" destination="$2" template_version="$3"
-    local customer_id
-    customer_id="$(uuidgen | tr '[:upper:]' '[:lower:]')"
-    local idempotency_key="e2e-${channel}-$(date +%s)-$$"
+    local customer_id="${4:-}"
+    if [[ -z "$customer_id" ]]; then
+        customer_id="$(uuidgen | tr '[:upper:]' '[:lower:]')"
+    fi
+    # uuidgen (not $$/date) keeps this unique across concurrent subshells,
+    # which all share the parent's $$ under bash.
+    local idempotency_key="e2e-${channel}-$(uuidgen | tr '[:upper:]' '[:lower:]')"
 
     local response
     response="$(curl -sk --fail-with-body \
@@ -250,22 +273,90 @@ send_comms() {
     echo "$response" | grep -o '"comms_request_id":"[^"]*"' | cut -d'"' -f4
 }
 
+require_count() {
+    # require_count VALUE -> positive integer, defaulting empty to 1
+    local value="${1:-1}"
+    if ! [[ "$value" =~ ^[1-9][0-9]*$ ]]; then
+        echo "[e2e] count must be a positive integer, got '$value'" >&2
+        exit 1
+    fi
+    echo "$value"
+}
+
+bulk_send() {
+    # bulk_send CHANNEL DESTINATION TEMPLATE_VERSION COUNT STATE_KEY -- fires
+    # COUNT sends concurrently (batched at MAX_CONCURRENT_SENDS) and stores
+    # the last successful comms_request_id under STATE_KEY.
+    local channel="$1" destination="$2" template_version="$3" count="$4" state_key="$5"
+    log "sending $count $channel message(s) via messgr-ingest asynchronously (up to $MAX_CONCURRENT_SENDS at a time)"
+
+    local customer_id
+    customer_id="$(customer_id_for_e2e)"
+
+    local result_dir
+    result_dir="$(mktemp -d "$WORK_DIR/bulk-${channel}.XXXXXX")"
+
+    local i=1 batch_end j
+    while [[ $i -le $count ]]; do
+        batch_end=$((i + MAX_CONCURRENT_SENDS - 1))
+        [[ $batch_end -gt $count ]] && batch_end=$count
+
+        for ((j = i; j <= batch_end; j++)); do
+            (
+                local id
+                if id="$(send_comms "$channel" "$destination" "$template_version" "$customer_id" 2>"$result_dir/$j.err")"; then
+                    echo "$id" > "$result_dir/$j.ok"
+                fi
+            ) &
+        done
+        wait
+
+        log "  ...$batch_end/$count sent"
+        i=$((batch_end + 1))
+    done
+
+    local ok_count last_id
+    ok_count="$(find "$result_dir" -name '*.ok' | wc -l | tr -d ' ')"
+    last_id="$(find "$result_dir" -name '*.ok' -exec cat {} \; | tail -n1)"
+    if [[ -n "$last_id" ]]; then
+        state_set "$state_key" "$last_id"
+    fi
+    log "$channel bulk send done: $ok_count/$count succeeded"
+    if [[ "$ok_count" != "$count" ]]; then
+        log "failures logged under $result_dir (*.err) -- not cleaning up"
+    else
+        rm -rf "$result_dir"
+    fi
+}
+
 step_3_send_sms() {
     require_state
-    log "sending sms via messgr-ingest"
-    local comms_request_id
-    comms_request_id="$(send_comms sms "+15550100" "$SMS_TEMPLATE_VERSION")"
-    state_set LAST_SMS_REQUEST_ID "$comms_request_id"
-    log "comms_request_id=$comms_request_id"
+    local count
+    count="$(require_count "${1:-1}")"
+    if [[ "$count" -eq 1 ]]; then
+        log "sending sms via messgr-ingest"
+        local comms_request_id
+        comms_request_id="$(send_comms sms "+15550100" "$SMS_TEMPLATE_VERSION" "$(customer_id_for_e2e)")"
+        state_set LAST_SMS_REQUEST_ID "$comms_request_id"
+        log "comms_request_id=$comms_request_id"
+    else
+        bulk_send sms "+15550100" "$SMS_TEMPLATE_VERSION" "$count" LAST_SMS_REQUEST_ID
+    fi
 }
 
 step_4_send_email() {
     require_state
-    log "sending email via messgr-ingest"
-    local comms_request_id
-    comms_request_id="$(send_comms email "jordan@example.com" "$EMAIL_TEMPLATE_VERSION")"
-    state_set LAST_EMAIL_REQUEST_ID "$comms_request_id"
-    log "comms_request_id=$comms_request_id"
+    local count
+    count="$(require_count "${1:-1}")"
+    if [[ "$count" -eq 1 ]]; then
+        log "sending email via messgr-ingest"
+        local comms_request_id
+        comms_request_id="$(send_comms email "jordan@example.com" "$EMAIL_TEMPLATE_VERSION" "$(customer_id_for_e2e)")"
+        state_set LAST_EMAIL_REQUEST_ID "$comms_request_id"
+        log "comms_request_id=$comms_request_id"
+    else
+        bulk_send email "jordan@example.com" "$EMAIL_TEMPLATE_VERSION" "$count" LAST_EMAIL_REQUEST_ID
+    fi
 }
 
 tenant_psql() {
@@ -305,13 +396,13 @@ step_5_trace_sms_in_db() {
 
 usage() {
     cat >&2 <<EOF
-Usage: $0 <step>
+Usage: $0 <step> [count]
 
 Steps:
   1-destroy-env      stop background processes, docker compose down -v, wipe .e2e/
   2-setup-env        full local env: db+vault, provision tenant, certs, start ingest+dispatcher+mock providers
-  3-send-sms         POST /comms for channel=sms
-  4-send-email       POST /comms for channel=email
+  3-send-sms [n]     POST /comms for channel=sms. n>1 fires n sends asynchronously (default 1)
+  4-send-email [n]   POST /comms for channel=email. n>1 fires n sends asynchronously (default 1)
   5-trace-sms-in-db  print the ledger/outbox/event rows for the last sms send
 EOF
     exit 1
@@ -320,8 +411,8 @@ EOF
 case "${1:-}" in
     1-destroy-env)     step_1_destroy_env ;;
     2-setup-env)       step_2_setup_env ;;
-    3-send-sms)        step_3_send_sms ;;
-    4-send-email)      step_4_send_email ;;
+    3-send-sms)        step_3_send_sms "${2:-1}" ;;
+    4-send-email)      step_4_send_email "${2:-1}" ;;
     5-trace-sms-in-db) step_5_trace_sms_in_db ;;
     *)                 usage ;;
 esac
