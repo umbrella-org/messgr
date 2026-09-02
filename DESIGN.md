@@ -482,7 +482,8 @@ CREATE TABLE customer_dek (
     customer_id    uuid PRIMARY KEY,
     wrapped_dek    text NOT NULL,       -- Vault Transit ciphertext, "vault:v1:..." (§7.6)
     created_at     timestamptz NOT NULL,
-    shredded_at    timestamptz          -- set when key destroyed; row retained as tombstone
+    shredded_at    timestamptz          -- set when key destroyed; row retained as tombstone;
+                                         -- unread until crypto-shred ships (build step 15)
 );
 
 CREATE TABLE erasure_request (
@@ -732,7 +733,8 @@ CREATE TABLE tenant (
     region         text NOT NULL,               -- must match this control DB's region; asserted on boot
     database_name  text UNIQUE NOT NULL,
     vault_mount    text UNIQUE NOT NULL,        -- per-tenant Transit mount (§7.6)
-    webhook_token  text UNIQUE NOT NULL,        -- opaque; provider callback path (§10). Never the slug
+    webhook_token  text UNIQUE NOT NULL,        -- opaque; provider callback path (§10). Never the
+                                                 -- slug; unread until messgr-webhook ships (step 12)
     status         text NOT NULL,               -- provisioning | active | suspended
                                                 -- | offboarding_archive | offboarding_destroy  (§7.7)
     created_at     timestamptz NOT NULL
@@ -757,6 +759,7 @@ CREATE TABLE tenant_schema_version (             -- migrations run N times; drif
 );
 
 CREATE TABLE platform_kill_switch (              -- operator-level; overrides tenant switches (§5.2)
+                                                  -- cloud-only; unread until cloud enablement (step 19)
     id          uuid PRIMARY KEY,
     scope       text NOT NULL,                   -- platform | tenant
     tenant_id   uuid,
