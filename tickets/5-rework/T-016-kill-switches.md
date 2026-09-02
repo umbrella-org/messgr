@@ -377,6 +377,33 @@ happy path), and `just docs-check` (clean). No new test added for the retry path
 (injecting a transient `sqlx::Error` into a real Postgres pool has no existing harness in this
 test suite). Scope is the fix only, per rules §1 — nothing else was touched.
 
+### Scoped re-review — round 1
+
+Reviewer independence (step 0), round 1: **delegated** — this session authored the F1 fix
+(commit `a229843`) itself, so per step 0 the audits (steps 2 through 4a) were delegated to a
+fresh, independent sub-agent, briefed adversarially with F1's text, the fix commit, and
+instructions to look for defects the fix itself introduces, not just confirm it. Classification,
+severity, disposition, and the move stayed with this (the orchestrating) reviewer. Every
+delegated finding was re-verified by hand against the actual file before being recorded below
+(step 0: "delegation buys independence, not accuracy").
+
+F1 verified fixed: both `claim_for_scope` error arms now `sleep`+`continue` instead of
+`return` (confirmed by reading `src/dispatcher/drain.rs` on `feat/T-016-kill-switches` directly),
+so `run_release_drain` can no longer race a "gave up" completion against a genuine one.
+`just build`/`just lint`/`just test`/`just docs-check` all re-ran green on the branch.
+
+The delegated audit surfaced one new blocking defect in the fix's own replacement text (F2) and
+one new non-blocking observation (F3), both confirmed by hand:
+
+| id | severity | class | disposition | description | evidence | suggestion |
+|---|---|---|---|---|---|---|
+| F2 | blocking | correctness | — | The F1 fix's retry loops have no bound: a *permanently*-failing (not transient) `write_terminal` call spins forever on that one row, which — because the call sites `.await` it inline inside the batch's `for` loop — blocks every other row already claimed in that batch, every future `claim_for_scope` call for that scope (the outer `loop` never gets back to it), and, for `run_release_drain`, the `draining` map entry for the whole switch forever, since `handle.await` never returns for the stuck channel. | `src/dispatcher/drain.rs:110-116` (`drain_released_scope`'s `for row in batch { ... write_expired(&ctx, &row).await; ... }`) and `:220-222` (`discard_engaged_scope`'s equivalent) call the unconditional retry-forever loops in `write_expired`/`write_discarded` (`:31-56`, `:157-182`) with no attempt cap; `run_release_drain` (`:128-151`) awaits every channel's handle before removing `kill_switch.id` from `draining`, so one stuck channel blocks that removal for every channel, including ones that already finished. | For a `discard` switch specifically this reintroduces F1's own failure mode by a different route: if the switch is later released while its discard sweep is livelocked on a poison row, the un-swept remainder is no longer excluded (a `discard` switch's release never enters the `draining` map — only `hold` releases do, per `src/bin/dispatcher.rs`'s `on_queued::HOLD` check) and gets dispatched and sent for real. For a `hold` switch the failure direction is safer (the scope stays excluded/held rather than stampeding) but still wedges that release forever, needing a dispatcher restart that would hit the same poison row again on the next discard sweep. Fix: cap retries (e.g. N attempts with backoff) per row, then skip it and continue the batch/scope rather than blocking forever — logging or alerting loudly on the skip so the poison row doesn't silently vanish from operator visibility, and consider surfacing "stuck draining" as a metric rather than relying on log volume. |
+| F3 | non-blocking | test-gap | noted | No test exercises the retry-on-error path in either direction (neither the round-1 fix nor this round found one) — there is no harness in this suite for injecting a `sqlx::Error` into a claim or write | `tests/kill_switch.rs` — no fixture forces a `claim_for_scope`/`write_terminal` failure | Add one once F2's bounded-retry-and-skip fix lands: assert a permanently-failing row does not block the rest of its batch or the scope's later rows. Not promoted to a follow-up ticket on its own — it is the same gap F2's fix should close, and it fails the "would this actually be scheduled on its own" test isolated from F2. |
+
+Disposition summary (round 1 re-review): 1 blocking (F2), 1 non-blocking (F3, noted). F1 confirmed fixed.
+
+cost: estimated L, actual L (unchanged — F2 is a small, same-file bounded-retry fix, not a scope change)
+
 ## History
 
 - 2026-09-01 — created (TO DO). source: chat: build-order step 4 (§14), filed after T-014 (step 2 work) landed.
@@ -400,3 +427,4 @@ test suite). Scope is the fix only, per rules §1 — nothing else was touched.
 - 2026-09-02 — IN DEVELOPMENT → IN REVIEW: acceptance green
 - 2026-09-02 — IN REVIEW → REWORK: F1 blocking: kill-switch drain/discard tasks silently treat a mid-sweep DB error as completion, losing the release-ramp/discard guarantee
 - 2026-09-02 — REWORK → IN REVIEW: findings fixed
+- 2026-09-02 — IN REVIEW → REWORK: F2 blocking: retry-forever in drain/discard has no bound, livelocking the batch/scope on a permanently-failing row
