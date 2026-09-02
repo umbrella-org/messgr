@@ -18,7 +18,7 @@ Guidance for AI agents working in this repository.
 | Any schema change | §4 (data model) — 11 subsections |
 | Anything touching sending | §5 (gate chain), §6 (timing), §9 (dispatcher) |
 | Anything touching PII | §7 — read all of it before proposing a change |
-| Current state of play | "Decisions taken" (24 rows) and "Still open" (15 items), at the end |
+| Current state of play | "Decisions taken" (28 rows) and "Still open" (15 items), at the end |
 
 Every decision in the table cites the section that justifies it. Follow the citation before changing anything.
 
