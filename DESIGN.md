@@ -645,8 +645,10 @@ CREATE TABLE kill_switch (
     released_by text,
     released_at timestamptz              -- NULL = currently active
 );
-CREATE UNIQUE INDEX ON kill_switch (scope, scope_key) WHERE released_at IS NULL;
+CREATE UNIQUE INDEX ON kill_switch (scope, COALESCE(scope_key, '')) WHERE released_at IS NULL;
 ```
+
+**Correction: this index did not do its job for `global` scope.** `scope_key` is NULL for `global` — and Postgres unique indexes treat every NULL as distinct from every other NULL, so `(scope, scope_key) = ('global', NULL)` never collides with itself. Two operators could each engage a global kill switch, both succeed, and now releasing one leaves the other silently still active — exactly the two-active-switches hole a unique index here exists to prevent. Wrapping `scope_key` in `COALESCE(scope_key, '')` gives every scope a real, comparable value; `''` is never a legitimate `scope_key` for any non-global scope, so this cannot mask a genuine collision.
 
 Quota overrides carry a mandatory `valid_to`. A permanent "temporary" uplift is the most common way quota systems quietly stop meaning anything.
 
@@ -676,7 +678,7 @@ CREATE TABLE tenant_config (
 CREATE TABLE quiet_hours_policy (
     tenant_id   uuid NOT NULL,
     scope       text NOT NULL,          -- region | segment | default
-    scope_key   text,
+    scope_key   text NOT NULL DEFAULT '',  -- '' for the institution-wide default row
     start_local time NOT NULL,
     end_local   time NOT NULL,
     PRIMARY KEY (tenant_id, scope, scope_key)
@@ -691,6 +693,8 @@ CREATE TABLE provider_config (
     PRIMARY KEY (channel, priority)
 );
 ```
+
+**Correction: `quiet_hours_policy`'s primary key could not represent its own `default` scope.** `scope_key` was nullable, and the `default` scope (institution-wide fallback, per §6.1's resolution order `customer tz -> segment policy -> institution default`) is exactly the row with no natural key — but a `PRIMARY KEY` column is implicitly `NOT NULL`, so a `default`-scope row could never be inserted at all under the schema as originally written. Same fix as `kill_switch` above, adapted to a primary key rather than a partial unique index (which cannot itself wrap an expression): `scope_key` is `NOT NULL DEFAULT ''`, with `''` reserved for the scope that has no key.
 
 T-007 ships only `tenant_config`'s `retention_years`, `default_timezone`, `default_locale`,
 `schedule_horizon_days`, `quota_day_boundary_tz`, `verification_mode`, and `staleness_max_age` —
