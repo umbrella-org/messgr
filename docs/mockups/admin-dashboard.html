@@ -1,0 +1,713 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>messgr — Admin Dashboard (mockup)</title>
+<!--
+  Static mockup. No backend, no build step — open the file directly.
+
+  This is a DESIGN MOCKUP, not the eventual implementation. The real
+  dashboard is expected to be built with htmx or Datastar (data-* driven,
+  server-rendered fragments) per AGENTS.md — this file marks the spots
+  where that wiring would attach with `data-*` attributes matching the
+  Datastar convention (data-signals / data-on-* / data-text / data-attr),
+  left inert here. Everything visible below is faked with a small vanilla
+  JS block at the bottom so the mockup renders without a server.
+-->
+<style>
+  .viz-root {
+    color-scheme: light;
+    --surface-1:      #fcfcfb;
+    --page-plane:     #f9f9f7;
+    --text-primary:   #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted:     #898781;
+    --gridline:       #e1e0d9;
+    --baseline:       #c3c2b7;
+    --border:         rgba(11,11,11,0.10);
+
+    --series-sent:     #2a78d6; /* categorical slot 1 — blue */
+    --series-received: #eb6834; /* categorical slot 2 — orange */
+
+    --status-good:     #0ca30c;
+    --status-warning:  #fab219;
+    --status-serious:  #ec835a;
+    --status-critical: #d03b3b;
+    --status-good-text:#006300;
+  }
+  :root:where(:not([data-theme="light"])) .viz-root {
+    @media (prefers-color-scheme: dark) {
+      color-scheme: dark;
+      --surface-1:      #1a1a19;
+      --page-plane:     #0d0d0d;
+      --text-primary:   #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted:     #898781;
+      --gridline:       #2c2c2a;
+      --baseline:       #383835;
+      --border:         rgba(255,255,255,0.10);
+
+      --series-sent:     #3987e5;
+      --series-received: #d95926;
+
+      --status-good:     #0ca30c;
+      --status-warning:  #fab219;
+      --status-serious:  #ec835a;
+      --status-critical: #d03b3b;
+      --status-good-text:#0ca30c;
+    }
+  }
+  :root[data-theme="dark"] .viz-root {
+    color-scheme: dark;
+    --surface-1:      #1a1a19;
+    --page-plane:     #0d0d0d;
+    --text-primary:   #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted:     #898781;
+    --gridline:       #2c2c2a;
+    --baseline:       #383835;
+    --border:         rgba(255,255,255,0.10);
+
+    --series-sent:     #3987e5;
+    --series-received: #d95926;
+
+    --status-good:     #0ca30c;
+    --status-warning:  #fab219;
+    --status-serious:  #ec835a;
+    --status-critical: #d03b3b;
+    --status-good-text:#0ca30c;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+  /* background/color live here, not on body — the theme vars above are
+     scoped to .viz-root, and a var() referenced from an ancestor of the
+     element that defines it is invalid, silently falling back to the
+     browser default (white bg, black text) regardless of theme. */
+  .viz-root {
+    min-height: 100vh;
+    background: var(--page-plane);
+    color: var(--text-primary);
+  }
+
+  a { color: inherit; }
+
+  /* ---- shell ---- */
+  .topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 24px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface-1);
+  }
+  .topbar .brand { display: flex; align-items: center; gap: 10px; font-weight: 600; }
+  .topbar .brand .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--series-sent); }
+  .topbar nav { display: flex; gap: 20px; font-size: 13px; color: var(--text-secondary); }
+  .topbar nav a.active { color: var(--text-primary); font-weight: 600; }
+  .theme-toggle {
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-secondary);
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: 12px;
+    cursor: pointer;
+  }
+
+  main { max-width: 1180px; margin: 0 auto; padding: 24px; }
+
+  h1 { font-size: 20px; margin: 0 0 2px; }
+  .subhead { color: var(--text-secondary); font-size: 13px; margin: 0 0 20px; }
+
+  /* ---- filter row (one row, above everything it scopes) ---- */
+  .filter-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 20px;
+  }
+  .filter-row .label { font-size: 12px; color: var(--text-muted); margin-right: 4px; }
+  .segmented {
+    display: inline-flex;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .segmented button {
+    border: none;
+    background: var(--surface-1);
+    color: var(--text-secondary);
+    font-size: 13px;
+    padding: 7px 14px;
+    cursor: pointer;
+    border-right: 1px solid var(--border);
+  }
+  .segmented button:last-child { border-right: none; }
+  .segmented button[aria-pressed="true"] {
+    background: var(--series-sent);
+    color: #fff;
+    font-weight: 600;
+  }
+  .refresh-note { margin-left: auto; font-size: 12px; color: var(--text-muted); }
+
+  /* ---- cards ---- */
+  .card {
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+  }
+
+  /* ---- stat tiles ---- */
+  .kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 14px;
+    margin-bottom: 20px;
+  }
+  .stat-tile { padding: 16px 18px; }
+  .stat-tile .label { font-size: 12px; color: var(--text-secondary); margin-bottom: 8px; }
+  .stat-tile .value-row { display: flex; align-items: baseline; gap: 8px; }
+  .stat-tile .value { font-size: 30px; font-weight: 600; line-height: 1; letter-spacing: -0.01em; }
+  .stat-tile .delta { font-size: 12px; font-weight: 600; }
+  .stat-tile .delta.up-good { color: var(--status-good-text); }
+  .stat-tile .delta.up-bad { color: var(--status-critical); }
+  .stat-tile .delta.neutral { color: var(--text-muted); }
+  .stat-tile .sub { margin-top: 6px; font-size: 12px; color: var(--text-muted); }
+  .sparkline { margin-top: 10px; display: block; }
+
+  /* ---- channel cards ---- */
+  .channel-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 14px;
+    margin-bottom: 20px;
+  }
+  .channel-card { padding: 16px 18px; display: flex; align-items: center; gap: 16px; }
+  .channel-card .icon {
+    width: 40px; height: 40px; border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; font-weight: 700; color: #fff;
+    background: var(--text-muted);
+    flex: none;
+  }
+  .channel-card.sms .icon { background: var(--series-sent); }
+  .channel-card.email .icon { background: var(--series-received); }
+  .channel-card .name { font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+  .channel-card .breakdown { display: flex; gap: 18px; font-size: 12px; color: var(--text-secondary); }
+  .channel-card .breakdown b { color: var(--text-primary); font-weight: 600; font-size: 14px; display: block; }
+  .channel-card .key { display: inline-flex; align-items: center; gap: 5px; }
+  .key-dash { width: 10px; height: 2px; border-radius: 1px; display: inline-block; }
+
+  /* ---- main content grid ---- */
+  .content-grid {
+    display: grid;
+    grid-template-columns: 2fr 1fr;
+    gap: 14px;
+    margin-bottom: 20px;
+    align-items: start;
+  }
+  .card-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    padding: 16px 18px 0;
+  }
+  .card-head h2 { font-size: 14px; margin: 0; }
+  .card-head .caption { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+  .table-toggle {
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-secondary);
+    border-radius: 6px;
+    padding: 4px 8px;
+    font-size: 11px;
+    cursor: pointer;
+  }
+
+  .legend { display: flex; gap: 16px; padding: 8px 18px 0; font-size: 12px; color: var(--text-secondary); }
+  .legend .item { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+  .legend .swatch-line { width: 14px; height: 2px; border-radius: 1px; }
+
+  .chart-wrap { padding: 6px 10px 14px; position: relative; }
+  svg { display: block; overflow: visible; }
+  .axis-label { fill: var(--text-muted); font-size: 11px; }
+  .gridline { stroke: var(--gridline); stroke-width: 1; }
+  .baseline { stroke: var(--baseline); stroke-width: 1; }
+
+  .crosshair { stroke: var(--baseline); stroke-width: 1; pointer-events: none; opacity: 0; }
+  .hover-dot { pointer-events: none; opacity: 0; }
+
+  .tooltip {
+    position: absolute;
+    pointer-events: none;
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.12);
+    padding: 8px 10px;
+    font-size: 12px;
+    opacity: 0;
+    transform: translate(-50%, -110%);
+    white-space: nowrap;
+    z-index: 5;
+  }
+  .tooltip .t-date { color: var(--text-muted); margin-bottom: 4px; }
+  .tooltip .t-row { display: flex; align-items: center; gap: 6px; justify-content: space-between; }
+  .tooltip .t-row + .t-row { margin-top: 3px; }
+  .tooltip .t-key { display: flex; align-items: center; gap: 6px; color: var(--text-secondary); }
+  .tooltip .t-key .stroke { width: 10px; height: 2px; border-radius: 1px; display: inline-block; }
+  .tooltip .t-val { font-weight: 600; color: var(--text-primary); }
+
+  .table-view { display: none; padding: 0 18px 16px; }
+  .table-view.shown { display: block; }
+  .chart-wrap.hidden { display: none; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th { text-align: left; color: var(--text-muted); font-weight: 500; padding: 6px 8px; border-bottom: 1px solid var(--gridline); }
+  td { padding: 6px 8px; border-bottom: 1px solid var(--gridline); font-variant-numeric: tabular-nums; }
+  td.num, th.num { text-align: right; }
+
+  /* ---- stacked bar (channel mix) ---- */
+  .bar-rows { padding: 4px 18px 16px; }
+  .bar-row { margin-bottom: 14px; }
+  .bar-row .bar-head { display: flex; justify-content: space-between; font-size: 12px; color: var(--text-secondary); margin-bottom: 6px; }
+  .bar-row .bar-head b { color: var(--text-primary); font-weight: 600; }
+  .bar-track { display: flex; height: 20px; border-radius: 4px; overflow: visible; background: var(--gridline); }
+  .bar-seg {
+    height: 20px;
+    cursor: pointer;
+    position: relative;
+  }
+  .bar-seg.sent { background: var(--series-sent); border-radius: 4px 0 0 4px; margin-right: 2px; }
+  .bar-seg.received { background: var(--series-received); border-radius: 0 4px 4px 0; }
+
+  /* ---- activity table card ---- */
+  .activity-card { margin-bottom: 8px; }
+  .status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 2px 8px 2px 6px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .status-pill.delivered { background: color-mix(in srgb, var(--status-good) 14%, transparent); color: var(--status-good-text); }
+  .status-pill.pending { background: color-mix(in srgb, var(--status-warning) 20%, transparent); color: #8a5a00; }
+  .status-pill.failed { background: color-mix(in srgb, var(--status-critical) 14%, transparent); color: var(--status-critical); }
+  :root[data-theme="dark"] .status-pill.pending,
+  :root:where(:not([data-theme="light"])) .status-pill.pending { color: var(--status-warning); }
+
+  .dir-badge {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    padding: 1px 6px;
+    border-radius: 4px;
+    color: #fff;
+  }
+  .dir-badge.out { background: var(--series-sent); }
+  .dir-badge.in { background: var(--series-received); }
+
+  footer.note {
+    font-size: 11px;
+    color: var(--text-muted);
+    padding: 8px 4px 32px;
+    line-height: 1.5;
+  }
+
+  @media (max-width: 900px) {
+    .kpi-grid { grid-template-columns: repeat(2, 1fr); }
+    .channel-grid { grid-template-columns: 1fr; }
+    .content-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="viz-root" data-signals="{range: '7d'}">
+
+  <div class="topbar">
+    <div class="brand"><span class="dot"></span> messgr <span style="color:var(--text-muted); font-weight:400;">/ admin</span></div>
+    <nav>
+      <a class="active" href="#">Overview</a>
+      <a href="#">Messages</a>
+      <a href="#">Templates</a>
+      <a href="#">Consent</a>
+      <a href="#">Kill switches</a>
+    </nav>
+    <button class="theme-toggle" id="theme-toggle" type="button">Dark mode</button>
+  </div>
+
+  <main>
+    <h1>Message traffic</h1>
+    <p class="subhead">Ledger totals across SMS and email, all tenants. Every gate runs at dispatch — figures reflect what was actually sent, not what was scheduled.</p>
+
+    <!-- Filter row: one row, above the content it scopes. Datastar wiring point:
+         data-on-click="@get('/admin/overview?range=today')" per button in the real app. -->
+    <div class="filter-row">
+      <span class="label">Date range</span>
+      <div class="segmented" role="group" aria-label="Date range" id="range-picker">
+        <button data-range="today" aria-pressed="false">Today</button>
+        <button data-range="7d" aria-pressed="true">Last 7 days</button>
+        <button data-range="30d" aria-pressed="false">Last 30 days</button>
+        <button data-range="90d" aria-pressed="false">Last 90 days</button>
+      </div>
+      <span class="refresh-note" data-text="$lastUpdated">Updated 2 min ago</span>
+    </div>
+
+    <!-- KPI stat tiles -->
+    <div class="kpi-grid">
+      <div class="card stat-tile">
+        <div class="label">Messages sent</div>
+        <div class="value-row">
+          <span class="value" data-text="$kpi.sent">128,943</span>
+          <span class="delta up-good">▲ 4.2%</span>
+        </div>
+        <div class="sub">vs previous 7 days</div>
+      </div>
+      <div class="card stat-tile">
+        <div class="label">Messages received</div>
+        <div class="value-row">
+          <span class="value" data-text="$kpi.received">8,412</span>
+          <span class="delta neutral">▼ 1.8%</span>
+        </div>
+        <div class="sub">inbound replies · SMS + email</div>
+      </div>
+      <div class="card stat-tile">
+        <div class="label">Delivery rate</div>
+        <div class="value-row">
+          <span class="value" data-text="$kpi.deliveryRate">98.6%</span>
+          <span class="delta up-good">▲ 0.3 pt</span>
+        </div>
+        <div class="sub">delivered ÷ dispatched</div>
+      </div>
+      <div class="card stat-tile">
+        <div class="label">Failed / bounced</div>
+        <div class="value-row">
+          <span class="value" data-text="$kpi.failed">1,804</span>
+          <span class="delta up-bad">▲ 12.4%</span>
+        </div>
+        <div class="sub">1.4% of dispatched — above 1.0% baseline</div>
+      </div>
+    </div>
+
+    <!-- Channel breakdown -->
+    <div class="channel-grid">
+      <div class="card channel-card sms">
+        <div class="icon">SMS</div>
+        <div style="flex:1;">
+          <div class="name">SMS</div>
+          <div class="breakdown">
+            <span class="key"><span class="key-dash" style="background:var(--series-sent)"></span>Sent <b data-text="$channel.sms.sent">76,210</b></span>
+            <span class="key"><span class="key-dash" style="background:var(--series-received)"></span>Received <b data-text="$channel.sms.received">5,340</b></span>
+          </div>
+        </div>
+      </div>
+      <div class="card channel-card email">
+        <div class="icon">MAIL</div>
+        <div style="flex:1;">
+          <div class="name">Email</div>
+          <div class="breakdown">
+            <span class="key"><span class="key-dash" style="background:var(--series-sent)"></span>Sent <b data-text="$channel.email.sent">52,733</b></span>
+            <span class="key"><span class="key-dash" style="background:var(--series-received)"></span>Received <b data-text="$channel.email.received">3,072</b></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Main content: trend line chart + channel mix bar -->
+    <div class="content-grid">
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <h2>Volume over time</h2>
+            <div class="caption">Sent vs. received, daily — last 7 days</div>
+          </div>
+          <button class="table-toggle" id="line-table-toggle" type="button">View as table</button>
+        </div>
+        <div class="legend">
+          <span class="item" data-legend="sent"><span class="swatch-line" style="background:var(--series-sent)"></span>Sent</span>
+          <span class="item" data-legend="received"><span class="swatch-line" style="background:var(--series-received)"></span>Received</span>
+        </div>
+        <div class="chart-wrap" id="line-chart-wrap">
+          <svg id="line-chart" width="100%" height="220" viewBox="0 0 760 220" preserveAspectRatio="none"></svg>
+          <div class="tooltip" id="line-tooltip"></div>
+        </div>
+        <div class="table-view" id="line-table-view">
+          <table>
+            <thead><tr><th>Day</th><th class="num">Sent</th><th class="num">Received</th></tr></thead>
+            <tbody id="line-table-body"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <h2>Channel mix</h2>
+            <div class="caption">Sent + received, this range</div>
+          </div>
+        </div>
+        <div class="bar-rows" id="channel-bars"></div>
+      </div>
+    </div>
+
+    <!-- Recent activity -->
+    <div class="card activity-card">
+      <div class="card-head">
+        <div>
+          <h2>Recent activity</h2>
+          <div class="caption">Last 6 ledger entries — full history in Messages</div>
+        </div>
+        <a href="#" style="font-size:12px; color:var(--text-secondary);">View all →</a>
+      </div>
+      <div style="padding: 10px 18px 18px;">
+        <table>
+          <thead>
+            <tr><th>Time</th><th>Channel</th><th>Direction</th><th>Customer</th><th>Status</th></tr>
+          </thead>
+          <tbody id="activity-body"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <footer class="note">
+      Mockup only — figures are illustrative, not live data. Layout assumes server-rendered
+      fragments (htmx / Datastar): the filter row and table-view toggles above are marked
+      with <code>data-signals</code> / <code>data-on-click</code> / <code>data-text</code> as
+      the attachment points; this file fakes their effect with inline JS so it opens standalone.
+    </footer>
+  </main>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  var root = document.documentElement;
+  var themeBtn = document.getElementById("theme-toggle");
+  themeBtn.addEventListener("click", function () {
+    var dark = root.getAttribute("data-theme") === "dark";
+    root.setAttribute("data-theme", dark ? "light" : "dark");
+    themeBtn.textContent = dark ? "Dark mode" : "Light mode";
+  });
+
+  // Date range picker — cosmetic only in this mockup (no data re-fetch).
+  document.getElementById("range-picker").addEventListener("click", function (e) {
+    var btn = e.target.closest("button[data-range]");
+    if (!btn) return;
+    this.querySelectorAll("button").forEach(function (b) { b.setAttribute("aria-pressed", "false"); });
+    btn.setAttribute("aria-pressed", "true");
+  });
+
+  // ---- mock data: 7 days ----
+  var days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  var sent = [17200, 18600, 19100, 17900, 15400, 12800, 27943];
+  var received = [1180, 1240, 1310, 1260, 1080, 890, 1452];
+
+  function fmt(n) { return n.toLocaleString("en-US"); }
+
+  // ---- line chart (SVG) ----
+  var W = 760, H = 220, padL = 40, padR = 10, padT = 14, padB = 26;
+  var plotW = W - padL - padR, plotH = H - padT - padB;
+  var maxVal = Math.max.apply(null, sent) * 1.15;
+
+  function x(i) { return padL + (i / (days.length - 1)) * plotW; }
+  function y(v) { return padT + plotH - (v / maxVal) * plotH; }
+
+  var svg = document.getElementById("line-chart");
+  var svgns = "http://www.w3.org/2000/svg";
+
+  function el(tag, attrs) {
+    var e = document.createElementNS(svgns, tag);
+    for (var k in attrs) e.setAttribute(k, attrs[k]);
+    return e;
+  }
+
+  // gridlines (4 steps, clean round numbers) + y ticks
+  var steps = 4;
+  for (var s = 0; s <= steps; s++) {
+    var val = Math.round((maxVal * s / steps) / 1000) * 1000;
+    var gy = y(val);
+    svg.appendChild(el("line", { x1: padL, x2: W - padR, y1: gy, y2: gy, class: "gridline" }));
+    var t = el("text", { x: padL - 8, y: gy + 3, class: "axis-label", "text-anchor": "end" });
+    t.textContent = val >= 1000 ? (val / 1000) + "k" : val;
+    svg.appendChild(t);
+  }
+  // baseline
+  svg.appendChild(el("line", { x1: padL, x2: W - padR, y1: y(0), y2: y(0), class: "baseline" }));
+  // x labels
+  days.forEach(function (d, i) {
+    var t = el("text", { x: x(i), y: H - 6, class: "axis-label", "text-anchor": "middle" });
+    t.textContent = d;
+    svg.appendChild(t);
+  });
+
+  function path(data) {
+    return data.map(function (v, i) { return (i === 0 ? "M" : "L") + x(i) + " " + y(v); }).join(" ");
+  }
+
+  var sentPath = el("path", { d: path(sent), fill: "none", stroke: "var(--series-sent)", "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round" });
+  var recvPath = el("path", { d: path(received), fill: "none", stroke: "var(--series-received)", "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round" });
+  svg.appendChild(sentPath);
+  svg.appendChild(recvPath);
+
+  // end markers with surface ring
+  [{ data: sent, color: "var(--series-sent)" }, { data: received, color: "var(--series-received)" }].forEach(function (s) {
+    var last = s.data.length - 1;
+    svg.appendChild(el("circle", { cx: x(last), cy: y(s.data[last]), r: 6, fill: "var(--surface-1)" }));
+    svg.appendChild(el("circle", { cx: x(last), cy: y(s.data[last]), r: 4, fill: s.color }));
+  });
+  // direct end-label on the series the story is about (sent)
+  var endLabel = el("text", {
+    x: x(sent.length - 1) + 8, y: y(sent[sent.length - 1]) - 8,
+    class: "axis-label", "font-weight": "600", fill: "var(--text-primary)"
+  });
+  endLabel.textContent = fmt(sent[sent.length - 1]);
+  svg.appendChild(endLabel);
+
+  // crosshair + hover dots
+  var crosshair = el("line", { x1: 0, x2: 0, y1: padT, y2: H - padB, class: "crosshair" });
+  svg.appendChild(crosshair);
+  var dotSent = el("circle", { r: 5, fill: "var(--series-sent)", class: "hover-dot" });
+  var dotRecv = el("circle", { r: 5, fill: "var(--series-received)", class: "hover-dot" });
+  svg.appendChild(dotSent);
+  svg.appendChild(dotRecv);
+
+  // wide invisible hit rect drives hover across the whole plot
+  var hit = el("rect", { x: padL, y: padT, width: plotW, height: plotH, fill: "transparent" });
+  svg.appendChild(hit);
+
+  var tooltip = document.getElementById("line-tooltip");
+  var wrap = document.getElementById("line-chart-wrap");
+
+  function showTooltip(i, clientX) {
+    crosshair.style.opacity = 1;
+    crosshair.setAttribute("x1", x(i));
+    crosshair.setAttribute("x2", x(i));
+    dotSent.style.opacity = 1;
+    dotRecv.style.opacity = 1;
+    dotSent.setAttribute("cx", x(i)); dotSent.setAttribute("cy", y(sent[i]));
+    dotRecv.setAttribute("cx", x(i)); dotRecv.setAttribute("cy", y(received[i]));
+
+    tooltip.innerHTML =
+      '<div class="t-date"></div>' +
+      '<div class="t-row"><span class="t-key"><span class="stroke" style="background:var(--series-sent)"></span><span class="nm"></span></span><span class="t-val"></span></div>' +
+      '<div class="t-row"><span class="t-key"><span class="stroke" style="background:var(--series-received)"></span><span class="nm"></span></span><span class="t-val"></span></div>';
+    tooltip.querySelector(".t-date").textContent = days[i];
+    var rows = tooltip.querySelectorAll(".t-row");
+    rows[0].querySelector(".nm").textContent = "Sent";
+    rows[0].querySelector(".t-val").textContent = fmt(sent[i]);
+    rows[1].querySelector(".nm").textContent = "Received";
+    rows[1].querySelector(".t-val").textContent = fmt(received[i]);
+
+    var rect = wrap.getBoundingClientRect();
+    var svgRect = svg.getBoundingClientRect();
+    var px = svgRect.left - rect.left + (x(i) / W) * svgRect.width;
+    var py = svgRect.top - rect.top + (y(Math.max(sent[i], received[i])) / H) * svgRect.height;
+    tooltip.style.left = px + "px";
+    tooltip.style.top = py + "px";
+    tooltip.style.opacity = 1;
+  }
+  function hideTooltip() {
+    crosshair.style.opacity = 0;
+    dotSent.style.opacity = 0;
+    dotRecv.style.opacity = 0;
+    tooltip.style.opacity = 0;
+  }
+  hit.addEventListener("pointermove", function (e) {
+    var svgRect = svg.getBoundingClientRect();
+    var relX = ((e.clientX - svgRect.left) / svgRect.width) * W;
+    var i = Math.round(((relX - padL) / plotW) * (days.length - 1));
+    i = Math.max(0, Math.min(days.length - 1, i));
+    showTooltip(i, e.clientX);
+  });
+  hit.addEventListener("pointerleave", hideTooltip);
+
+  // legend toggle-to-isolate
+  document.querySelectorAll(".legend .item").forEach(function (item) {
+    item.addEventListener("click", function () {
+      var series = item.getAttribute("data-legend");
+      var target = series === "sent" ? sentPath : recvPath;
+      var other = series === "sent" ? recvPath : sentPath;
+      var isolated = target.style.opacity === "1" && other.style.opacity === "0.15";
+      if (isolated) {
+        sentPath.style.opacity = ""; recvPath.style.opacity = "";
+      } else {
+        target.style.opacity = "1"; other.style.opacity = "0.15";
+      }
+    });
+  });
+
+  // table view toggle (accessibility twin of the chart)
+  var tableBody = document.getElementById("line-table-body");
+  days.forEach(function (d, i) {
+    var tr = document.createElement("tr");
+    tr.innerHTML = "<td></td><td class='num'></td><td class='num'></td>";
+    tr.children[0].textContent = d;
+    tr.children[1].textContent = fmt(sent[i]);
+    tr.children[2].textContent = fmt(received[i]);
+    tableBody.appendChild(tr);
+  });
+  var lineToggle = document.getElementById("line-table-toggle");
+  var chartWrap = document.getElementById("line-chart-wrap");
+  var tableView = document.getElementById("line-table-view");
+  lineToggle.addEventListener("click", function () {
+    var showingTable = tableView.classList.contains("shown");
+    tableView.classList.toggle("shown", !showingTable);
+    chartWrap.classList.toggle("hidden", !showingTable);
+    lineToggle.textContent = showingTable ? "View as table" : "View as chart";
+  });
+
+  // ---- channel mix stacked bar ----
+  var channels = [
+    { name: "SMS", sent: 76210, received: 5340 },
+    { name: "Email", sent: 52733, received: 3072 }
+  ];
+  var barMax = Math.max.apply(null, channels.map(function (c) { return c.sent + c.received; }));
+  var barsWrap = document.getElementById("channel-bars");
+  channels.forEach(function (c) {
+    var total = c.sent + c.received;
+    var row = document.createElement("div");
+    row.className = "bar-row";
+    row.innerHTML =
+      '<div class="bar-head"><span>' + c.name + '</span><b>' + fmt(total) + '</b></div>' +
+      '<div class="bar-track">' +
+        '<div class="bar-seg sent" style="width:' + (c.sent / barMax * 100) + '%" tabindex="0"></div>' +
+        '<div class="bar-seg received" style="width:' + (c.received / barMax * 100) + '%" tabindex="0"></div>' +
+      '</div>';
+    var segs = row.querySelectorAll(".bar-seg");
+    segs[0].title = "Sent: " + fmt(c.sent);
+    segs[1].title = "Received: " + fmt(c.received);
+    barsWrap.appendChild(row);
+  });
+
+  // ---- recent activity table ----
+  var activity = [
+    { time: "10:42:03", channel: "SMS", dir: "out", customer: "cus_•••4f21", status: "delivered" },
+    { time: "10:41:58", channel: "Email", dir: "out", customer: "cus_•••9b02", status: "delivered" },
+    { time: "10:41:40", channel: "SMS", dir: "in", customer: "cus_•••1a77", status: "delivered" },
+    { time: "10:41:12", channel: "Email", dir: "out", customer: "cus_•••6cd4", status: "pending" },
+    { time: "10:40:55", channel: "SMS", dir: "out", customer: "cus_•••e330", status: "failed" },
+    { time: "10:40:31", channel: "Email", dir: "in", customer: "cus_•••0f8a", status: "delivered" }
+  ];
+  var activityBody = document.getElementById("activity-body");
+  activity.forEach(function (a) {
+    var tr = document.createElement("tr");
+    var statusLabel = a.status === "delivered" ? "Delivered" : a.status === "pending" ? "Pending" : "Failed";
+    var dot = a.status === "delivered" ? "●" : a.status === "pending" ? "●" : "●";
+    tr.innerHTML =
+      "<td>" + a.time + "</td>" +
+      "<td>" + a.channel + "</td>" +
+      "<td><span class='dir-badge " + a.dir + "'>" + (a.dir === "out" ? "OUT" : "IN") + "</span></td>" +
+      "<td>" + a.customer + "</td>" +
+      "<td><span class='status-pill " + a.status + "'>" + dot + " " + statusLabel + "</span></td>";
+    activityBody.appendChild(tr);
+  });
+})();
+</script>
+</body>
+</html>
