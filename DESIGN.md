@@ -113,12 +113,16 @@ For that one job the cost was: policies and force-RLS on ~20 tables, a separate 
 The same bug is caught far more cheaply:
 
 ```rust
-// on pool creation, and on checkout in debug/staging builds
+// once, right after the pool is opened — a live connection cannot change
+// which database it's bound to mid-life, so re-checking at checkout time
+// tests nothing this check didn't already catch at creation.
 let db: String = sqlx::query_scalar("SELECT current_database()").fetch_one(&conn).await?;
-assert_eq!(db, expected_database_for(tenant_id), "tenant pool mis-routed");
+assert_eq!(db, expected_database, "tenant pool mis-routed");
 ```
 
-One query, no schema surface, no pooling constraint. A pool is bound to a connection string, so it cannot silently change databases underneath you; the realistic failure is selecting the wrong pool, and the assertion catches exactly that.
+One query, no schema surface, no pooling constraint. A pool is bound to a connection string, so it cannot silently change databases underneath you; the realistic failure is selecting the wrong pool, and the assertion catches exactly that — **provided `expected_database` is derived independently of whatever built this pool's connection string.** If both come from the same `tenant_id` (or the same config value) passed into one function, the assertion compares that value to itself and can never fail, however the pool was actually constructed; it looks tested and isn't. `expected_database` must trace back to the caller's own intent — e.g. the tenant the caller believed it was asking for, resolved separately from whatever the pool-construction code did with it — not be re-derived from the same input inside the same call.
+
+**Correction: this was previously written as firing "at pool creation and at checkout".** A checkout-time recheck cannot observe anything creation-time didn't already: a `sqlx::Pool` hands out connections bound to the same connection string used to create it, and Postgres has no operation that reassigns a live session to a different database. The only meaningful moment for this assertion is once, right after the pool opens.
 
 `tenant_id` stays as a column — cheap, useful in exports and support queries, and it keeps the shared-schema consolidation path open if the business ever pivots to hundreds of small tenants. That path remains a weak secondary justification (such a pivot would be a partitioning redesign regardless), but the column costs nothing to keep.
 
@@ -1227,7 +1231,7 @@ Centralizing communications creates a single point of failure. The mitigations m
 | Primary degraded but sending continues, and a kill switch is needed | **The awkward case.** The admin panel writes switches to the primary, so a partially-failed primary is exactly when the control is hardest to reach. Mitigations: the kill-switch write path is a single tiny transaction on its own small connection pool, so it survives conditions that starve bulk traffic; and the runbook includes the direct `psql` statement to engage a switch, tested and kept alongside the on-call notes. Do not let the only path to stopping the system be a web form. |
 | One provider down | Circuit breaker opens; that channel's queued messages back off and retry, draining when the provider recovers. Other channels unaffected. **Except OTP — see §12.1.** |
 | Dispatcher crash | Leases expire, standby acquires the advisory lock, work resumes. At-least-once delivery — see below. |
-| Marketing backlog | Admission control caps its share; transactional preempts. Auth is on a separate path entirely. |
+| Marketing backlog | Transactional preempts via claim-order priority, not a share-of-budget cap — that mechanism was specified and cut (§8) because it duplicated `ORDER BY priority` for a tunable nobody would tune. Auth is on a separate path entirely. |
 | One tenant's dispatcher wedges | Contained to that tenant — one process, one database, one advisory lock (§9). Standby takes over. No other tenant observes anything. |
 | One tenant saturates cluster IO | **Bounded, not prevented** — Postgres has no per-database IO or CPU quota. `CONNECTION LIMIT` and `statement_timeout` cap concurrency and runaway queries; per-database IO monitoring identifies the culprit. Remediation is relocating that tenant to its own cluster — a dump and restore, not a redesign (§9). |
 | One tenant needs a point-in-time restore | Full-cluster recovery to a side instance, then logical extraction of that tenant (§13). Other tenants stay live throughout, but RTO reflects a cluster restore. Requires a rehearsed runbook and spare capacity. |
@@ -1324,7 +1328,7 @@ This is still far cleaner than extracting one tenant's rows from shared partitio
 **Isolation must be tested, not asserted.** A suite that runs against a single tenant proves nothing about the property the whole design rests on. From step 0b onward, CI runs a **two-tenant** integration suite asserting at minimum:
 
 - Work performed in tenant A's context never reads or writes a row in tenant B's database.
-- The `current_database()` assertion fires when a pool is deliberately mis-wired to the wrong tenant, at pool creation and at checkout (§2.1). This is now the whole isolation mechanism, so it needs a test that actually breaks it.
+- The `current_database()` assertion fires when a pool is deliberately mis-wired to the wrong tenant, once at pool creation (§2.1 — checkout-time re-checking cannot observe anything creation-time didn't). This is now the whole isolation mechanism, so the test must prove `expected_database` is derived independently of the pool's own construction — a mutation test that deliberately re-derives both from the same input must turn this test red.
 - Dispatcher leader election holds under a forced failover, over a direct connection, with exactly one active dispatcher observed throughout (§2.3).
 - Every table containing customer data either appears in the erasure statements of §7.2 or is on a **named, reasoned exemption list checked in alongside the erasure code** (currently: `suppression`, §7.2). Checked against the live schema, not a hand-maintained list of tables to remember — a bare allowlist with no reasons is indistinguishable from the `comms_event` omission this check exists to catch; the reason is what a reviewer actually checks against.
 
