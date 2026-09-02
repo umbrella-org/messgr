@@ -361,6 +361,22 @@ Disposition summary: 1 blocking (F1), 0 non-blocking.
 
 cost: estimated L, actual L
 
+### Rework fix record — round 1 (commit a229843)
+
+F1 fixed: `drain_released_scope` and `discard_engaged_scope` (`src/dispatcher/drain.rs`) no
+longer return on a `claim_for_scope` error — they log and retry (`RETRY_DELAY`, 1s) instead, so
+neither task ever reports a scope finished except on an actual empty claim. The per-row
+`write_terminal` calls (`expired` in the drain task, `discarded` in the discard task) are now
+routed through new `write_expired`/`write_discarded` helpers that retry the same way on failure,
+rather than logging and moving on to the next row while leaving this one leased and unresolved.
+`run_release_drain` is unchanged — it now correctly only clears `draining` once every channel's
+task has genuinely emptied its backlog. Re-ran `just build`, `just lint`, `just test` (all green,
+including the unmodified `tests/kill_switch.rs` suite — the retry path only engages on the error
+branch, which the existing tests don't exercise, so this is a non-behavioural change on the
+happy path), and `just docs-check` (clean). No new test added for the retry path itself
+(injecting a transient `sqlx::Error` into a real Postgres pool has no existing harness in this
+test suite). Scope is the fix only, per rules §1 — nothing else was touched.
+
 ## History
 
 - 2026-09-01 — created (TO DO). source: chat: build-order step 4 (§14), filed after T-014 (step 2 work) landed.
@@ -383,3 +399,4 @@ cost: estimated L, actual L
   new sends immediately regardless of how long the dispatcher's drain takes.
 - 2026-09-02 — IN DEVELOPMENT → IN REVIEW: acceptance green
 - 2026-09-02 — IN REVIEW → REWORK: F1 blocking: kill-switch drain/discard tasks silently treat a mid-sweep DB error as completion, losing the release-ramp/discard guarantee
+- 2026-09-02 — REWORK → IN REVIEW: findings fixed

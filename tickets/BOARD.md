@@ -20,10 +20,11 @@ Last updated: 2026-09-02
 
 ## IN REVIEW
 
-### messgr (0/1)
+### messgr (1/1)
 
 | id | title | depends-on |
 |---|---|---|
+| T-016 | Kill switches | [] |
 
 ## REWORK
 
@@ -31,7 +32,6 @@ Last updated: 2026-09-02
 
 | id | title | open findings |
 |---|---|---|
-| T-016 | Kill switches | F1 blocking: kill-switch drain/discard tasks silently treat a mid-sweep DB error as completion, losing the release-ramp… |
 
 ## READY (impact order, per child)
 
