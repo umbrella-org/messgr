@@ -15,6 +15,12 @@ pub struct ProducerCert {
     pub tenant_id: Uuid,
     pub producer_id: Uuid,
     pub enabled: bool,
+    /// `tenant.status` joined in fresh on every call (T-016, closes
+    /// T-011/F3) — `resolve_producer` runs on every request already, unlike
+    /// `TenantContext`, which is opened once and cached for the life of the
+    /// process (`tenant::registry`'s own doc comment), so this is the one
+    /// place a status flip is guaranteed to be observed promptly.
+    pub tenant_status: String,
 }
 
 pub async fn find_producer_cert(
@@ -22,7 +28,13 @@ pub async fn find_producer_cert(
     cert_subject: &str,
 ) -> Result<Option<ProducerCert>, sqlx::Error> {
     sqlx::query_as::<_, ProducerCert>(
-        "SELECT cert_subject, tenant_id, producer_id, enabled FROM producer_cert WHERE cert_subject = $1",
+        r#"
+        SELECT producer_cert.cert_subject, producer_cert.tenant_id, producer_cert.producer_id,
+               producer_cert.enabled, tenant.status AS tenant_status
+        FROM producer_cert
+        JOIN tenant ON tenant.id = producer_cert.tenant_id
+        WHERE producer_cert.cert_subject = $1
+        "#,
     )
     .bind(cert_subject)
     .fetch_optional(pool)

@@ -37,7 +37,9 @@ pub async fn create_comms(
     let tenant = producer.tenant;
 
     // Fast pre-check: skip resolution/template/DEK/encryption work for a
-    // genuine retry.
+    // genuine retry. A retry of an already-accepted request must still
+    // replay even under an engaged switch — the row already exists; dispatch
+    // holding it is dispatch's concern, not a reason to reject the retry.
     if let Some(existing) =
         super::repo::find_idempotent_reply(&tenant.pool, &idempotency_key).await?
     {
@@ -47,6 +49,21 @@ pub async fn create_comms(
                 comms_request_id: existing,
             }),
         ));
+    }
+
+    // DESIGN.md §5.2, T-016 decision 6: checked before any resolution/
+    // template/DEK work, against the tenant's own poll-refreshed cache
+    // (`LISTEN` never fires over this process's PgBouncer connection, §2.3).
+    if let Some(scope) = tenant
+        .kill_switches
+        .blocking_scope(
+            &body.channel,
+            producer.producer_id,
+            body.campaign_id.as_deref(),
+        )
+        .await
+    {
+        return Err(IngestError::KillSwitchEngaged { scope });
     }
 
     let resolved = resolve(

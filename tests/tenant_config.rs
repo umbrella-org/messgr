@@ -42,6 +42,7 @@ fn sample_input(retention_years: i32) -> TenantConfigInput {
             days: 0,
             microseconds: 7_200 * 1_000_000,
         },
+        kill_switch_release_rate: 500,
     }
 }
 
@@ -175,6 +176,7 @@ async fn setting_and_loading_round_trips_every_typed_field() {
         loaded.staleness_max_age_duration(),
         chrono::Duration::seconds(7_200)
     );
+    assert_eq!(loaded.kill_switch_release_rate, 500);
 
     tenant_pool.close().await;
     drop_test_tenant(&control_pool, &db_name, &slug).await;

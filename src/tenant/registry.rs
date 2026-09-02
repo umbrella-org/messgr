@@ -16,6 +16,7 @@ use zeroize::Zeroizing;
 
 use crate::key_cache::KeyCache;
 use crate::keystore::{KeyStore, KeyStoreError};
+use crate::kill_switch::cache::{KillSwitchCache, run_refresh_loop};
 use crate::profile::Profile;
 use crate::tenant::model::Tenant;
 use crate::tenant::pool::connect_tenant_pool;
@@ -28,6 +29,11 @@ use crate::tenant_pepper::{TenantPepperError, ensure_tenant_pepper};
 /// ingest path", one of the two callers it names.
 const DEK_CACHE_CAPACITY: usize = 100_000;
 const DEK_CACHE_TTL: Duration = Duration::from_secs(3600);
+/// "Every few seconds" (DESIGN.md §5.2) — `messgr-ingest` connects through
+/// PgBouncer transaction mode, where `LISTEN` never fires (§2.3), so this
+/// poll is the *only* propagation path here, unlike the dispatcher's 30s
+/// fallback behind a `LISTEN` fast path.
+const KILL_SWITCH_POLL_INTERVAL: Duration = Duration::from_secs(5);
 
 /// Everything a request handler needs for one tenant, opened once and
 /// reused for the life of the process (or until evicted — no eviction
@@ -40,6 +46,10 @@ pub struct TenantContext {
     pub config: TenantConfig,
     pub pepper: Zeroizing<Vec<u8>>,
     pub dek_cache: KeyCache,
+    /// Refreshed by a background poll spawned the first time this tenant's
+    /// context is opened (T-016 decision 6) — never from the dispatcher's
+    /// `LISTEN`, which this process cannot use (§2.3).
+    pub kill_switches: Arc<KillSwitchCache>,
 }
 
 #[derive(Debug)]
@@ -162,12 +172,27 @@ impl TenantRegistry {
             DEK_CACHE_TTL,
         );
 
+        let kill_switches = Arc::new(KillSwitchCache::new());
+        let poll_pool = pool.clone();
+        let poll_cache = kill_switches.clone();
+        tokio::spawn(async move {
+            run_refresh_loop(
+                poll_cache,
+                poll_pool,
+                None,
+                KILL_SWITCH_POLL_INTERVAL,
+                |_| {},
+            )
+            .await;
+        });
+
         let context = Arc::new(TenantContext {
             tenant,
             pool,
             config,
             pepper,
             dek_cache,
+            kill_switches,
         });
         contexts.insert(tenant_id, context.clone());
         Ok(context)

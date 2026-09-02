@@ -1,0 +1,15 @@
+-- Auth kill switch (DESIGN.md §5.2, T-016): a dedicated flag, separate from
+-- `kill_switch` entirely, since OTP shares no process with the dispatcher
+-- (AGENTS.md hard invariant 1, §3) and cannot read a tenant-database table.
+-- `sms-sender`/`otp-api` (build-order step 17) are this column's only
+-- intended reader -- neither exists yet, so nothing in this codebase reads
+-- or writes it today. Must fail OPEN on a read failure or timeout once a
+-- reader exists (§5.2's correction): a control-database outage must never
+-- silently disable customer login.
+--
+-- Engaging/releasing it is a documented psql runbook
+-- (docs/user-manual/kill-switches.adoc), the same shape as `kill_switch`:
+-- one transaction writing this column and a platform_audit row recording
+-- both approvers' identities. The two-person approval is an out-of-band
+-- human process this schema records, not enforces (DESIGN.md decision 29).
+ALTER TABLE tenant ADD COLUMN auth_enabled boolean NOT NULL DEFAULT true;

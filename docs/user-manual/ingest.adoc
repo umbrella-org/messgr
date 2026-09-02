@@ -7,10 +7,18 @@ chapter), and writes the ledger + outbox row in one transaction, encrypting the 
 rendered template body under the customer's DEK (DESIGN.md §4.1-§4.3, §7, §11). The request body
 identifies the customer one of three ways -- exactly one of `customer_id`, `external_id` +
 `external_id_system` together, or neither (resolve by `destination` alone) -- any other
-combination is rejected (`422`). No gate chain exists yet (consent, quotas, kill switches,
-suppression -- §5, §5.1, §5.2 -- are unbuilt; `T-016` is kill switches specifically, not the gate
-chain as a whole), and `class = "auth"` is rejected outright (`422`) -- OTP has its own path
-(`sms-sender`/`otp-api`, `T-047`), never this one.
+combination is rejected (`422`). Consent, quotas, and suppression (§5, §5.1) are still unbuilt;
+`class = "auth"` is rejected outright (`422`) -- OTP has its own path (`sms-sender`/`otp-api`,
+`T-047`), never this one.
+
+`T-016` adds the first two ingest-side rejections ahead of the full gate chain: a client
+certificate belonging to a tenant whose `tenant.status` isn't `active` (suspended or
+offboarding) gets `403`, distinct from an unregistered or disabled producer certificate's own
+`403`; and a currently-engaged kill switch matching this request's channel, producer, or
+campaign gets `503` (temporary -- the switch may release at any moment), checked against a
+poll-refreshed in-process cache rather than `kill_switch` directly, since this process connects
+through PgBouncer transaction mode, where `LISTEN` never fires (DESIGN.md §2.3, §5.2). See
+"Kill switches" for how an operator engages/releases one.
 
 Requires four env vars, no defaults (`.env.example`): `INGEST_LISTEN_ADDR` (default
 `0.0.0.0:8443` if unset), `INGEST_TLS_CERT_FILE`, `INGEST_TLS_KEY_FILE`,

@@ -9,6 +9,8 @@
 use sqlx::PgPool;
 use uuid::Uuid;
 
+use crate::tenant::model::status;
+
 use super::cert_repo;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -23,7 +25,19 @@ pub struct ResolvedIdentity {
 #[derive(Debug)]
 pub enum ResolutionError {
     UnknownCert,
-    Disabled { tenant_id: Uuid, producer_id: Uuid },
+    Disabled {
+        tenant_id: Uuid,
+        producer_id: Uuid,
+    },
+    /// `tenant.status != 'active'` (T-016, closes T-011/F3). Allowlisting
+    /// `active` — rather than blocklisting `suspended`/`offboarding_*` —
+    /// also rejects a stray request against a still-`provisioning` tenant,
+    /// which is strictly safer and free: no producer cert should exist for
+    /// one yet.
+    TenantNotActive {
+        tenant_id: Uuid,
+        producer_id: Uuid,
+    },
     Database(sqlx::Error),
 }
 
@@ -34,6 +48,9 @@ impl std::fmt::Display for ResolutionError {
             Self::Disabled { producer_id, .. } => {
                 write!(f, "producer {producer_id} is disabled")
             }
+            Self::TenantNotActive { tenant_id, .. } => {
+                write!(f, "tenant {tenant_id} is not active")
+            }
             Self::Database(err) => write!(f, "identity resolution failed: {err}"),
         }
     }
@@ -43,7 +60,9 @@ impl std::error::Error for ResolutionError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Database(err) => Some(err),
-            Self::UnknownCert | Self::Disabled { .. } => None,
+            Self::UnknownCert
+            | Self::Disabled { .. }
+            | Self::TenantNotActive { .. } => None,
         }
     }
 }
@@ -68,6 +87,12 @@ pub async fn resolve_producer(
             tenant_id: cert.tenant_id,
             producer_id: cert.producer_id,
         }),
+        Some(cert) if cert.tenant_status != status::ACTIVE => {
+            Err(ResolutionError::TenantNotActive {
+                tenant_id: cert.tenant_id,
+                producer_id: cert.producer_id,
+            })
+        }
         Some(cert) => Ok(ResolvedIdentity {
             tenant_id: cert.tenant_id,
             producer_id: cert.producer_id,

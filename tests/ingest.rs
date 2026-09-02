@@ -71,6 +71,7 @@ fn sample_tenant_config(locale: &str) -> TenantConfigInput {
             days: 0,
             microseconds: 7_200 * 1_000_000,
         },
+        kill_switch_release_rate: 500,
     }
 }
 
@@ -679,6 +680,50 @@ async fn disabled_producer_certificate_is_rejected() {
     let body: serde_json::Value =
         response.json().await.expect("parsing response failed");
     assert_eq!(body["error"], "producer is disabled");
+
+    teardown(&fixture, Some(&_cert_subject)).await;
+}
+
+/// T-016, closing T-011/F3: a suspended tenant's still-enabled producer cert
+/// must be rejected too, distinctly from `disabled_producer_certificate_is_rejected`
+/// above. No CLI/repo path to suspend a tenant exists yet (§7.7 offboarding
+/// enforcement is step 19) -- the raw `UPDATE` below stands in for that.
+#[tokio::test]
+async fn suspended_tenant_producer_is_rejected() {
+    let fixture = setup("en-US").await;
+    let vault = vault_keystore();
+    let (identity_pem, _cert_subject) =
+        register_test_producer(&fixture, &vault, "suspended-tenant-caller").await;
+
+    sqlx::query("UPDATE tenant SET status = 'suspended' WHERE slug = $1")
+        .bind(&fixture.tenant_slug)
+        .execute(&fixture.control_pool)
+        .await
+        .expect("suspending the tenant failed");
+
+    let client = mtls_client(
+        &fixture.server_common_name,
+        fixture.server.addr,
+        &identity_pem,
+        &fixture.server_ca_pem,
+    );
+    let url = format!(
+        "https://{}:{}/comms",
+        fixture.server_common_name,
+        fixture.server.addr.port()
+    );
+
+    let response = client
+        .post(&url)
+        .header("Idempotency-Key", unique_name("idem"))
+        .json(&sample_body(Uuid::new_v4()))
+        .send()
+        .await
+        .expect("request failed");
+    assert_eq!(response.status(), 403);
+    let body: serde_json::Value =
+        response.json().await.expect("parsing response failed");
+    assert_eq!(body["error"], "tenant is not active");
 
     teardown(&fixture, Some(&_cert_subject)).await;
 }
