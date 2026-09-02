@@ -24,12 +24,27 @@ use super::worker::{DispatcherContext, LEASE_DURATION, process_one};
 /// switch's own guarantee.
 const RETRY_DELAY: Duration = Duration::from_secs(1);
 
-/// Writes a claimed row's `expired` terminal state, retrying on failure
-/// (F1 rework) — a stuck retry here is preferable to the caller believing
-/// this row is accounted for when it is still sitting leased and
-/// unresolved.
+/// How many times a single row's terminal write is retried before this task
+/// gives up on *that row specifically* and moves on (F2 rework). Unlike
+/// `claim_for_scope`'s own retry (unbounded — a failure there claims nothing,
+/// so it blocks no other row), a per-row `write_terminal` retry sits inside
+/// the batch's own `for` loop: an unbounded version of it stalls every row
+/// behind this one, every later `claim_for_scope` call for this scope, and,
+/// for `run_release_drain`, the whole switch's `draining` entry forever,
+/// since the channel's task never returns. Five attempts (five seconds at
+/// `RETRY_DELAY`) rides out an ordinary transient blip while still bounding
+/// how long one bad row can hold up everything after it.
+const MAX_WRITE_TERMINAL_ATTEMPTS: u32 = 5;
+
+/// Writes a claimed row's `expired` terminal state, retrying on failure up
+/// to `MAX_WRITE_TERMINAL_ATTEMPTS` times (F1/F2 rework) before giving up on
+/// this row and returning anyway, so one permanently-failing row cannot
+/// block every row after it. A row given up on this way stays leased until
+/// its lease naturally expires, at which point it becomes an ordinary
+/// outbox row again — the same fate any other row's mid-dispatch failure
+/// already has elsewhere in this codebase (`worker::process_one`).
 async fn write_expired(ctx: &DispatcherContext, row: &ClaimedOutbox) {
-    loop {
+    for attempt in 1..=MAX_WRITE_TERMINAL_ATTEMPTS {
         match repo::write_terminal(
             &ctx.pool,
             row.created_at,
@@ -43,13 +58,24 @@ async fn write_expired(ctx: &DispatcherContext, row: &ClaimedOutbox) {
         .await
         {
             Ok(()) => return,
+            Err(err) if attempt < MAX_WRITE_TERMINAL_ATTEMPTS => {
+                tracing::error!(
+                    comms_request_id = %row.comms_request_id,
+                    %err,
+                    attempt,
+                    "kill-switch drain: writing expired terminal failed, retrying"
+                );
+                tokio::time::sleep(RETRY_DELAY).await;
+            }
             Err(err) => {
                 tracing::error!(
                     comms_request_id = %row.comms_request_id,
                     %err,
-                    "kill-switch drain: writing expired terminal failed, retrying"
+                    attempts = MAX_WRITE_TERMINAL_ATTEMPTS,
+                    "kill-switch drain: writing expired terminal failed repeatedly, \
+                     giving up on this row — it remains leased, unresolved, and needs \
+                     operator investigation; the rest of this scope's backlog continues"
                 );
-                tokio::time::sleep(RETRY_DELAY).await;
             }
         }
     }
@@ -150,12 +176,16 @@ pub async fn run_release_drain(
         .remove(&kill_switch.id);
 }
 
-/// Writes a claimed row's `discarded` terminal state, retrying on failure
-/// (F1 rework) — same reasoning as `write_expired`: a row this task gives
-/// up on is a row that was promised discarded and instead sits leased and
-/// unresolved.
+/// Writes a claimed row's `discarded` terminal state, retrying on failure up
+/// to `MAX_WRITE_TERMINAL_ATTEMPTS` times (F1/F2 rework) — same reasoning as
+/// `write_expired`: bounded so one row cannot block every row after it in
+/// the same batch, or the scope's later batches. A row given up on this way
+/// stays engaged-and-excluded (held) for as long as the switch stays
+/// engaged; only a later release without this row ever having been swept
+/// can still dispatch it for real, same as any row this task never reached
+/// at all.
 async fn write_discarded(pool: &PgPool, row: &ClaimedOutbox) {
-    loop {
+    for attempt in 1..=MAX_WRITE_TERMINAL_ATTEMPTS {
         match repo::write_terminal(
             pool,
             row.created_at,
@@ -169,13 +199,24 @@ async fn write_discarded(pool: &PgPool, row: &ClaimedOutbox) {
         .await
         {
             Ok(()) => return,
+            Err(err) if attempt < MAX_WRITE_TERMINAL_ATTEMPTS => {
+                tracing::error!(
+                    comms_request_id = %row.comms_request_id,
+                    %err,
+                    attempt,
+                    "kill-switch discard: writing discarded terminal failed, retrying"
+                );
+                tokio::time::sleep(RETRY_DELAY).await;
+            }
             Err(err) => {
                 tracing::error!(
                     comms_request_id = %row.comms_request_id,
                     %err,
-                    "kill-switch discard: writing discarded terminal failed, retrying"
+                    attempts = MAX_WRITE_TERMINAL_ATTEMPTS,
+                    "kill-switch discard: writing discarded terminal failed repeatedly, \
+                     giving up on this row — it remains leased, unresolved, and needs \
+                     operator investigation; the rest of this scope's backlog continues"
                 );
-                tokio::time::sleep(RETRY_DELAY).await;
             }
         }
     }
