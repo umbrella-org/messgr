@@ -132,15 +132,38 @@ T-017. `depends-on: []` is correct as filed.
    `WHERE` clause to exclude `producer_id`s under an active `producer`/`producer_channel` switch
    (channel already pinned per loop) and `campaign_id`s under an active `campaign` switch, via
    `<> ALL($n)` array parameters built from the cache snapshot.
-4. **Release ramps via a one-shot background drain task, not a partially-excluded cache.** When
-   the cache observes a scope's `released_at` flip from NULL to non-NULL, it spawns a task that
-   walks that scope's still-held `outbox` rows in claim order
-   (`ORDER BY priority, next_attempt_at`), in batches of `tenant_config.kill_switch_release_rate`
-   rows per second: a row whose `expires_at` has passed gets the existing `expired` terminal
-   write (`repo::write_terminal`, reusing T-013's `comms_event`/`final_status` path — no new
-   terminal-state plumbing); every other row gets `next_attempt_at = now()` so it re-enters the
-   normal claim path unassisted. No new `outbox` column — `next_attempt_at`/`expires_at` already
-   exist (T-009).
+4. **Release ramps via a one-shot background drain task that claims its own rows directly —
+   not by bumping `next_attempt_at` and reopening the normal claim query.** *(Revised during
+   implementation — see the plan-amendment History line below for why the plan as originally
+   written here didn't actually ramp anything.)* A released scope's `outbox` rows already have
+   `next_attempt_at` in the past, so the moment the shared cache stops excluding a released
+   scope, the *normal* claim loop would see the whole backlog at once regardless of any
+   `next_attempt_at` bump — there is no way to make a bump "trickle" rows in through a query
+   that has no per-row admission state to check. Instead: the shared `KillSwitchCache` only ever
+   tracks *engaged* switches (`released_at IS NULL`) — released switches drop out of it
+   immediately, which is exactly right for `messgr-ingest` (a release must unblock new sends at
+   once). The dispatcher additionally tracks its own `draining: Arc<RwLock<HashMap<Uuid,
+   KillSwitch>>>` (one map shared by all this process's channel loops, not exposed to ingest):
+   `KillSwitchCache::refresh`'s returned `RefreshDelta.released` entries are inserted here
+   *before* anything else happens, so there is no window where a released `hold` scope is
+   excluded by neither map. `DispatcherContext::claim_exclusion` folds both maps together via
+   `kill_switch::cache::exclusion_for_channel`, so the normal claim loop keeps excluding a
+   draining scope exactly as if it were still engaged. The drain task itself
+   (`dispatcher::drain::drain_released_scope`, one per channel this process runs, since sending
+   needs that channel's own `Sender`) is the *only* thing allowed to claim a draining scope's
+   rows: `dispatcher::repo::claim_for_scope` leases up to `kill_switch_release_rate` matching
+   rows directly (the inverse of the normal claim's exclusion — it matches the switch's scope
+   instead of excluding it), sleeping one second between batches, until the scope's backlog is
+   empty — at which point it's removed from `draining` and the exclusion lifts for good. A row
+   whose `expires_at` has passed by the time it's drained gets the existing `expired` terminal
+   write (`repo::write_terminal`, reusing T-013's path) instead of being sent. No new `outbox`
+   column — `next_attempt_at`/`expires_at` already exist (T-009); no new state on the switch row
+   either — "draining" is process-local, derived from the cache diff, never persisted. `draining`
+   is a plain `std::sync::RwLock`, not `tokio::sync::RwLock`: the insert must happen
+   synchronously, in the same refresh tick that removes the switch from the shared cache's
+   engaged set — doing it inside a spawned task instead (an `.await` away) reopens the exact
+   same window this decision exists to close, for however long it takes that task to be
+   scheduled.
 5. **`kill_switch_release_rate` is a new `tenant_config` column** (`int NOT NULL DEFAULT 500`,
    rows/second), following T-007's established shape for an operator-tunable value: migration,
    `TenantConfig`/`TenantConfigInput` fields + `matches()`, `repo.rs` load/upsert,
@@ -184,6 +207,18 @@ T-017. `depends-on: []` is correct as filed.
 10. **No new erasure surface.** `kill_switch` holds no customer data (scope/reason/operator
     identity only) — review-addendum step-2 item 5 does not apply; state this explicitly so a
     reviewer doesn't have to re-derive it.
+11. **A `discard` switch's backlog is handled the same way as release-drain, but at engage time.**
+    *(Added during implementation — not in the original plan; see the plan-amendment History
+    line.)* The Outcome/Description above already promised `on_queued = 'discard'` behaviour, but
+    decision 4 as originally written only covered release and never specified an engage-time
+    mechanism at all. `KillSwitchCache::refresh` also returns `RefreshDelta.newly_engaged`; for
+    any `on_queued = 'discard'` entry there, `dispatcher::drain::discard_engaged_scope` claims
+    that scope's matching rows via the same `claim_for_scope` decision 4 introduces (with
+    `channel: None`, since discarding never sends and so needs no channel-specific `Sender` — one
+    task covers every channel at once) and immediately writes each an `expired`-shaped
+    `discarded` terminal state, looping until the scope's backlog is empty. No pacing needed
+    (nothing is sent), and no interaction with `draining` — a `discard` switch's rows are gone
+    before release is ever relevant.
 
 ### Tasks
 
@@ -192,20 +227,35 @@ T-017. `depends-on: []` is correct as filed.
 index from DESIGN.md §4.9, plus the `kill_switch_notify` trigger (decision 1).
 
 #### Task 2 — kill-switch cache module
-New `src/kill_switch/{mod.rs,model.rs,repo.rs,cache.rs}` (mirrors `partition_lifecycle`'s
-layout): `model.rs` the `KillSwitch` row + `scope`/`on_queued` constants (matching
-`tenant::model::status`'s `&'static str` convention); `repo.rs` `list_active`,
-`find_released_since` (for the drain trigger); `cache.rs` `KillSwitchCache` — the in-memory
-active-scope set, a method to test `(channel, producer_id, campaign_id)` against it, and the
-poll/refresh loop shared by both callers (dispatcher passes a `PgListener`, ingest does not —
-same struct, an `Option` for the listen half). Register `pub mod kill_switch;` in `src/lib.rs`.
+New `src/kill_switch/{mod.rs,model.rs,repo.rs,cache.rs}` (as planned, minus `find_released_since`
+— superseded, see decision 4's amendment): `model.rs` the `KillSwitch` row, `scope`/`on_queued`
+constants (matching `tenant::model::status`'s `&'static str` convention), and `matches`/
+`producer_id`/`producer_channel_parts` helpers; `repo.rs` `list_active` only — the drain trigger
+turned out to need a *diff* against the cache's own previous snapshot, not a separate query, so
+it lives in `cache.rs` instead; `cache.rs` `KillSwitchCache` (the in-memory active-*engaged*-only
+set — see decision 4), `RefreshDelta`/`refresh` (the diff), `blocking_scope` (ingest's check),
+`ChannelExclusion`/`exclusion_for_channel` (the dispatcher's claim-exclusion builder, a free
+function so it can fold together the cache's engaged set and the dispatcher's own draining map —
+decision 4), and `run_refresh_loop` (the poll/`LISTEN` loop shared by both callers). Register
+`pub mod kill_switch;` in `src/lib.rs`.
 
 #### Task 3 — dispatcher integration
-`src/dispatcher/repo.rs::claim`: candidate-set exclusion (decision 3). `src/dispatcher/worker.rs`:
-`DispatcherContext` gains `kill_switches: Arc<KillSwitchCache>`; `run_channel_loop` consults it
-before calling `repo::claim`. `src/bin/dispatcher.rs`: construct the shared cache once, spawn its
-refresh task, spawn the release-drain task (decision 4), thread the `Arc` into every
-`DispatcherContext`.
+`src/dispatcher/repo.rs`: `claim` gains the `exclusion: &ChannelExclusion` parameter (decision 3);
+new `claim_for_scope` (decision 4/11's inverse-of-exclusion query, via `sqlx::QueryBuilder` since
+it branches on scope kind and an optional channel pin). `src/dispatcher/worker.rs`:
+`DispatcherContext` gains `kill_switches: Arc<KillSwitchCache>` and `draining:
+Arc<RwLock<HashMap<Uuid, KillSwitch>>>`, plus a `claim_exclusion` method folding both;
+`run_channel_loop` consults it before calling `repo::claim`; `process_one` becomes `pub(crate)`
+so the new `drain` module can reuse it. New `src/dispatcher/drain.rs` (not in the original file
+list — needed once decision 4 was revised): `drain_released_scope` (one channel's ramp),
+`run_release_drain` (fans a released switch out to every channel this process runs, then clears
+`draining`), and `discard_engaged_scope` (decision 11). Registered as `pub mod drain;` in
+`src/dispatcher/mod.rs`. `src/bin/dispatcher.rs`: build the shared cache, `draining` map, and
+per-channel `DispatcherContext`s (as a `HashMap` keyed by channel, so the refresh task can hand
+it to `run_release_drain`); load `tenant_config.kill_switch_release_rate` once at startup; spawn
+the refresh task (dedicated `LISTEN kill_switch` connection) with a closure that spawns
+`discard_engaged_scope`/`run_release_drain` off `RefreshDelta`; spawn each channel's
+`run_channel_loop`.
 
 #### Task 4 — `tenant_config.kill_switch_release_rate`
 New `migrations/tenant/0010_tenant_config_kill_switch_release_rate.sql` (a fresh migration, not
@@ -243,17 +293,24 @@ each to `docs/user-manual/dispatcher.adoc` (kill-switch enforcement now exists) 
 (`tests/dispatcher.rs`/`tests/ingest.rs` conventions: real provisioning against the local
 compose stack, `wiremock` for the provider) exercising:
 
-- Engaging a `producer` switch → `POST /comms` for that producer returns `503` with a
-  `kill_switch_engaged`-shaped body; a different producer on the same tenant still succeeds.
-- A message already in `outbox` under an engaged `producer`/`channel`/`global` switch is not
-  claimed by a running dispatcher (assert the row is still present and `leased_until IS NULL`
-  after several claim-loop ticks).
-- Releasing the switch drains the backlog at `kill_switch_release_rate`: immediately after
-  release, at most one rate-sized batch is claimable; the rest remain held until the next tick.
-- A held row whose `expires_at` has passed is written `expired` on drain, never sent.
-- A `global` switch blocks claiming on every channel, not just one.
-- A tenant with `status = 'suspended'` gets `403` from `POST /comms` even with an `enabled`
-  producer cert; `status = 'active'` still succeeds.
+- `engaged_kill_switch_rejects_the_matching_producer_but_not_another`: engaging a `producer`
+  switch → `POST /comms` for that producer eventually (polling for the ingest-side cache to
+  refresh) returns `503`; a different producer on the same tenant still gets `201`.
+- `engaged_producer_switch_excludes_only_that_producers_rows`: a message already in `outbox`
+  under an engaged `producer` switch is not claimed (`repo::claim` with the cache's exclusion
+  applied), while an unrelated producer's row still is.
+- `global_switch_excludes_every_channel`: a `global` switch's exclusion blocks claiming on every
+  channel a dispatcher process might run, not just one.
+- `release_ramp_admits_at_most_release_rate_rows_per_batch`: `claim_for_scope` with a 5-row
+  backlog and `limit = 2` returns exactly 2, leaving 3 unleased for the next tick.
+- `drain_sends_every_row_and_marks_an_already_expired_one_expired_instead`: running
+  `drain_released_scope` to completion against a real `wiremock` provider sends every non-expired
+  row and writes `expired` (never sends) for one whose `expires_at` had already passed.
+- `release_immediately_stops_blocking_new_ingest_even_before_drain_finishes`: `blocking_scope`
+  returns `None` the refresh cycle right after release, independent of any drain still running.
+- `tests/producer.rs::resolve_producer_rejects_a_suspended_tenant` and
+  `tests/ingest.rs::suspended_tenant_producer_is_rejected`: a `status = 'suspended'` tenant's
+  still-`enabled` producer cert resolves to `TenantNotActive` / gets `403` from `POST /comms`.
 
 `just docs-check` clean.
 
@@ -288,3 +345,17 @@ to `dispatcher.adoc` and `ingest.adoc` (Task 8).
 - 2026-09-02 — re-graded medium/M → high/L during refinement: dispatcher, ingest, and two migrations all touched, plus a new release-drain task. auth_enabled scoped to schema+audit only (otp-api, its only reader, is step 17); DESIGN.md Still Open #9 resolved for this step (decision 29).
 - 2026-09-02 — TO DO → READY: plan complete
 - 2026-09-02 — READY → IN DEVELOPMENT: picked up
+- 2026-09-02 — plan amended inline: decision 4's release mechanism as refined (bump
+  `next_attempt_at`, let the normal claim loop re-admit the row) does not ramp anything — a
+  released scope's rows already have `next_attempt_at` in the past, so the instant the shared
+  cache stops excluding the scope, the normal claim loop sees the whole backlog at once
+  regardless of any bump. Fixed during implementation: the dispatcher keeps a process-local
+  `draining` map (populated from `KillSwitchCache::refresh`'s diff) that keeps excluding a
+  released scope from the normal claim loop until a dedicated `drain_released_scope` task —
+  which claims its own rate-limited batches directly via a new `claim_for_scope` query — empties
+  it. Also added decision 11: the plan never specified a mechanism for `on_queued = 'discard'`
+  at all, despite the ticket's own Outcome/Description promising it; `discard_engaged_scope`
+  (same `claim_for_scope`, no pacing) closes that gap. `messgr-ingest`'s side (decision 6) is
+  unaffected — it only ever reads the shared cache's *engaged* set, so a release still unblocks
+  new sends immediately regardless of how long the dispatcher's drain takes.
+- 2026-09-02 — IN DEVELOPMENT → IN REVIEW: acceptance green
