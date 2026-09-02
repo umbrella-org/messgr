@@ -20,10 +20,11 @@ Last updated: 2026-09-02
 
 ## IN REVIEW
 
-### messgr (0/1)
+### messgr (1/1)
 
 | id | title | depends-on |
 |---|---|---|
+| T-016 | Kill switches | [] |
 
 ## REWORK
 
@@ -31,7 +32,6 @@ Last updated: 2026-09-02
 
 | id | title | open findings |
 |---|---|---|
-| T-016 | Kill switches | F2 blocking: retry-forever in drain/discard has no bound, livelocking the batch/scope on a permanently-failing row |
 
 ## READY (impact order, per child)
 

@@ -404,6 +404,24 @@ Disposition summary (round 1 re-review): 1 blocking (F2), 1 non-blocking (F3, no
 
 cost: estimated L, actual L (unchanged — F2 is a small, same-file bounded-retry fix, not a scope change)
 
+### Rework fix record — round 2 (commit a5f8ce6)
+
+F2 fixed: `write_expired` and `write_discarded` (`src/dispatcher/drain.rs`) now retry a failed
+`write_terminal` call up to a new `MAX_WRITE_TERMINAL_ATTEMPTS` (5, ~5s at `RETRY_DELAY`) instead
+of forever, logging distinctly on the final failure ("giving up on this row ... needs operator
+investigation") and then returning — allowing the caller's `for row in batch` loop to continue to
+the next row instead of blocking on this one indefinitely. `claim_for_scope`'s own retry (F1,
+unchanged) stays unbounded, since a failed claim returns no rows at all and so blocks nothing
+else — only the per-row terminal write sits inside the batch loop and needed a bound. A row given
+up on stays leased until its lease naturally expires and then becomes an ordinary outbox row,
+same as any other row's mid-dispatch failure elsewhere in this codebase
+(`worker::process_one`). F3 (test-gap) not separately addressed — no new test added, for the same
+reason recorded in round 1 (no harness in this suite injects a `sqlx::Error`); it remains
+`noted`. Re-ran `just build`, `just lint`, `just test` (all green, including the unmodified
+`tests/kill_switch.rs` suite — the bound only changes behaviour on the already-untested error
+path), and `just docs-check` (clean). Scope is the F2 fix only, per rules §1 — nothing else was
+touched.
+
 ## History
 
 - 2026-09-01 — created (TO DO). source: chat: build-order step 4 (§14), filed after T-014 (step 2 work) landed.
@@ -428,3 +446,4 @@ cost: estimated L, actual L (unchanged — F2 is a small, same-file bounded-retr
 - 2026-09-02 — IN REVIEW → REWORK: F1 blocking: kill-switch drain/discard tasks silently treat a mid-sweep DB error as completion, losing the release-ramp/discard guarantee
 - 2026-09-02 — REWORK → IN REVIEW: findings fixed
 - 2026-09-02 — IN REVIEW → REWORK: F2 blocking: retry-forever in drain/discard has no bound, livelocking the batch/scope on a permanently-failing row
+- 2026-09-02 — REWORK → IN REVIEW: findings fixed
