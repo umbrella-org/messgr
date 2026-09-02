@@ -495,3 +495,4 @@ fixes stayed small and scoped)
 - 2026-09-02 — IN REVIEW → REWORK: F2 blocking: retry-forever in drain/discard has no bound, livelocking the batch/scope on a permanently-failing row
 - 2026-09-02 — REWORK → IN REVIEW: findings fixed
 - 2026-09-02 — IN REVIEW → DONE: F1 and F2 fixed and verified; no new findings
+- 2026-09-02 — MR opened: PR #19 (`feat/T-016-kill-switches`), awaiting merge
