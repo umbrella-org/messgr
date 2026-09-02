@@ -13,6 +13,11 @@ pub struct TenantConfig {
     pub quota_day_boundary_tz: String,
     pub verification_mode: String,
     pub staleness_max_age: PgInterval,
+    /// Rows/second the kill-switch release-drain ramp admits after a switch
+    /// releases (DESIGN.md §5.2, T-016 decision 5) — a fresh tenant with no
+    /// `tenant_config` row has no value here at all (T-007 decision 4);
+    /// `messgr-dispatcher` falls back to this column's own SQL default.
+    pub kill_switch_release_rate: i32,
 }
 
 impl TenantConfig {
@@ -39,6 +44,7 @@ pub struct TenantConfigInput {
     pub quota_day_boundary_tz: String,
     pub verification_mode: String,
     pub staleness_max_age: PgInterval,
+    pub kill_switch_release_rate: i32,
 }
 
 impl TenantConfigInput {
@@ -53,6 +59,7 @@ impl TenantConfigInput {
             && self.quota_day_boundary_tz == existing.quota_day_boundary_tz
             && self.verification_mode == existing.verification_mode
             && self.staleness_max_age == existing.staleness_max_age
+            && self.kill_switch_release_rate == existing.kill_switch_release_rate
     }
 }
 

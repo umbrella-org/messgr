@@ -4,8 +4,9 @@
 //! the provider itself (`wiremock`, the same tool T-012's `HttpSender`
 //! tests use).
 
+use std::collections::HashMap;
 use std::num::NonZeroUsize;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
@@ -23,11 +24,18 @@ use messgr::encryption;
 use messgr::ingest::repo::insert_transactional;
 use messgr::key_cache::KeyCache;
 use messgr::keystore::VaultKeyStore;
+use messgr::kill_switch::cache::{ChannelExclusion, KillSwitchCache};
 use messgr::profile::Profile;
 use messgr::sender::Sender;
 use messgr::sender::http::HttpSender;
 use messgr::tenant::pool::connect_tenant_pool;
 use messgr::tenant::provision::provision_tenant;
+
+/// No switches engaged — every pre-T-016 test in this file claims against an
+/// empty kill-switch world.
+fn no_exclusion() -> ChannelExclusion {
+    ChannelExclusion::default()
+}
 
 fn control_database_url() -> String {
     dotenvy::dotenv().ok();
@@ -243,6 +251,8 @@ async fn successful_send_writes_sent_event_and_final_status_and_deletes_the_outb
         cache: Arc::new(cache),
         mount: tenant.mount.clone(),
         sender,
+        kill_switches: Arc::new(KillSwitchCache::new()),
+        draining: Arc::new(RwLock::new(HashMap::new())),
     };
 
     let claimed = repo::claim(
@@ -250,6 +260,7 @@ async fn successful_send_writes_sent_event_and_final_status_and_deletes_the_outb
         "sms",
         10,
         Utc::now() + chrono::Duration::minutes(2),
+        &no_exclusion(),
     )
     .await
     .expect("claim failed");
@@ -328,6 +339,8 @@ async fn failed_send_writes_failed_event_and_final_status_with_no_requeue() {
         cache: Arc::new(cache),
         mount: tenant.mount.clone(),
         sender,
+        kill_switches: Arc::new(KillSwitchCache::new()),
+        draining: Arc::new(RwLock::new(HashMap::new())),
     };
 
     let claimed = repo::claim(
@@ -335,6 +348,7 @@ async fn failed_send_writes_failed_event_and_final_status_with_no_requeue() {
         "sms",
         10,
         Utc::now() + chrono::Duration::minutes(2),
+        &no_exclusion(),
     )
     .await
     .expect("claim failed");
@@ -390,9 +404,10 @@ async fn concurrent_claims_never_double_claim_the_same_row() {
     write_ready_outbox_row(&tenant, &vault, &cache, "+15550101", "row two").await;
 
     let leased_until = Utc::now() + chrono::Duration::minutes(2);
+    let exclusion = no_exclusion();
     let (first, second) = tokio::join!(
-        repo::claim(&tenant.tenant_pool, "sms", 1, leased_until),
-        repo::claim(&tenant.tenant_pool, "sms", 1, leased_until),
+        repo::claim(&tenant.tenant_pool, "sms", 1, leased_until, &exclusion),
+        repo::claim(&tenant.tenant_pool, "sms", 1, leased_until, &exclusion),
     );
     let first: Vec<ClaimedOutbox> = first.expect("first claim failed");
     let second: Vec<ClaimedOutbox> = second.expect("second claim failed");
@@ -430,6 +445,7 @@ async fn claim_ignores_leased_and_not_yet_due_rows() {
         "sms",
         10,
         Utc::now() + chrono::Duration::minutes(2),
+        &no_exclusion(),
     )
     .await
     .expect("claim failed");
@@ -443,6 +459,7 @@ async fn claim_ignores_leased_and_not_yet_due_rows() {
         "sms",
         10,
         Utc::now() + chrono::Duration::minutes(2),
+        &no_exclusion(),
     )
     .await
     .expect("second claim failed");

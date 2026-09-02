@@ -61,6 +61,14 @@ pub enum IngestError {
     MissingPeerCertificate,
     UnknownProducer,
     ProducerDisabled,
+    /// `tenant.status != 'active'` (T-016, closes T-011/F3) — checked fresh
+    /// at identity resolution, not from the cached `TenantContext`.
+    TenantNotActive,
+    /// A currently-engaged kill switch matches this request's
+    /// `(channel, producer_id, campaign_id)` (DESIGN.md §5.2, T-016).
+    /// Temporary and distinct from every existing 4xx rejection — `503`,
+    /// not a generic `500` — since the switch may release at any moment.
+    KillSwitchEngaged { scope: String },
     TenantNotConfigured,
     MissingIdempotencyKey,
     InvalidClass(String),
@@ -99,6 +107,7 @@ impl From<ResolutionError> for IngestError {
         match err {
             ResolutionError::UnknownCert => Self::UnknownProducer,
             ResolutionError::Disabled { .. } => Self::ProducerDisabled,
+            ResolutionError::TenantNotActive { .. } => Self::TenantNotActive,
             ResolutionError::Database(err) => Self::Database(err),
         }
     }
@@ -156,6 +165,10 @@ impl std::fmt::Display for IngestError {
             }
             Self::UnknownProducer => write!(f, "unregistered producer certificate"),
             Self::ProducerDisabled => write!(f, "producer is disabled"),
+            Self::TenantNotActive => write!(f, "tenant is not active"),
+            Self::KillSwitchEngaged { scope } => {
+                write!(f, "kill switch engaged (scope: {scope})")
+            }
             Self::TenantNotConfigured => write!(f, "tenant has no tenant_config"),
             Self::MissingIdempotencyKey => {
                 write!(f, "Idempotency-Key header is required")
@@ -187,7 +200,10 @@ impl std::error::Error for IngestError {}
 impl IntoResponse for IngestError {
     fn into_response(self) -> Response {
         let status = match &self {
-            Self::UnknownProducer | Self::ProducerDisabled => StatusCode::FORBIDDEN,
+            Self::UnknownProducer | Self::ProducerDisabled | Self::TenantNotActive => {
+                StatusCode::FORBIDDEN
+            }
+            Self::KillSwitchEngaged { .. } => StatusCode::SERVICE_UNAVAILABLE,
             Self::MissingIdempotencyKey => StatusCode::BAD_REQUEST,
             Self::InvalidClass(_)
             | Self::InvalidChannel(_)

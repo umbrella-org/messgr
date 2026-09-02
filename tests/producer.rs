@@ -698,6 +698,66 @@ async fn resolve_producer_distinguishes_disabled_from_unknown() {
     drop_test_tenant(&control_pool, &db_name, &slug).await;
 }
 
+/// T-016, closing T-011/F3: a suspended tenant's still-`enabled` producer
+/// cert must not resolve, even though nothing about the cert itself changed.
+/// There's no CLI/repo path to suspend a tenant yet (§7.7 offboarding
+/// enforcement is step 19) -- the raw `UPDATE` below is standing in for
+/// that until one exists.
+#[tokio::test]
+async fn resolve_producer_rejects_a_suspended_tenant() {
+    let control_url = control_database_url();
+    let control_pool = db::connect(&control_url, 5)
+        .await
+        .expect("failed to connect to control database");
+    let vault = vault_keystore();
+
+    let slug = unique_name("test_tenant_resolve_suspended");
+    let db_name = unique_name("test_db_resolve_suspended");
+    let cert_subject = format!("CN={}", unique_name("resolve-suspended"));
+
+    let tenant_id =
+        provision_test_tenant(&control_pool, &control_url, &vault, &slug, &db_name)
+            .await;
+
+    let outcome = register_producer(
+        &control_pool,
+        &control_url,
+        &slug,
+        "resolve-suspended-producer",
+        &cert_subject,
+        "team",
+        "team@example.com",
+        Profile::Dev,
+        "test-actor",
+    )
+    .await
+    .expect("registration failed");
+
+    sqlx::query("UPDATE tenant SET status = 'suspended' WHERE id = $1")
+        .bind(tenant_id)
+        .execute(&control_pool)
+        .await
+        .expect("suspending the tenant failed");
+
+    let result = resolve_producer(&control_pool, &cert_subject).await;
+    match result {
+        Err(ResolutionError::TenantNotActive {
+            tenant_id: resolved_tenant_id,
+            producer_id: resolved_producer_id,
+        }) => {
+            assert_eq!(resolved_tenant_id, tenant_id);
+            assert_eq!(resolved_producer_id, outcome.producer_id);
+        }
+        other => panic!(
+            "a suspended tenant's still-enabled producer cert must resolve to \
+             TenantNotActive, not {other:?}"
+        ),
+    }
+
+    cleanup_cert(&control_pool, &cert_subject).await;
+    drop_test_tenant(&control_pool, &db_name, &slug).await;
+}
+
 #[tokio::test]
 async fn idempotent_reregistration_does_not_silently_reenable_a_disabled_producer() {
     // Regression guard for T-006 decision 3: cert_repo::upsert_producer_cert's

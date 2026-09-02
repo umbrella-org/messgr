@@ -5,25 +5,40 @@
 //! order step 7); this binary runs exactly one instance per tenant and
 //! treats a send failure as terminal on the first attempt (T-013 decision
 //! 2).
+//!
+//! T-016 adds kill-switch enforcement: a shared `KillSwitchCache`, refreshed
+//! by a dedicated `LISTEN kill_switch` connection with a 30-second poll
+//! fallback (DESIGN.md §5.2), feeds every channel's claim-exclusion check
+//! and drives the release-drain / engage-discard one-shot tasks.
 
+use std::collections::HashMap;
 use std::num::NonZeroUsize;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use messgr::config::Config;
 use messgr::db;
+use messgr::dispatcher::drain::{discard_engaged_scope, run_release_drain};
 use messgr::dispatcher::worker::{DispatcherContext, run_channel_loop};
 use messgr::key_cache::KeyCache;
 use messgr::keystore::{KeyStore, VaultKeyStore};
+use messgr::kill_switch::cache::{KillSwitchCache, run_refresh_loop};
+use messgr::kill_switch::model::on_queued;
 use messgr::sender::Sender;
 use messgr::sender::http::HttpSender;
 use messgr::tenant::pool::connect_tenant_pool;
 use messgr::tenant::repo as tenant_repo;
+use messgr::tenant_config::repo as tenant_config_repo;
 
 /// `key_cache.rs`'s own doc comment recommends this exact sizing for
 /// "T-013's dispatcher".
 const DEK_CACHE_CAPACITY: usize = 100_000;
 const DEK_CACHE_TTL: Duration = Duration::from_secs(3600);
+/// Matches `migrations/tenant/0010_tenant_config_kill_switch_release_rate.sql`'s
+/// own column default -- used when a tenant has no `tenant_config` row at
+/// all (T-007 decision 4: no auto-seeding).
+const DEFAULT_KILL_SWITCH_RELEASE_RATE: i32 = 500;
+const KILL_SWITCH_POLL_INTERVAL: Duration = Duration::from_secs(30);
 
 fn env_var(name: &str) -> String {
     std::env::var(name).unwrap_or_else(|_| panic!("{name} must be set"))
@@ -81,21 +96,103 @@ async fn main() {
         DEK_CACHE_TTL,
     ));
 
-    let mut handles = Vec::new();
-    for channel in channels {
+    let release_rate = tenant_config_repo::load(&tenant_pool)
+        .await
+        .expect("loading tenant_config failed")
+        .map(|c| c.kill_switch_release_rate)
+        .unwrap_or(DEFAULT_KILL_SWITCH_RELEASE_RATE) as i64;
+
+    let kill_switches = Arc::new(KillSwitchCache::new());
+    let draining = Arc::new(RwLock::new(HashMap::new()));
+
+    let mut contexts = HashMap::new();
+    for channel in &channels {
         let upper = channel.to_uppercase();
         let base_url = env_var(&format!("DISPATCHER_{upper}_BASE_URL"));
         let api_key = env_var(&format!("DISPATCHER_{upper}_API_KEY"));
         let sender: Arc<dyn Sender> = Arc::new(HttpSender::new(base_url, api_key));
 
-        let ctx = Arc::new(DispatcherContext {
-            pool: tenant_pool.clone(),
-            keystore: keystore.clone(),
-            cache: cache.clone(),
-            mount: tenant.vault_mount.clone(),
-            sender,
-        });
+        contexts.insert(
+            channel.clone(),
+            Arc::new(DispatcherContext {
+                pool: tenant_pool.clone(),
+                keystore: keystore.clone(),
+                cache: cache.clone(),
+                mount: tenant.vault_mount.clone(),
+                sender,
+                kill_switches: kill_switches.clone(),
+                draining: draining.clone(),
+            }),
+        );
+    }
 
+    let mut handles = Vec::new();
+
+    let mut refresh_listener = sqlx::postgres::PgListener::connect_with(&tenant_pool)
+        .await
+        .expect("messgr-dispatcher: failed to open the kill-switch LISTEN connection");
+    refresh_listener
+        .listen("kill_switch")
+        .await
+        .expect("messgr-dispatcher: failed to LISTEN on kill_switch");
+
+    let refresh_pool = tenant_pool.clone();
+    let refresh_cache = kill_switches.clone();
+    let refresh_contexts = contexts.clone();
+    let refresh_draining = draining.clone();
+    handles.push(tokio::spawn(async move {
+        run_refresh_loop(
+            refresh_cache,
+            refresh_pool.clone(),
+            Some(refresh_listener),
+            KILL_SWITCH_POLL_INTERVAL,
+            move |delta| {
+                for switch in delta.newly_engaged {
+                    if switch.on_queued == on_queued::DISCARD {
+                        tracing::info!(
+                            kill_switch_id = %switch.id,
+                            scope = %switch.scope,
+                            "messgr-dispatcher: discarding backlog for newly-engaged switch"
+                        );
+                        tokio::spawn(discard_engaged_scope(
+                            refresh_pool.clone(),
+                            switch,
+                            release_rate,
+                        ));
+                    }
+                }
+                for switch in delta.released {
+                    if switch.on_queued == on_queued::HOLD {
+                        tracing::info!(
+                            kill_switch_id = %switch.id,
+                            scope = %switch.scope,
+                            "messgr-dispatcher: draining backlog for released switch"
+                        );
+                        // Inserted here, synchronously, in the same tick
+                        // `KillSwitchCache::refresh` removed this switch from
+                        // the *engaged* set — not inside the spawned task
+                        // below. A `tokio::spawn` only starts running at its
+                        // own next poll, so doing this insert there would
+                        // leave a window where the switch is excluded by
+                        // neither map and the normal claim loop could claim
+                        // its whole backlog at once (T-016 decision 4's own
+                        // plan-amendment note).
+                        refresh_draining
+                            .write()
+                            .expect("draining lock poisoned")
+                            .insert(switch.id, switch.clone());
+
+                        let draining = refresh_draining.clone();
+                        let contexts = refresh_contexts.clone();
+                        tokio::spawn(run_release_drain(contexts, draining, switch, release_rate));
+                    }
+                }
+            },
+        )
+        .await;
+    }));
+
+    for (channel, ctx) in contexts {
         tracing::info!(%channel, "messgr-dispatcher: starting claim loop");
         handles.push(tokio::spawn(run_channel_loop(ctx, channel)));
     }

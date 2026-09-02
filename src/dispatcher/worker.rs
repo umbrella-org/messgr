@@ -1,6 +1,7 @@
 //! The per-channel claim loop (DESIGN.md §4.2, §9, T-013).
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
 use std::time::Duration as StdDuration;
 
 use chrono::{Duration as ChronoDuration, Utc};
@@ -11,23 +12,57 @@ use crate::customer_dek::lifecycle::{self, CustomerDekError};
 use crate::encryption::{self, EncryptionError};
 use crate::key_cache::KeyCache;
 use crate::keystore::KeyStore;
+use crate::kill_switch::cache::{self, ChannelExclusion, KillSwitchCache};
+use crate::kill_switch::model::KillSwitch;
 use crate::sender::{Sender, SenderError};
 
 use super::model::ClaimedOutbox;
 use super::repo;
 
-const CLAIM_BATCH_SIZE: i64 = 20;
-const LEASE_DURATION: ChronoDuration = ChronoDuration::minutes(2);
+pub const CLAIM_BATCH_SIZE: i64 = 20;
+pub const LEASE_DURATION: ChronoDuration = ChronoDuration::minutes(2);
 const POLL_INTERVAL: StdDuration = StdDuration::from_secs(1);
 
 /// Everything one channel's claim loop needs, opened once at startup and
-/// shared across every row it processes.
+/// shared across every row it processes. `kill_switches`/`draining` are
+/// shared across every channel this dispatcher process runs (DESIGN.md
+/// §5.2's scopes — `global`/`producer`/`campaign` aren't channel-specific),
+/// not opened per channel like the rest of this struct.
 pub struct DispatcherContext {
     pub pool: PgPool,
     pub keystore: Arc<dyn KeyStore>,
     pub cache: Arc<KeyCache>,
     pub mount: String,
     pub sender: Arc<dyn Sender>,
+    pub kill_switches: Arc<KillSwitchCache>,
+    /// Released switches whose backlog hasn't finished the release-drain
+    /// ramp yet (T-016 decision 4). Kept separate from `kill_switches`
+    /// (which only ever holds *engaged* switches) because a released switch
+    /// must still be excluded from the normal claim loop until its own
+    /// drain task empties it — only that task is allowed to claim its rows.
+    /// A plain `std::sync::RwLock`, not `tokio::sync::RwLock`: the refresh
+    /// loop's `on_delta` callback (`kill_switch::cache::run_refresh_loop`)
+    /// is synchronous by design, so this insert can happen in the same
+    /// tick that removes the switch from `kill_switches` — no `.await`
+    /// between the two means no window where a released scope is excluded
+    /// by neither map. Never held across an `.await` point.
+    pub draining: Arc<RwLock<HashMap<Uuid, KillSwitch>>>,
+}
+
+impl DispatcherContext {
+    /// The exclusion `repo::claim` must apply for `channel`: the union of
+    /// currently-engaged switches and scopes still draining after release.
+    pub async fn claim_exclusion(&self, channel: &str) -> ChannelExclusion {
+        let mut switches = self.kill_switches.active_snapshot().await;
+        switches.extend(
+            self.draining
+                .read()
+                .expect("draining lock poisoned")
+                .values()
+                .cloned(),
+        );
+        cache::exclusion_for_channel(switches.iter(), channel)
+    }
 }
 
 #[derive(Debug)]
@@ -179,7 +214,9 @@ pub async fn try_process(
 
 /// Processes one claimed row, logging rather than propagating on failure —
 /// one bad row must not stop the loop from claiming the rest of its batch.
-async fn process_one(ctx: &DispatcherContext, row: ClaimedOutbox) {
+/// `pub(crate)`, not private: the release-drain task (`super::drain`) reuses
+/// this exact send-or-fail path for rows it claims itself.
+pub(crate) async fn process_one(ctx: &DispatcherContext, row: ClaimedOutbox) {
     if let Err(err) = try_process(ctx, &row).await {
         tracing::error!(
             comms_request_id = %row.comms_request_id,
@@ -203,7 +240,8 @@ pub async fn run_channel_loop(ctx: Arc<DispatcherContext>, channel: String) {
 
     loop {
         let leased_until = Utc::now() + LEASE_DURATION;
-        let claimed = repo::claim(&ctx.pool, &channel, CLAIM_BATCH_SIZE, leased_until)
+        let exclusion = ctx.claim_exclusion(&channel).await;
+        let claimed = repo::claim(&ctx.pool, &channel, CLAIM_BATCH_SIZE, leased_until, &exclusion)
             .await
             .expect("dispatcher: claim query failed");
 

@@ -5,24 +5,41 @@ use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 use uuid::Uuid;
 
+use crate::kill_switch::cache::ChannelExclusion;
+use crate::kill_switch::model::{KillSwitch, scope};
+
 use super::model::{ClaimedOutbox, RequestCiphertexts};
 
 /// Leases up to `limit` ready rows for `channel` (DESIGN.md §4.2's own claim
 /// query), bumping `attempts` as part of the same `UPDATE` (T-013 decision
 /// 10). `leased_until` is computed by the caller (`Utc::now() +
 /// LEASE_DURATION`) rather than bound as a Postgres `interval`.
+///
+/// `exclusion` (DESIGN.md §5.2, T-016 decision 3) is checked *before*
+/// claiming, not after: a `global`/`channel`-scope match skips the query
+/// entirely, and `producer`/`campaign`-scope matches are excluded from the
+/// candidate set via `<> ALL`. This is what makes "held" a real state rather
+/// than a busy-wait — a matching row is never leased, gate-blocked, and
+/// re-leased on the next tick (DESIGN.md decision 28).
 pub async fn claim(
     pool: &PgPool,
     channel: &str,
     limit: i64,
     leased_until: DateTime<Utc>,
+    exclusion: &ChannelExclusion,
 ) -> Result<Vec<ClaimedOutbox>, sqlx::Error> {
+    if exclusion.blocked_entirely {
+        return Ok(Vec::new());
+    }
+
     sqlx::query_as::<_, ClaimedOutbox>(
         r#"
         UPDATE outbox SET leased_until = $3, attempts = attempts + 1
         WHERE comms_request_id IN (
             SELECT comms_request_id FROM outbox
             WHERE channel = $1 AND next_attempt_at <= now() AND leased_until IS NULL
+              AND producer_id <> ALL($4)
+              AND (campaign_id IS NULL OR campaign_id <> ALL($5))
             ORDER BY priority, next_attempt_at
             LIMIT $2
             FOR UPDATE SKIP LOCKED
@@ -35,8 +52,97 @@ pub async fn claim(
     .bind(channel)
     .bind(limit)
     .bind(leased_until)
+    .bind(&exclusion.blocked_producer_ids)
+    .bind(&exclusion.blocked_campaign_ids)
     .fetch_all(pool)
     .await
+}
+
+/// The inverse of `claim`'s exclusion: leases up to `limit` rows matching
+/// `kill_switch`'s own scope instead of excluding it — the release-drain
+/// ramp's (T-016 decision 4) candidate query. `channel`, when `Some`, also
+/// pins the result to one channel (the release-drain task needs this,
+/// since it must hand each row to that channel's own `Sender`); `None`
+/// (the discard-at-engage task, which never sends) matches every channel a
+/// channel-agnostic scope (`global`/`producer`/`campaign`) covers.
+pub async fn claim_for_scope(
+    pool: &PgPool,
+    channel: Option<&str>,
+    kill_switch: &KillSwitch,
+    limit: i64,
+    leased_until: DateTime<Utc>,
+) -> Result<Vec<ClaimedOutbox>, sqlx::Error> {
+    let mut qb = sqlx::QueryBuilder::new("UPDATE outbox SET leased_until = ");
+    qb.push_bind(leased_until);
+    qb.push(
+        ", attempts = attempts + 1 WHERE comms_request_id IN (\
+          SELECT comms_request_id FROM outbox \
+          WHERE next_attempt_at <= now() AND leased_until IS NULL",
+    );
+
+    if let Some(channel) = channel {
+        qb.push(" AND channel = ");
+        qb.push_bind(channel.to_string());
+    }
+
+    match kill_switch.scope.as_str() {
+        scope::GLOBAL => {}
+        scope::CHANNEL => {
+            let Some(switch_channel) = kill_switch.scope_key.as_deref() else {
+                return Ok(Vec::new());
+            };
+            match channel {
+                Some(pinned) if pinned != switch_channel => return Ok(Vec::new()),
+                Some(_) => {}
+                None => {
+                    qb.push(" AND channel = ");
+                    qb.push_bind(switch_channel.to_string());
+                }
+            }
+        }
+        scope::PRODUCER => {
+            let Some(producer_id) = kill_switch.producer_id() else {
+                return Ok(Vec::new());
+            };
+            qb.push(" AND producer_id = ");
+            qb.push_bind(producer_id);
+        }
+        scope::PRODUCER_CHANNEL => {
+            let Some((producer_id, switch_channel)) = kill_switch.producer_channel_parts()
+            else {
+                return Ok(Vec::new());
+            };
+            match channel {
+                Some(pinned) if pinned != switch_channel => return Ok(Vec::new()),
+                Some(_) => {}
+                None => {
+                    qb.push(" AND channel = ");
+                    qb.push_bind(switch_channel.to_string());
+                }
+            }
+            qb.push(" AND producer_id = ");
+            qb.push_bind(producer_id);
+        }
+        scope::CAMPAIGN => {
+            let Some(campaign_id) = kill_switch.scope_key.as_deref() else {
+                return Ok(Vec::new());
+            };
+            qb.push(" AND campaign_id = ");
+            qb.push_bind(campaign_id.to_string());
+        }
+        _ => return Ok(Vec::new()),
+    }
+
+    qb.push(" ORDER BY priority, next_attempt_at LIMIT ");
+    qb.push_bind(limit);
+    qb.push(
+        " FOR UPDATE SKIP LOCKED) \
+          RETURNING comms_request_id, created_at, channel, class, priority, customer_id, \
+                    address_id, producer_id, campaign_id, next_attempt_at, expires_at, \
+                    cancelled_at, attempts, leased_until",
+    );
+
+    qb.build_query_as::<ClaimedOutbox>().fetch_all(pool).await
 }
 
 /// Looks up the encrypted destination/payload for one ledger row.
