@@ -20,11 +20,10 @@ Last updated: 2026-09-02
 
 ## IN REVIEW
 
-### messgr (1/1)
+### messgr (0/1)
 
 | id | title | depends-on |
 |---|---|---|
-| T-016 | Kill switches | [] |
 
 ## REWORK
 
@@ -77,6 +76,7 @@ Last updated: 2026-09-02
 | T-013 | Minimal dispatcher: per-channel claim loop, LISTEN/NOTIFY wakeup, comms_event write | yes — merged to main (PR #15, e6a5b8e) |
 | T-014 | Partition lifecycle: create-ahead, move to slow tablespace, detach + drop | yes — merged to main (PR #16, 10f6a88) |
 | T-015 | Customer projection + resolution at ingest | yes — MERGED: PR #18 (`feat/T-015-customer-projection-resolution`, 83f73aa) |
+| T-016 | Kill switches | no — publish-gated |
 | T-017 | CI: create messgr_cold tablespace before partition-lifecycle tests | yes — MERGED: PR #17 (`feat/T-017-ci-messgr-cold-tablespace`, b5c66bd) |
 
 ## DROPPED

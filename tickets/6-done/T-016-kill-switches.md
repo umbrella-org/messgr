@@ -422,6 +422,53 @@ reason recorded in round 1 (no harness in this suite injects a `sqlx::Error`); i
 path), and `just docs-check` (clean). Scope is the F2 fix only, per rules §1 — nothing else was
 touched.
 
+### Scoped re-review — round 2
+
+Reviewer independence (step 0), round 2: **delegated** — this session authored the F2 fix
+(commit `a5f8ce6`) itself, so the audits were again delegated to a fresh, independent sub-agent,
+briefed adversarially with F2's text, both fix commits, and instructions to trace control flow
+through the bounded retry and its callers rather than take the fix record's claims at face value.
+Classification, severity, disposition, and the move stayed with this reviewer; every delegated
+finding was re-verified by hand before recording.
+
+**F2 verified fixed.** Traced control flow: `write_expired`/`write_discarded` attempt exactly 5
+times (no off-by-one — the final attempt skips the sleep and logs the distinct "giving up"
+message instead), then return normally either way, so the caller's `for row in batch` loop always
+proceeds to the next row. `drain_released_scope`'s outer `loop` re-claims on its next iteration;
+`run_release_drain`'s `handle.await`s therefore return once each channel's batch genuinely empties,
+and `draining.remove(...)` runs — no more permanently-stuck `draining` entry. No double-write risk
+(`write_terminal`'s `INSERT ... ON CONFLICT DO NOTHING` + idempotent `UPDATE`/`DELETE` tolerate a
+retried attempt regardless of count).
+
+**Correction to this ticket's own prior record.** F1's and F2's evidence text, and both rework fix
+records above, describe a given-up-on row as staying leased "until its lease naturally expires" —
+that is imprecise. A direct check (`grep -rn "leased_until" src/ migrations/`) confirms `claim`
+and `claim_for_scope` (`src/dispatcher/repo.rs`) and the outbox's own partial index
+(`migrations/tenant/0004_ledger_outbox_schema.sql:53`) all filter strictly on
+`leased_until IS NULL` — nothing anywhere in this codebase compares `leased_until` against
+`now()`. There is no time-based lease reclaim at all yet: a row F2 gives up on stays leased
+**permanently**, not temporarily, until a human clears it by hand. This is not a T-016 defect,
+though: it is a pre-existing, already-filed, independently-critical gap —
+`tickets/1-to-do/T-021-outbox-lease-lifecycle-and-dispatcher-retry-with-backoff.md` — which exists
+precisely to add retryable-failure lease clearing and backoff, and names `worker::process_one`'s
+identical untracked-failure path as the same gap. T-016's `write_expired`/`write_discarded`
+give-up behaviour is consistent with that same existing (flawed) idiom, not a new instance of it;
+fixing the underlying lease lifecycle is T-021's scope, not this ticket's. Per AGENTS.md's own
+instruction for a wrong claim found on the record: corrected here, plainly, rather than silently
+edited into the earlier rounds' text above (append-only history stands as written).
+
+No new findings this round. F3 remains `noted`, not materially widened by round 2 (one more
+branch inside the same already-untested error path, not a new untested surface).
+
+Disposition summary (round 2 re-review): 0 blocking, 0 non-blocking (new). F1 and F2 both
+confirmed fixed.
+
+`just build`/`just lint`/`just test`/`just docs-check` all re-ran green on the branch (delegated
+audit; independently unremarkable — no output worth reproducing here beyond "all green").
+
+cost: estimated L, actual L (two bounded rework rounds on the same one file; still L, not XL — the
+fixes stayed small and scoped)
+
 ## History
 
 - 2026-09-01 — created (TO DO). source: chat: build-order step 4 (§14), filed after T-014 (step 2 work) landed.
@@ -447,3 +494,4 @@ touched.
 - 2026-09-02 — REWORK → IN REVIEW: findings fixed
 - 2026-09-02 — IN REVIEW → REWORK: F2 blocking: retry-forever in drain/discard has no bound, livelocking the batch/scope on a permanently-failing row
 - 2026-09-02 — REWORK → IN REVIEW: findings fixed
+- 2026-09-02 — IN REVIEW → DONE: F1 and F2 fixed and verified; no new findings
