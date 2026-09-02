@@ -49,14 +49,15 @@ hand-written planning prose lives in `tickets/NOTES.md` (created by `pickle inst
 
 `pickle install` (run once in the overarching project) creates `tickets/` with the seven
 ordered status directories (`1-to-do/` … `7-dropped/`), renders a fresh `tickets/BOARD.md`,
-scaffolds `tickets/NOTES.md`, writes the `tickets/README.md` pointer, installs this skill for the
-detected agents (`.agents/skills/brine/`, symlinked into `.claude/skills/` for Claude
-Code), injects the `AGENTS.md`/`CLAUDE.md` marker block, and writes `pickle.toml` — recording the
-**layout** there (`umbrella` by default, or `in-tree` with `--in-tree`; rules §0). A plain
-`install` registers **no** child, and `pickle project add <name> <path>` registers the first one
-and every one after it; `--path <dir>` registers that first child immediately, and `--in-tree`
-registers the sole child at `.`. Install scope is **per-project** — nothing is written to
-`~/`.
+scaffolds `tickets/NOTES.md`, writes the `tickets/README.md` pointer, installs this skill into
+`.agents/skills/brine/`, injects the `AGENTS.md` marker block, and writes `pickle.toml` —
+recording the **layout** there (`umbrella` by default, or `in-tree` with `--in-tree`; rules §0).
+Which coding agents it wires up is exactly the set `--agent` names (default `claude`) — **there
+is no autodetection**; naming `claude` is what adds the `.claude/skills/brine` symlink and
+`CLAUDE.md`. A plain `install` registers **no** child, and `pickle project add <name> <path>`
+registers the first one and every one after it; `--path <dir>` registers that first child
+immediately, and `--in-tree` registers the sole child at `.`. Install scope is **per-project** —
+nothing is written to `~/`.
 
 ## Project configuration (in `pickle.toml` + the `AGENTS.md` marker block)
 
@@ -107,7 +108,8 @@ WIP limits, and an optional per-child review addendum. Defaults:
   prefix unset share the one legacy global `T` counter; numbers are unique only within a prefix,
   so an id is always qualified across children. Filename `<PREFIX>-NNN-<slug>.md`.
 - **Priority.** `impact` / `complexity` / `cost` frontmatter; the board orders each child's
-  TO DO/READY group deterministically from it (impact descending, ties by id).
+  TO DO/READY group deterministically from it (impact descending, ties by cost ascending, then
+  by id).
 - **Dependencies (may cross children).** `depends-on:` frontmatter. A ticket may not enter
   `3-in-development/` while any dependency is not in `6-done/` **and its feature branch merged
   to the base of the dependency's target child-project's repo** (done ≠ merged; the human
@@ -160,8 +162,8 @@ When asked to turn an idea, finding, or request into a ticket:
    ticket is born from another one, add `--spawned-by "T-NNN[,T-MMM]"`. The title must be a
    single line and the ids must be `T-NNN`, or the command rejects the invocation and writes
    nothing — put multi-line context in the Description, not the title. If the command rejects,
-   fix the offending argument (collapse the title to a single line; correct any malformed id)
-   and retry before proceeding. Then fill in the `## Outcome` (1–3 sentences, in
+   fix the offending argument (collapse the title to a single line; shorten an over-long one;
+   correct any malformed id) and retry before proceeding. Then fill in the `## Outcome` (1–3 sentences, in
    user-observable terms: what changes when this ships) and the Description prose.
 4. **Grade it** (impact / complexity / cost) **against the existing backlog** — re-grade
    neighbours if the comparison shifts them.
@@ -251,9 +253,17 @@ When asked to rework ticket T-NNN (a review found blocking findings):
 2. Read the ticket's `## Review` section: the **blocking findings are the entire scope**.
    Implement nothing else — any new work needs a new ticket.
 3. On the **same** `feat/T-NNN-<slug>` branch (in the target child's repo), fix only the listed
-   findings (local commits per the commit policy — they make the re-review diffable).
+   findings (local commits per the commit policy — they make the re-review diffable). Note the
+   branch tip **before your first fix commit**: that is what the re-review diffs against.
 4. Re-run the acceptance test and the child's build/validate commands until green.
-5. Record what was fixed against each finding in `## Review`.
+5. Record what was fixed against each finding in `## Review`, and **re-read the replacement text
+   you just wrote** before handing back — nothing else audits it before it ships, and you are its
+   cheapest reader. Head the record `### Rework fix record — round N (commit <sha>)` for a single
+   commit, or `(commits <the tip you noted in step 3>..<tip after>)` for several — the form
+   `git diff <before>..<after>` takes as written — or `no commits this round — <why>` for none.
+   Record the SHAs as they stand when you hand back, and do not tidy the branch here: the tidy
+   belongs to publishing, and it rewrites them (§1's fallback covers a record whose SHAs no longer
+   resolve). The scoped re-review reads that diff (`resources/review-protocol.md` §1).
 6. `pickle ticket move T-NNN in-review --reason "findings fixed"` and hand back for a **scoped
    re-review**.
 
@@ -261,11 +271,15 @@ When asked to rework ticket T-NNN (a review found blocking findings):
 
 "Validate ticket T-NNN" and "review ticket T-NNN" are the same procedure. Follow
 `resources/review-protocol.md` (plus the project's layered addenda — overarching + the ticket's
-child). In short:
+child). Before auditing, settle reviewer independence (the protocol's step 0): delegate the
+audits to an independent reviewer if the reviewing agent authored the branch in this same
+session, and record which happened either way — independent, delegated, or a conscious skip when
+none is available. In short:
 
 1. The ticket must be in `4-in-review/`. Audit implementation, quality, consistency, and docs
    (running the child's configured commands); classify each finding **blocking** (→
-   `5-rework/`, scoped re-review after the fix) vs **non-blocking** (→ one of the four
+   `5-rework/`, scoped re-review of the findings *and the diff that fixed them*) vs
+   **non-blocking** (→ one of the four
    dispositions in the rules §5, whose default is to note and close; the original proceeds to
    `6-done/`), and give every finding — blocking ones included — a **class** from the closed
    vocabulary in `resources/review-protocol.md` §5. A follow-up ticket is the exception, is
@@ -321,7 +335,8 @@ Fix every error it reports — an error is a broken invariant, not a judgement c
 
 ## Notes
 
-`pickle` installs this skill **per project** (into `.agents/skills/brine/`, symlinked for
-Claude Code); it does not install globally, and each project pins its own payload version.
+`pickle` installs this skill **per project** (into `.agents/skills/brine/`, with the
+`.claude/skills/` symlink when `--agent` includes `claude`); it does not install globally, and
+each project pins its own payload version.
 `pickle upgrade` refreshes the installed skill + marker block from the binary without touching
 tickets.

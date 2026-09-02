@@ -151,7 +151,11 @@ findings table, using the canonical column skeleton and `class` vocabulary defin
 Legal disposition values, and which one is the default, are defined in `tickets/README.md §5`.
 Then add a one-line disposition summary, a `cost: estimated …, actual …` line beneath it, the
 verdict, notes from any scoped re-review, and the id of any ticket a finding was spawned into or
-absorbed by.>
+absorbed by. A rework round adds its own sub-section here —
+`### Rework fix record — round N (commit 6f0f135)` for one commit,
+`(commits 91c4de2..b33b6ad)` for several (the tip *before* the fix, then the tip after), or
+`no commits this round — <why>` — naming what was fixed against each finding: that commit or
+range is what the following scoped re-review reads (`review-protocol.md` §1).>
 
 ## History
 

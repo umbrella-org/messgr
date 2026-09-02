@@ -11,9 +11,10 @@ earns a **disposition** (rules §5), and most are resolved without a new ticket.
 - The flow engine is the **brine skill** at `.agents/skills/brine/`. It holds
   the rules (`resources/tickets-README.md`), the ticket template
   (`resources/TEMPLATE.md`), and the review protocol
-  (`resources/review-protocol.md`). Claude Code sees it via `.claude/skills/brine`.
-  The directory is pickle-owned — `pickle upgrade` replaces it wholesale, so keep
-  hand-written notes outside it.
+  (`resources/review-protocol.md`). Agents that read `.agents/skills/` find it there
+  directly; `pickle install --agent claude` adds a `.claude/skills/brine` view for
+  Claude Code. The directory is pickle-owned — `pickle install` and `pickle upgrade`
+  both replace it wholesale, so keep hand-written notes outside it.
 - Triggers: "make it a ticket", "refine ticket T-NNN", "implement ticket T-NNN", "rework ticket
   T-NNN", "validate ticket T-NNN" (or "review ticket T-NNN"), "audit the board".
 

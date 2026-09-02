@@ -263,13 +263,16 @@ All other transitions are forward-only, as diagrammed.
   written in full (`RICK-137`, never "137"). `pickle board audit` checks a ticket's id prefix
   matches its `project:`'s configured prefix. The id is stable for the ticket's life; only the
   slug in the filename may be tidied. Because a child's prefix is part of its ids, **re-homing a
-  ticket to a differently-prefixed child is a renumber, not a free relabel** (`pickle ticket
-  renumber`). **Tickets are never deleted:** `6-done/` and `7-dropped/` are permanent archives —
+  ticket to a differently-prefixed child is a renumber, not a free relabel** — pickle ships no
+  command for it, so treat it as a one-time manual migration: rename the file to the new
+  prefix, edit the id in its frontmatter and heading, and fix any cross-references that named
+  the old id. **Tickets are never deleted:** `6-done/` and `7-dropped/` are permanent archives —
   pruning them would both lose the record and break the `max()+1` rule.
 - **Filename.** `<PREFIX>-NNN-<slug>.md`. The slug is derived from the title, so a **title is a single
-  line of text**: `pickle ticket new` rejects an empty or multi-line title outright rather than
-  rewriting it, because the title becomes the filename, the `# T-NNN — …` heading and a `BOARD.md`
-  cell at once.
+  line of text, and reasonably short**. `pickle ticket new` rejects an empty or multi-line title
+  outright rather than rewriting it, and rejects one past ~120 runes, because the title becomes the
+  filename, the `# T-NNN — …` heading, and a `BOARD.md` cell at once. Put long context in the
+  Description, where there is no limit.
 - **Target child-project.** `project:` frontmatter — a registered child name (§0). Required on
   every ticket; validated by `pickle board audit`.
 - **Priority.** `impact` / `complexity` / `cost` frontmatter:
@@ -282,7 +285,8 @@ All other transitions are forward-only, as diagrammed.
   While a ticket is unrefined, a grade may be an **adjacent-pair range** (`low-medium`,
   `medium-high`, `S-M`, `M-L`, `L-XL`) to encode honest uncertainty; refinement should
   collapse it to a single value. Priority order is **not** encoded in filenames — the board
-  (§6) renders TO DO/READY by descending impact within each child's group, ties by id.
+  (§6) renders TO DO/READY by descending impact within each child's group, ties by cost
+  ascending, then by id.
   **Assess every new ticket against the existing backlog** before filing it, and re-grade the
   board. When a grade changes on re-assessment, write the one-line reason into the ticket's own
   `## Outcome` or Description — not only into a `NOTES.md` triage table, which a later reader
@@ -393,9 +397,16 @@ non-blocking — a **disposition**.
 
 - **Blocking** — breaks the golden path, ships wrong behaviour, or contradicts a locked
   decision. → ticket moves to **`5-rework/`**. Fix *only the findings* on the same branch, then
-  move back to `4-in-review/` for a **scoped re-review** (verify the findings are resolved — do
-  not re-audit the whole feature from scratch). A blocking finding is never dispositioned: it is
-  fixed, and the ticket does not proceed until it is.
+  move back to `4-in-review/` for a **scoped re-review** (verify the findings are resolved **and
+  read the diff that closed them**, since a fix's own replacement text is the one part of the
+  branch nothing has audited yet — still not a re-audit of the whole feature from scratch; the
+  mechanics are
+  in `resources/review-protocol.md` §1). A blocking finding is never dispositioned: it is
+  fixed, and the ticket does not proceed until it is. Such a finding, first identified after the
+  ticket has already moved to `6-done/`, cannot take that route: it is filed as its own ticket
+  instead (not the `new ticket` disposition), `spawned-by` the concluded one, with a dated
+  `## History` line on the concluded ticket recording the filed id, and batched by theme when one
+  pass turns up more than one (`resources/review-protocol.md` §6c).
 - **Non-blocking** — quality/consistency/polish that doesn't block shipping. The reviewed ticket
   proceeds to `6-done/`, and each finding takes exactly one disposition below.
 
@@ -446,9 +457,10 @@ promotion test, and the same default.
 single source of truth, and the board is rendered from them wholesale by `pickle ticket new`,
 `pickle ticket move` and `pickle board sync`. It shows every ticket grouped by status; within
 each status section tickets are **sub-grouped by child-project** under a `### <child>` heading,
-with TO DO/READY ordered deterministically (impact descending, ties by id) inside each child's
-group. WIP counts, the DONE `merged` cell and the DROPPED/REWORK reason cells are all derived —
-from the config, the merge History line, and the last transition's `--reason` respectively.
+with TO DO/READY ordered deterministically (impact descending, ties by cost ascending, then by
+id) inside each child's group. WIP counts, the DONE `merged` cell and the DROPPED/REWORK reason
+cells are all derived — from the config, the merge History line, and the last transition's
+`--reason` respectively.
 
 > **Board rule: never edit `BOARD.md` by hand.** Edit the tickets — the board follows. If the
 > board looks wrong or stale, run `pickle board sync`; `pickle board audit` checks it in two
@@ -536,6 +548,9 @@ longer worth building, is routed back to `2-ready/`/`1-to-do/` to be re-refined 
 assumption no longer holds and re-refining would not save it, **dropped**: `7-dropped/` is
 already a legal target from `2-ready/` (with a reason), and DROP is as legitimate a verdict here
 as proceed or route-back.
+The same bias governs the review that follows, on a narrower trigger — there the handoff is
+required only when the reviewing agent wrote the branch it is auditing (this skill's
+`resources/review-protocol.md` step 0).
 The gate's own findings take **the four dispositions of §5**, with the same default: an
 amendment to the plan under pickup is `fixed inline` (edit the plan, record it in History) or
 `folded`; genuinely adjacent work is `noted` unless it passes the promotion test. A gate that
