@@ -287,3 +287,4 @@ to `dispatcher.adoc` and `ingest.adoc` (Task 8).
 - 2026-09-02 — scope widened (TO DO). source: audit: design/implementation audit folded in five findings touching this ticket's own schema/mechanism: kill_switch's NULL-key uniqueness bug, the held-state spin risk, ingest-side kill-switch propagation (LISTEN doesn't work behind PgBouncer), auth_enabled's fail-open correction, and T-011/F3's unchecked tenant.status.
 - 2026-09-02 — re-graded medium/M → high/L during refinement: dispatcher, ingest, and two migrations all touched, plus a new release-drain task. auth_enabled scoped to schema+audit only (otp-api, its only reader, is step 17); DESIGN.md Still Open #9 resolved for this step (decision 29).
 - 2026-09-02 — TO DO → READY: plan complete
+- 2026-09-02 — READY → IN DEVELOPMENT: picked up
