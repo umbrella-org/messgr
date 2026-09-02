@@ -1,5 +1,7 @@
 # messgr — Design
 
+**Version 1** · 2026-09-02 · `be36441`
+
 Centralized communications orchestration and audit ledger for customer messaging across SMS, email, and WhatsApp.
 
 **Constraints:** Rust · 100k–5M messages/day per tenant · 7-year retention · customer service + compliance users.

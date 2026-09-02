@@ -59,6 +59,14 @@ The pattern in the first two: **backup and recovery boundaries are coarser than 
 
 **Build order is numbered and load-bearing.** Steps carry sequencing constraints with stated reasons (encryption before first write, projection before gates, kill switches before volume). Renumbering means re-checking every reference to a step number.
 
+## Review addendum
+
+[`review-addendum.md`](review-addendum.md) layers project-specific review rules on top of the
+brine review protocol — wired as `review_addendum` on the `messgr` project in `pickle.toml`.
+There is no overarching addendum: `messgr` is the only registered child, so a second file above
+it would run alongside this one on every review with nothing left to say. Read it before
+validating any ticket.
+
 ## Response style
 
 A caveman-mode plugin (`lite`) is active in the user's environment: drop filler, hedging, and pleasantries; keep all technical substance; full sentences retained at this level. **Prose written into `DESIGN.md` and any other artifact is normal professional writing** — the compression applies to conversational replies only.
