@@ -945,6 +945,8 @@ DELETE FROM customer_external_id WHERE customer_id = $1;
 
 The `comms_event` statement was absent from an earlier version of this design, which meant physical redaction left the recipient address readable in provider payloads. Any new table holding third-party data must be added here at the same time it is created — the erasure surface is easy to grow without noticing.
 
+**Named exemption: `suppression` is deliberately not touched by erasure, and this needs to be a stated decision rather than a gap someone finds later.** `suppression` holds `destination_hmac` with no `customer_id` column, so it cannot join into `WHERE customer_id = $1` at all — and that absence is structural, not an oversight: the table's entire purpose is to block future sends to a bad *destination*, regardless of which customer currently holds it (§5's suppression gate). A customer's erasure request must not silently un-suppress a hard-bounced or complained-about number for whoever is issued it next. So: a suppression entry outlives the customer that triggered it, by design, until its own review date (§5) retires it independently. The mechanical CI check in §14 that walks the schema for customer-linkable columns must carry this table as a named, reasoned exemption — not a silent absence from the erasure statements above, which is indistinguishable from the `comms_event` miss this section already recounts.
+
 `customer_id` itself is retained as an opaque UUID — it carries no personal information once the projection is redacted, and keeping it preserves the timeline's structural integrity and the ledger's foreign keys.
 
 Deliberately a **redaction, not a row DELETE**. The row skeleton survives so that message counts, campaign reach figures, and delivery statistics remain accurate and reconcilable. Deleting rows outright would silently change historical aggregates and destroy the referential target of `comms_event`. Full row purge is available as a third, explicitly-authorized mode, but it is the nuclear option and it does corrupt historical counts — do not offer it as a routine choice.
@@ -1307,7 +1309,7 @@ This is still far cleaner than extracting one tenant's rows from shared partitio
 - Work performed in tenant A's context never reads or writes a row in tenant B's database.
 - The `current_database()` assertion fires when a pool is deliberately mis-wired to the wrong tenant, at pool creation and at checkout (§2.1). This is now the whole isolation mechanism, so it needs a test that actually breaks it.
 - Dispatcher leader election holds under a forced failover, over a direct connection, with exactly one active dispatcher observed throughout (§2.3).
-- Every table containing customer data appears in the erasure statements of §7.2, checked against the live schema rather than a hand-maintained list. The `comms_event` omission is precisely the failure this catches.
+- Every table containing customer data either appears in the erasure statements of §7.2 or is on a **named, reasoned exemption list checked in alongside the erasure code** (currently: `suppression`, §7.2). Checked against the live schema, not a hand-maintained list of tables to remember — a bare allowlist with no reasons is indistinguishable from the `comms_event` omission this check exists to catch; the reason is what a reviewer actually checks against.
 
 The leader-election test matters because the failure it guards against — two active dispatchers double-sending — is invisible in a single-node test and only appears under pooling.
 
