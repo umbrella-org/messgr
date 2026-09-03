@@ -13,10 +13,11 @@ Last updated: 2026-09-03
 
 ## IN DEVELOPMENT
 
-### messgr (0/1)
+### messgr (1/1)
 
 | id | title | depends-on |
 |---|---|---|
+| T-019 | Size one tenant's ledger and derive cluster limits | [] |
 
 ## IN REVIEW
 
@@ -38,7 +39,6 @@ Last updated: 2026-09-03
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
-| T-019 | Size one tenant's ledger and derive cluster limits | high | low | S | [] |  |
 
 ## TO DO (impact order, per child)
 

@@ -189,3 +189,4 @@ Still-open, Decisions taken). No separate doc, no user-facing surface outside DE
 - 2026-09-02 — created (TO DO). source: audit: design/implementation audit of DESIGN.md against the shipped code and ticket reviews; closes Still-open #15's stated prerequisite.
 - 2026-09-03 — TO DO → READY: implementation plan complete, all seven gate items present.
 - 2026-09-03 — TO DO → READY: plan complete
+- 2026-09-03 — READY → IN DEVELOPMENT: picked up
