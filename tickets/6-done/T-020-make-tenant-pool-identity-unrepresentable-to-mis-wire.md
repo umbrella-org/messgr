@@ -94,7 +94,7 @@ Same shape at each: bind the caller's already-resolved `Tenant` and `control_poo
 - `src/partition_lifecycle/lifecycle.rs`
 - `src/provider_config/configure.rs` (2 call sites)
 
-**Discovered during pickup, folded into this task:** in every file above except `src/bin/dispatcher.rs`, the enclosing function's own `profile: Profile` parameter was used *only* to forward to `connect_tenant_pool` — with that argument gone, `profile` is unused and `just lint` (`cargo clippy -- -D warnings`) fails on it. Remove `profile: Profile` from these signatures too: `register_producer`/`disable_producer`/`list_producers` (register.rs), `approve_template`/`show_template`/`list_template_versions`/`render_preview` (approve.rs), `set_tenant_config`/`show_tenant_config` (tenant_config/configure.rs), `set_provider_config`/`list_provider_config` (provider_config/configure.rs), `tenant_message_stats` (stats.rs), `run_for_tenant` (partition_lifecycle/lifecycle.rs), `pre_provision_for_tenant` (customer_dek/lifecycle.rs), `TenantRegistry::get_or_open` (registry.rs), `provision_tenant` (provision.rs). This cascades one level further, to their own callers — **`src/bin/control.rs`**, not in the original file list above, drops the `profile`/`Profile::from_env()` argument at each of these call sites. `src/bin/dispatcher.rs` keeps its `profile` local (used separately for `VaultKeyStore::connect_as_tenant`) and only drops it from the one `connect_tenant_pool` call.
+**Discovered during pickup, folded into this task:** in every file above except `src/bin/dispatcher.rs`, the enclosing function's own `profile: Profile` parameter was used *only* to forward to `connect_tenant_pool` — with that argument gone, `profile` is unused and `just lint` (`cargo clippy -- -D warnings`) fails on it. Remove `profile: Profile` from these signatures too: `register_producer`/`disable_producer`/`list_producers` (register.rs), `approve_template`/`show_template`/`list_template_versions`/`render_preview` (approve.rs), `set_tenant_config`/`show_tenant_config` (tenant_config/configure.rs), `set_provider_config`/`list_provider_config` (provider_config/configure.rs), `tenant_message_stats` (stats.rs), `run_for_tenant` (partition_lifecycle/lifecycle.rs), `pre_provision_for_tenant` (customer_dek/lifecycle.rs), `TenantRegistry::get_or_open` (registry.rs), `provision_tenant` (provision.rs). This cascades one level further, to their own callers — **`src/bin/control.rs`** and **`src/ingest/identity.rs`** (`ProducerContext::from_request_parts`, which calls `TenantRegistry::get_or_open`), not in the original file list above, drop the `profile`/`Profile::from_env()`/`state.profile` argument at each of these call sites. `src/bin/dispatcher.rs` keeps its `profile` local (used separately for `VaultKeyStore::connect_as_tenant`) and only drops it from the one `connect_tenant_pool` call.
 
 #### Task 4 — Update every test call site
 
@@ -131,7 +131,50 @@ No user-facing surface. DESIGN.md §2.1 already prescribes this exact fix in pro
 
 ## Review
 
-<!-- empty until IN REVIEW -->
+- [x] Reviewer independence settled (step 0): **fresh session, no memory of writing the branch** — the next-best handoff to a spawned independent reviewer (step 0's own fallback), since this host has no separate sub-agent reviewer wired up. Audits below were run directly by this session.
+- [x] Implementation audit — acceptance test re-run, tasks & criteria verified (steps 1, 2)
+- [x] Quality audit (step 3)
+- [x] Consistency audit (step 4)
+- [x] Documentation audit — `just docs-check` clean; no user-facing surface changed (step 4a)
+- [x] Docs-readability pass — conscious skip: no `.adoc`/`.md` prose changed by this ticket (step 4b)
+- [x] Findings recorded with severity, class, disposition; disposition summary + cost line (step 5)
+- [x] Ticket moved to `tickets/6-done/`; `## History` appended (step 6)
+- [x] Other references updated; governing documents reconciled (step 7)
+- [x] Remaining-tickets impact sweep done — no ticket in `1-to-do/`/`2-ready/` references T-020 (step 8)
+- [x] Summary + commit message & MR attributes presented for approval; remote-base check pending push; bookkeeping committed on `main` (step 9)
+
+### Implementation audit
+
+- `just build`, `just test` (30 lib + all integration suites), `just lint` (`cargo clippy -- -D warnings`, and independently re-run with `--all-targets`), `just docs-check` — all green on `feat/T-020-make-tenant-pool-identity-unrepresentable-to-mis-wire`.
+- `connect_tenant_pool_independently_verifies_the_tenant_it_was_told_to_open` (`tests/tenancy.rs`) present and passing — met.
+- **Mutation-sensitivity manually verified** (acceptance test's own reviewer-only step): temporarily changed `connect_tenant_pool`'s `db::connect_with_expected_database` call to pass `database_name` instead of the freshly-looked-up `tenant.database_name` → the new test failed exactly as predicted (`connecting under tenant A's id but tenant B's real database_name must panic ... not succeed`); reverted, re-ran green. Confirms the addendum's step-3 "an assertion must be able to fail" bar, and confirms decision 1/2 are load-bearing, not decorative.
+- All six confirmed design decisions (1–6) honoured: `connect_tenant_pool` signature matches decision 1 exactly; `TenantPool{tenant_id, pool}` returned per decision 2; `before_acquire` and `Profile::checks_pool_identity` deleted per decision 3 (verified: zero remaining references outside historical `6-done/` ticket text); no new `TenantId` newtype per decision 4; `.pool` unwrapped at the call site only, inner helpers' signatures unchanged, per decision 5; unknown `tenant_id` maps to `sqlx::Error::Configuration`, no new `From` impl, per decision 6.
+- All 17 production call sites (verified by grep count) and all listed test files updated; compiler + `just test` are the authoritative cross-check here — a wrong `tenant_id`/`database_name` pairing at any site would trip the very assertion this ticket fixes, so a passing suite is strong evidence every site is wired correctly, not just that it compiles.
+- Addendum step 2 items: no new table/column/index/lock/secret-handling in this diff — items 2, 3, 4, 5, 6 don't apply. Item 1 ("verbatim from the design is not a defence"): independently verified by the mutation test above, not by reading DESIGN.md's prose as given. Item 7 (advisory grep against hard invariants 1, 3): diff touches only tenant-pool construction and its callers' plumbing — no OTP/queue or gate-timing code path touched.
+
+### Quality / consistency audit
+
+- Idiomatic; matches the codebase's existing error-mapping and struct-field conventions (decision 6, decision 2).
+- `tenant_id` naming: `TenantPool.tenant_id` is `Uuid`, matching `Tenant.id`/`tenant_id` everywhere else (DESIGN.md §2.1) — no new naming question introduced (addendum step 4).
+- **F1 found and fixed inline**: `src/db.rs`'s `assert_current_database_panics_on_the_mismatch` test carried an `expect_err` message referencing `before_acquire` ("...the same way before_acquire would on a real checkout") — the exact mechanism Task 1 deleted. Missed by the doc-comment rename (which was done correctly) because it's a separate string one level down. Fixed by dropping the clause; re-ran the test and the full suite green after the edit (commit `9bafba9` on the feature branch).
+- **F2 found and fixed inline**: Task 3's "discovered during pickup" cascade note named `src/bin/control.rs` as an extra file needing the `profile` argument dropped from its callers, but omitted `src/ingest/identity.rs` (`ProducerContext::from_request_parts` → `TenantRegistry::get_or_open`), which was in fact touched (correctly) by the same commit. Code was already right; only the plan's own bookkeeping text was incomplete. Fixed by amending the ticket's Task 3 text in this review (see the Implementation Plan above).
+- Governing documents: DESIGN.md §2.1, §14, and decisions-table row 14 already state exactly what shipped (confirmed by re-reading each against the diff) — no edit needed, consistent with the ticket's own claim that no DESIGN.md change was required.
+- No stale `§N` cross-reference introduced (`just docs-check` passed; repo-wide grep for `before_acquire`/`checks_pool_identity` outside historical `6-done/` ticket records returns only F1, now fixed).
+
+### Findings
+
+| id | severity | class | disposition | description | evidence | suggestion |
+|---|---|---|---|---|---|---|
+| F1 | non-blocking | stale-xref | fixed inline | Test assertion message in `src/db.rs` referenced the deleted `before_acquire` mechanism. | `src/db.rs:150-152` (pre-fix) | Drop the dangling clause from the `expect_err` message. |
+| F2 | non-blocking | stale-xref | fixed inline | Ticket's Task 3 cascade note omitted `src/ingest/identity.rs` from the list of extra call sites touched by the `profile`-drop cascade. | Ticket Task 3, vs. `git diff main...HEAD -- src/ingest/identity.rs` | Add the file to the cascade note (done in this review). |
+
+Disposition summary: 2 findings, both `fixed inline` (F1, F2). No `folded`, `new ticket`, or `noted` findings.
+
+cost: estimated L, actual L
+
+### Reviewer independence
+
+No independent or delegated sub-agent audit was spawned — this host has no separate reviewer agent wired into this flow. This review ran in a session started fresh via `/clear`, carrying no memory of authoring the branch (the branch's own commits predate this session), which is step 0's own next-best handoff. Recorded per step 0's "record which happened, every time."
 
 ## History
 
@@ -140,3 +183,4 @@ No user-facing surface. DESIGN.md §2.1 already prescribes this exact fix in pro
 - 2026-09-03 — READY → IN DEVELOPMENT: picked up
 - 2026-09-03 — plan amended inline: Task 3/4 widened — removing `profile` from `connect_tenant_pool` left it unused (only forwarded, never otherwise read) in every enclosing wrapper function, which `just lint`'s `-D warnings` would reject; removing it there cascades to those wrappers' own callers, adding `src/bin/control.rs`, `tests/producer.rs`, and `tests/template.rs` to the file list.
 - 2026-09-03 — IN DEVELOPMENT → IN REVIEW: acceptance green
+- 2026-09-03 — IN REVIEW → DONE: verified: acceptance green, mutation-sensitivity manually confirmed, 2 non-blocking stale-xref findings fixed inline
