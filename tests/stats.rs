@@ -80,19 +80,19 @@ async fn provision_test_tenant(
     vault: &VaultKeyStore,
     slug: &str,
     database_name: &str,
-) {
+) -> Uuid {
     provision_tenant(
         control_pool,
         control_url,
         slug,
         "eu",
         database_name,
-        Profile::Dev,
         "test-actor",
         vault.client(),
     )
     .await
-    .expect("provisioning test tenant failed");
+    .expect("provisioning test tenant failed")
+    .tenant_id
 }
 
 struct TestTenant {
@@ -113,12 +113,14 @@ impl TestTenant {
 
         let slug = unique_name(&format!("test_st_{prefix}"));
         let db_name = unique_name(&format!("test_db_st_{prefix}"));
-        provision_test_tenant(&control_pool, &control_url, &vault, &slug, &db_name)
-            .await;
+        let tenant_id =
+            provision_test_tenant(&control_pool, &control_url, &vault, &slug, &db_name)
+                .await;
 
-        let tenant_pool = connect_tenant_pool(&control_url, &db_name, 5, Profile::Dev)
+        let tenant_pool = connect_tenant_pool(&control_pool, &control_url, tenant_id, &db_name, 5)
             .await
-            .expect("connecting tenant pool failed");
+            .expect("connecting tenant pool failed")
+            .pool;
 
         TestTenant {
             control_pool,
@@ -227,7 +229,6 @@ async fn stats_reports_channel_and_status_counts_excluding_whatsapp() {
         &tenant.control_url,
         &tenant.slug,
         None,
-        Profile::Dev,
     )
     .await
     .expect("tenant_message_stats failed");
@@ -285,7 +286,6 @@ async fn stats_since_filter_is_exact_at_the_day_boundary() {
         &tenant.control_url,
         &tenant.slug,
         None,
-        Profile::Dev,
     )
     .await
     .expect("tenant_message_stats (all-time) failed");
@@ -300,7 +300,6 @@ async fn stats_since_filter_is_exact_at_the_day_boundary() {
         &tenant.control_url,
         &tenant.slug,
         Some(tomorrow.date_naive()),
-        Profile::Dev,
     )
     .await
     .expect("tenant_message_stats (since tomorrow) failed");
@@ -315,7 +314,6 @@ async fn stats_since_filter_is_exact_at_the_day_boundary() {
         &tenant.control_url,
         &tenant.slug,
         Some((tomorrow + Duration::days(1)).date_naive()),
-        Profile::Dev,
     )
     .await
     .expect("tenant_message_stats (since day after tomorrow) failed");

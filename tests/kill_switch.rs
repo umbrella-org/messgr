@@ -154,23 +154,28 @@ async fn provision_test_tenant(vault: &VaultKeyStore) -> TestTenant {
     let slug = unique_name("test_kill_switch");
     let database_name = unique_name("test_db_kill_switch");
 
-    provision_tenant(
+    let provision_outcome = provision_tenant(
         &control_pool,
         &control_url,
         &slug,
         "eu",
         &database_name,
-        Profile::Dev,
         "test-actor",
         vault.client(),
     )
     .await
     .expect("provisioning test tenant failed");
 
-    let tenant_pool =
-        connect_tenant_pool(&control_url, &database_name, 5, Profile::Dev)
-            .await
-            .expect("connecting tenant pool failed");
+    let tenant_pool = connect_tenant_pool(
+        &control_pool,
+        &control_url,
+        provision_outcome.tenant_id,
+        &database_name,
+        5,
+    )
+    .await
+    .expect("connecting tenant pool failed")
+    .pool;
 
     TestTenant {
         control_pool,
@@ -667,6 +672,7 @@ fn mtls_client(
 struct Fixture {
     control_pool: PgPool,
     control_url: String,
+    tenant_id: Uuid,
     tenant_slug: String,
     database_name: String,
     server_common_name: String,
@@ -702,13 +708,12 @@ async fn setup(locale: &str) -> Fixture {
     let tenant_slug = unique_name("test_tenant_kill_switch");
     let database_name = unique_name("test_db_kill_switch_http");
 
-    provision_tenant(
+    let provision_outcome = provision_tenant(
         &control_pool,
         &control_url,
         &tenant_slug,
         "eu",
         &database_name,
-        Profile::Dev,
         "test-actor",
         vault.client(),
     )
@@ -720,7 +725,6 @@ async fn setup(locale: &str) -> Fixture {
         &control_url,
         &tenant_slug,
         sample_tenant_config(locale),
-        Profile::Dev,
         "test-actor",
     )
     .await
@@ -735,7 +739,6 @@ async fn setup(locale: &str) -> Fixture {
         "sms",
         locale,
         "Hi {{name}}, your balance is {{balance}}.",
-        Profile::Dev,
         "test-actor",
     )
     .await
@@ -767,6 +770,7 @@ async fn setup(locale: &str) -> Fixture {
     Fixture {
         control_pool,
         control_url,
+        tenant_id: provision_outcome.tenant_id,
         tenant_slug,
         database_name,
         server_common_name,
@@ -792,7 +796,6 @@ async fn register_test_producer(
         &cert_subject,
         "test-team",
         "oncall@example.com",
-        Profile::Dev,
         "test-actor",
     )
     .await
@@ -843,13 +846,15 @@ async fn engaged_kill_switch_rejects_the_matching_producer_but_not_another() {
         register_test_producer(&fixture, &vault, "other-caller").await;
 
     let tenant_pool = connect_tenant_pool(
+        &fixture.control_pool,
         &fixture.control_url,
+        fixture.tenant_id,
         &fixture.database_name,
         5,
-        Profile::Dev,
     )
     .await
-    .expect("connecting to tenant pool failed");
+    .expect("connecting to tenant pool failed")
+    .pool;
     engage_switch(
         &tenant_pool,
         scope::PRODUCER,

@@ -81,19 +81,19 @@ async fn provision_test_tenant(
     vault: &VaultKeyStore,
     slug: &str,
     database_name: &str,
-) {
+) -> Uuid {
     provision_tenant(
         control_pool,
         control_url,
         slug,
         "eu",
         database_name,
-        Profile::Dev,
         "test-actor",
         vault.client(),
     )
     .await
-    .expect("provisioning test tenant failed");
+    .expect("provisioning test tenant failed")
+    .tenant_id
 }
 
 fn small_cache() -> KeyCache {
@@ -110,11 +110,13 @@ async fn pre_provision_deks_creates_rows_and_is_idempotent() {
 
     let slug = unique_name("test_customer_dek_preprov");
     let db_name = unique_name("test_db_customer_dek_preprov");
-    provision_test_tenant(&control_pool, &control_url, &vault, &slug, &db_name).await;
+    let tenant_id =
+        provision_test_tenant(&control_pool, &control_url, &vault, &slug, &db_name).await;
 
-    let tenant_pool = connect_tenant_pool(&control_url, &db_name, 5, Profile::Dev)
+    let tenant_pool = connect_tenant_pool(&control_pool, &control_url, tenant_id, &db_name, 5)
         .await
-        .expect("connecting tenant pool failed");
+        .expect("connecting tenant pool failed")
+        .pool;
     let mount = format!("transit/{slug}");
     let customer_ids: Vec<Uuid> = (0..3).map(|_| Uuid::new_v4()).collect();
 
@@ -164,11 +166,13 @@ async fn get_or_create_dek_creates_one_lazily_on_first_call() {
 
     let slug = unique_name("test_customer_dek_lazy");
     let db_name = unique_name("test_db_customer_dek_lazy");
-    provision_test_tenant(&control_pool, &control_url, &vault, &slug, &db_name).await;
+    let tenant_id =
+        provision_test_tenant(&control_pool, &control_url, &vault, &slug, &db_name).await;
 
-    let tenant_pool = connect_tenant_pool(&control_url, &db_name, 5, Profile::Dev)
+    let tenant_pool = connect_tenant_pool(&control_pool, &control_url, tenant_id, &db_name, 5)
         .await
-        .expect("connecting tenant pool failed");
+        .expect("connecting tenant pool failed")
+        .pool;
     let mount = format!("transit/{slug}");
     let cache = small_cache();
     let customer_id = Uuid::new_v4();
@@ -213,11 +217,13 @@ async fn get_or_create_dek_second_call_is_served_from_the_cache_not_vault() {
 
     let slug = unique_name("test_customer_dek_cache_hit");
     let db_name = unique_name("test_db_customer_dek_cache_hit");
-    provision_test_tenant(&control_pool, &control_url, &vault, &slug, &db_name).await;
+    let tenant_id =
+        provision_test_tenant(&control_pool, &control_url, &vault, &slug, &db_name).await;
 
-    let tenant_pool = connect_tenant_pool(&control_url, &db_name, 5, Profile::Dev)
+    let tenant_pool = connect_tenant_pool(&control_pool, &control_url, tenant_id, &db_name, 5)
         .await
-        .expect("connecting tenant pool failed");
+        .expect("connecting tenant pool failed")
+        .pool;
     let mount = format!("transit/{slug}");
     let cache = small_cache();
 
@@ -275,7 +281,6 @@ async fn pre_provision_for_tenant_against_an_unknown_slug_is_rejected_without_au
         &unknown_slug,
         &vault,
         &[Uuid::new_v4()],
-        Profile::Dev,
         &unique_actor,
     )
     .await;

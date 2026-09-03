@@ -97,7 +97,6 @@ async fn provision_test_tenant(
         slug,
         "eu",
         database_name,
-        Profile::Dev,
         "test-actor",
         vault.client(),
     )
@@ -116,11 +115,12 @@ async fn load_returns_none_before_any_config_is_set() {
 
     let slug = unique_name("test_tenant_config_none");
     let db_name = unique_name("test_db_config_none");
-    provision_test_tenant(&control_pool, &control_url, &vault, &slug, &db_name).await;
+    let tenant_id = provision_test_tenant(&control_pool, &control_url, &vault, &slug, &db_name).await;
 
-    let tenant_pool = connect_tenant_pool(&control_url, &db_name, 2, Profile::Dev)
+    let tenant_pool = connect_tenant_pool(&control_pool, &control_url, tenant_id, &db_name, 2)
         .await
-        .expect("connecting tenant pool failed");
+        .expect("connecting tenant pool failed")
+        .pool;
 
     let loaded = repo::load(&tenant_pool)
         .await
@@ -144,23 +144,23 @@ async fn setting_and_loading_round_trips_every_typed_field() {
 
     let slug = unique_name("test_tenant_config_roundtrip");
     let db_name = unique_name("test_db_config_roundtrip");
-    provision_test_tenant(&control_pool, &control_url, &vault, &slug, &db_name).await;
+    let tenant_id = provision_test_tenant(&control_pool, &control_url, &vault, &slug, &db_name).await;
 
     let outcome = set_tenant_config(
         &control_pool,
         &control_url,
         &slug,
         sample_input(7),
-        Profile::Dev,
         "test-actor",
     )
     .await
     .expect("setting tenant_config failed");
     assert_eq!(outcome.outcome, "created");
 
-    let tenant_pool = connect_tenant_pool(&control_url, &db_name, 2, Profile::Dev)
+    let tenant_pool = connect_tenant_pool(&control_pool, &control_url, tenant_id, &db_name, 2)
         .await
-        .expect("connecting tenant pool failed");
+        .expect("connecting tenant pool failed")
+        .pool;
     let loaded = repo::load(&tenant_pool)
         .await
         .expect("loading tenant_config failed")
@@ -193,14 +193,13 @@ async fn resetting_with_identical_inputs_is_idempotent_and_does_not_duplicate_th
 
     let slug = unique_name("test_tenant_config_idempotent");
     let db_name = unique_name("test_db_config_idempotent");
-    provision_test_tenant(&control_pool, &control_url, &vault, &slug, &db_name).await;
+    let tenant_id = provision_test_tenant(&control_pool, &control_url, &vault, &slug, &db_name).await;
 
     let first = set_tenant_config(
         &control_pool,
         &control_url,
         &slug,
         sample_input(7),
-        Profile::Dev,
         "test-actor",
     )
     .await
@@ -212,16 +211,16 @@ async fn resetting_with_identical_inputs_is_idempotent_and_does_not_duplicate_th
         &control_url,
         &slug,
         sample_input(7),
-        Profile::Dev,
         "test-actor",
     )
     .await
     .expect("second set failed");
     assert_eq!(second.outcome, "idempotent");
 
-    let tenant_pool = connect_tenant_pool(&control_url, &db_name, 2, Profile::Dev)
+    let tenant_pool = connect_tenant_pool(&control_pool, &control_url, tenant_id, &db_name, 2)
         .await
-        .expect("connecting tenant pool failed");
+        .expect("connecting tenant pool failed")
+        .pool;
     let count: i64 = sqlx::query_scalar("SELECT count(*) FROM tenant_config")
         .fetch_one(&tenant_pool)
         .await
@@ -242,14 +241,13 @@ async fn resetting_with_different_inputs_updates_the_singleton_row() {
 
     let slug = unique_name("test_tenant_config_update");
     let db_name = unique_name("test_db_config_update");
-    provision_test_tenant(&control_pool, &control_url, &vault, &slug, &db_name).await;
+    let tenant_id = provision_test_tenant(&control_pool, &control_url, &vault, &slug, &db_name).await;
 
     set_tenant_config(
         &control_pool,
         &control_url,
         &slug,
         sample_input(7),
-        Profile::Dev,
         "test-actor",
     )
     .await
@@ -260,16 +258,16 @@ async fn resetting_with_different_inputs_updates_the_singleton_row() {
         &control_url,
         &slug,
         sample_input(3),
-        Profile::Dev,
         "test-actor",
     )
     .await
     .expect("second set failed");
     assert_eq!(second.outcome, "updated");
 
-    let tenant_pool = connect_tenant_pool(&control_url, &db_name, 2, Profile::Dev)
+    let tenant_pool = connect_tenant_pool(&control_pool, &control_url, tenant_id, &db_name, 2)
         .await
-        .expect("connecting tenant pool failed");
+        .expect("connecting tenant pool failed")
+        .pool;
     let loaded = repo::load(&tenant_pool)
         .await
         .expect("loading tenant_config failed")
@@ -303,7 +301,6 @@ async fn set_tenant_config_against_an_unknown_tenant_slug_is_rejected_and_audite
         &control_url,
         &unknown_slug,
         sample_input(7),
-        Profile::Dev,
         &unique_actor,
     )
     .await;

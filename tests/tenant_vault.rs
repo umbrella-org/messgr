@@ -106,7 +106,6 @@ async fn tenant_a_vault_credentials_cannot_read_tenant_bs_dek() {
         &slug_a,
         "eu",
         &db_a,
-        Profile::Dev,
         "test-actor",
         admin.client(),
     )
@@ -120,7 +119,6 @@ async fn tenant_a_vault_credentials_cannot_read_tenant_bs_dek() {
         &slug_b,
         "eu",
         &db_b,
-        Profile::Dev,
         "test-actor",
         admin.client(),
     )
@@ -202,7 +200,6 @@ async fn idempotent_reprovision_does_not_mint_a_second_secret_id() {
         &slug,
         "eu",
         &db_name,
-        Profile::Dev,
         "test-actor",
         admin.client(),
     )
@@ -219,7 +216,6 @@ async fn idempotent_reprovision_does_not_mint_a_second_secret_id() {
         &slug,
         "eu",
         &db_name,
-        Profile::Dev,
         "test-actor",
         admin.client(),
     )
@@ -296,7 +292,6 @@ async fn login_as_tenant_authenticates_and_can_create_a_dek_on_its_own_mount() {
         &slug,
         "eu",
         &db_name,
-        Profile::Dev,
         "test-actor",
         admin.client(),
     )

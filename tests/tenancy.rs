@@ -8,11 +8,14 @@
 //! 2. Work performed against tenant A's pool is not visible from tenant B's
 //!    pool — a real write, not just a `current_database()` comparison.
 //! 3. A pool deliberately mis-wired to the wrong expected tenant trips the
-//!    `current_database()` assertion (§2.1) instead of silently connecting.
-//!    (The other half of §2.1's assertion — the same check firing again on
-//!    every checkout via `before_acquire` — is a unit test next to the
-//!    assertion itself in `src/db.rs`, since it needs access to the private
-//!    `assert_current_database` helper.)
+//!    `current_database()` assertion (§2.1) instead of silently connecting
+//!    — exercised both at the low-level `db::connect_with_expected_database`
+//!    primitive (`a_mis_wired_pool_trips_the_current_database_assertion`,
+//!    which also has a unit-test sibling next to the private
+//!    `assert_current_database` helper in `src/db.rs`) and, mutation-
+//!    sensitively, through the public `connect_tenant_pool` every real call
+//!    site uses (T-020's
+//!    `connect_tenant_pool_independently_verifies_the_tenant_it_was_told_to_open`).
 
 use sqlx::{Executor, PgPool};
 use uuid::Uuid;
@@ -97,7 +100,6 @@ async fn two_tenants_are_isolated_by_database() {
         &slug_a,
         "eu",
         &db_a,
-        Profile::Dev,
         "test-actor",
         vault.client(),
     )
@@ -109,7 +111,6 @@ async fn two_tenants_are_isolated_by_database() {
         &slug_b,
         "eu",
         &db_b,
-        Profile::Dev,
         "test-actor",
         vault.client(),
     )
@@ -117,14 +118,26 @@ async fn two_tenants_are_isolated_by_database() {
     .expect("provisioning tenant B failed");
     assert_ne!(tenant_a.tenant_id, tenant_b.tenant_id);
 
-    let pool_a =
-        messgr::tenant::pool::connect_tenant_pool(&control_url, &db_a, 2, Profile::Dev)
-            .await
-            .expect("connecting tenant A's pool failed");
-    let pool_b =
-        messgr::tenant::pool::connect_tenant_pool(&control_url, &db_b, 2, Profile::Dev)
-            .await
-            .expect("connecting tenant B's pool failed");
+    let pool_a = messgr::tenant::pool::connect_tenant_pool(
+        &control_pool,
+        &control_url,
+        tenant_a.tenant_id,
+        &db_a,
+        2,
+    )
+    .await
+    .expect("connecting tenant A's pool failed")
+    .pool;
+    let pool_b = messgr::tenant::pool::connect_tenant_pool(
+        &control_pool,
+        &control_url,
+        tenant_b.tenant_id,
+        &db_b,
+        2,
+    )
+    .await
+    .expect("connecting tenant B's pool failed")
+    .pool;
 
     let current_a: String = sqlx::query_scalar("SELECT current_database()")
         .fetch_one(&pool_a)
@@ -175,39 +188,49 @@ async fn work_on_tenant_as_pool_never_reads_or_writes_tenant_bs_database() {
     let slug_b = unique_name("test_tenant_write_b");
     let db_b = unique_name("test_db_write_b");
 
-    provision_tenant(
+    let tenant_a = provision_tenant(
         &control_pool,
         &control_url,
         &slug_a,
         "eu",
         &db_a,
-        Profile::Dev,
         "test-actor",
         vault.client(),
     )
     .await
     .expect("provisioning tenant A failed");
-    provision_tenant(
+    let tenant_b = provision_tenant(
         &control_pool,
         &control_url,
         &slug_b,
         "eu",
         &db_b,
-        Profile::Dev,
         "test-actor",
         vault.client(),
     )
     .await
     .expect("provisioning tenant B failed");
 
-    let pool_a =
-        messgr::tenant::pool::connect_tenant_pool(&control_url, &db_a, 2, Profile::Dev)
-            .await
-            .expect("connecting tenant A's pool failed");
-    let pool_b =
-        messgr::tenant::pool::connect_tenant_pool(&control_url, &db_b, 2, Profile::Dev)
-            .await
-            .expect("connecting tenant B's pool failed");
+    let pool_a = messgr::tenant::pool::connect_tenant_pool(
+        &control_pool,
+        &control_url,
+        tenant_a.tenant_id,
+        &db_a,
+        2,
+    )
+    .await
+    .expect("connecting tenant A's pool failed")
+    .pool;
+    let pool_b = messgr::tenant::pool::connect_tenant_pool(
+        &control_pool,
+        &control_url,
+        tenant_b.tenant_id,
+        &db_b,
+        2,
+    )
+    .await
+    .expect("connecting tenant B's pool failed")
+    .pool;
 
     pool_a
         .execute("CREATE TABLE isolation_probe (id int)")
@@ -253,7 +276,6 @@ async fn a_mis_wired_pool_trips_the_current_database_assertion() {
         &slug,
         "eu",
         &db_name,
-        Profile::Dev,
         "test-actor",
         vault.client(),
     )
@@ -268,8 +290,7 @@ async fn a_mis_wired_pool_trips_the_current_database_assertion() {
     let wrong_expected = "not_the_real_database";
 
     let result = tokio::spawn(async move {
-        db::connect_with_expected_database(options, 2, wrong_expected, Profile::Dev)
-            .await
+        db::connect_with_expected_database(options, 2, wrong_expected).await
     })
     .await;
 
@@ -279,6 +300,95 @@ async fn a_mis_wired_pool_trips_the_current_database_assertion() {
     );
 
     drop_test_tenant(&control_pool, &db_name, &slug).await;
+}
+
+#[tokio::test]
+async fn connect_tenant_pool_independently_verifies_the_tenant_it_was_told_to_open() {
+    // DESIGN.md §14: "the test must prove `expected_database` is derived
+    // independently of the pool's own construction — a mutation test that
+    // deliberately re-derives both from the same input must turn this test
+    // red." This is that test, exercised through the public
+    // `connect_tenant_pool` every real call site uses (T-020), not through
+    // the lower-level `db::connect_with_expected_database` primitive the
+    // test above already covers.
+    //
+    // `connect_tenant_pool` (src/tenant/pool.rs) resolves `expected_db`
+    // fresh, via `tenant_repo::find_by_id(tenant_id)` — never from the
+    // `database_name` argument a caller supplies for the connection itself.
+    // Here the caller supplies tenant A's `tenant_id` but tenant B's real
+    // `database_name` — the exact caller-side mis-wiring T-020's Description
+    // names: "a bug ... supplied tenant B's name to the connection builder
+    // while some other path still labels it 'A'". The physical connection
+    // lands on B's database; the independent registry lookup for A's
+    // `tenant_id` disagrees, and the assertion panics.
+    //
+    // Mutation-sensitivity: if `connect_tenant_pool` is ever changed back to
+    // deriving `expected_db` from the caller's `database_name` argument
+    // instead of a fresh `tenant_repo::find_by_id` lookup — re-coupling the
+    // two derivations to the same input — this test goes red: B's real
+    // database then equals its own claimed identity, the assertion never
+    // fires, and `result.is_err()` below fails.
+    let control_url = control_database_url();
+    let control_pool = db::connect(&control_url, 5)
+        .await
+        .expect("failed to connect to control database");
+    let vault = vault_keystore();
+
+    let slug_a = unique_name("test_tenant_indep_a");
+    let db_a = unique_name("test_db_indep_a");
+    let slug_b = unique_name("test_tenant_indep_b");
+    let db_b = unique_name("test_db_indep_b");
+
+    let tenant_a = provision_tenant(
+        &control_pool,
+        &control_url,
+        &slug_a,
+        "eu",
+        &db_a,
+        "test-actor",
+        vault.client(),
+    )
+    .await
+    .expect("provisioning tenant A failed");
+    provision_tenant(
+        &control_pool,
+        &control_url,
+        &slug_b,
+        "eu",
+        &db_b,
+        "test-actor",
+        vault.client(),
+    )
+    .await
+    .expect("provisioning tenant B failed");
+
+    // Tenant A's id, but tenant B's real database_name — a caller mistake
+    // (stale cache, copy-paste, wrong lookup) that a type-safe constructor
+    // should catch rather than silently accept.
+    let control_pool_clone = control_pool.clone();
+    let control_url_clone = control_url.clone();
+    let tenant_a_id = tenant_a.tenant_id;
+    let db_b_clone = db_b.clone();
+    let result = tokio::spawn(async move {
+        messgr::tenant::pool::connect_tenant_pool(
+            &control_pool_clone,
+            &control_url_clone,
+            tenant_a_id,
+            &db_b_clone,
+            2,
+        )
+        .await
+    })
+    .await;
+
+    assert!(
+        result.is_err(),
+        "connecting under tenant A's id but tenant B's real database_name must panic on \
+         the independently-resolved identity check, not succeed"
+    );
+
+    drop_test_tenant(&control_pool, &db_a, &slug_a).await;
+    drop_test_tenant(&control_pool, &db_b, &slug_b).await;
 }
 
 #[tokio::test]
@@ -298,7 +408,6 @@ async fn provisioning_writes_a_platform_audit_row() {
         &slug,
         "eu",
         &db_name,
-        Profile::Dev,
         "test-actor",
         vault.client(),
     )
@@ -339,7 +448,6 @@ async fn idempotent_reprovision_writes_a_second_platform_audit_row() {
         &slug,
         "eu",
         &db_name,
-        Profile::Dev,
         "test-actor",
         vault.client(),
     )
@@ -352,7 +460,6 @@ async fn idempotent_reprovision_writes_a_second_platform_audit_row() {
         &slug,
         "eu",
         &db_name,
-        Profile::Dev,
         "test-actor",
         vault.client(),
     )
@@ -400,7 +507,6 @@ async fn rejected_reprovision_writes_a_platform_audit_row() {
         &slug,
         "eu",
         &db_name,
-        Profile::Dev,
         "test-actor",
         vault.client(),
     )
@@ -413,7 +519,6 @@ async fn rejected_reprovision_writes_a_platform_audit_row() {
         &slug,
         "eu",
         &conflicting_db_name,
-        Profile::Dev,
         "test-actor",
         vault.client(),
     )

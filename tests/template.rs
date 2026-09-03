@@ -90,7 +90,6 @@ async fn provision_test_tenant(
         slug,
         "eu",
         database_name,
-        Profile::Dev,
         "test-actor",
         vault.client(),
     )
@@ -120,7 +119,6 @@ async fn approving_and_showing_round_trips_every_field() {
         channel::SMS,
         "en-GB",
         "Hi {{name}}, your balance is {{balance}}.",
-        Profile::Dev,
         "test-actor",
     )
     .await
@@ -134,7 +132,6 @@ async fn approving_and_showing_round_trips_every_field() {
         "balance-alert",
         1,
         "en-GB",
-        Profile::Dev,
     )
     .await
     .expect("showing template failed")
@@ -175,7 +172,6 @@ async fn re_approving_the_same_version_locale_is_rejected_and_audited() {
         channel::SMS,
         "en-GB",
         "Hi {{name}}.",
-        Profile::Dev,
         &unique_actor,
     )
     .await
@@ -191,7 +187,6 @@ async fn re_approving_the_same_version_locale_is_rejected_and_audited() {
         channel::SMS,
         "en-GB",
         "Hi {{name}}, a different body.",
-        Profile::Dev,
         &unique_actor,
     )
     .await;
@@ -252,22 +247,16 @@ async fn list_versions_returns_every_version_and_locale_ordered() {
             channel::SMS,
             locale,
             "Hi {{name}}.",
-            Profile::Dev,
             "test-actor",
         )
         .await
         .expect("approving template failed");
     }
 
-    let versions = list_template_versions(
-        &control_pool,
-        &control_url,
-        &slug,
-        "balance-alert",
-        Profile::Dev,
-    )
-    .await
-    .expect("listing template versions failed");
+    let versions =
+        list_template_versions(&control_pool, &control_url, &slug, "balance-alert")
+            .await
+            .expect("listing template versions failed");
 
     let observed: Vec<(i32, String)> = versions
         .into_iter()
@@ -306,7 +295,6 @@ async fn render_preview_substitutes_every_supplied_variable() {
         channel::SMS,
         "en-GB",
         "Hi {{ name }}, your balance is {{balance}}.",
-        Profile::Dev,
         "test-actor",
     )
     .await
@@ -320,7 +308,6 @@ async fn render_preview_substitutes_every_supplied_variable() {
         1,
         "en-GB",
         &vars(&[("name", "Jordan"), ("balance", "£120.00")]),
-        Profile::Dev,
     )
     .await
     .expect("rendering template failed");
@@ -351,7 +338,6 @@ async fn render_preview_with_a_missing_variable_fails_without_a_partial_result()
         channel::SMS,
         "en-GB",
         "Hi {{name}}, your balance is {{balance}}.",
-        Profile::Dev,
         "test-actor",
     )
     .await
@@ -365,7 +351,6 @@ async fn render_preview_with_a_missing_variable_fails_without_a_partial_result()
         1,
         "en-GB",
         &vars(&[("name", "Jordan")]),
-        Profile::Dev,
     )
     .await;
 
@@ -402,7 +387,6 @@ async fn approve_template_against_an_unknown_tenant_slug_is_rejected_and_audited
         channel::SMS,
         "en-GB",
         "Hi {{name}}.",
-        Profile::Dev,
         &unique_actor,
     )
     .await;
