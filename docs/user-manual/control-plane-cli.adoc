@@ -90,8 +90,9 @@ to them happens inside `messgr-ingest`'s resolution path.
 customer (and, for address-only resolution, a provisional address) instead -- cheap, thin rows
 that get a DEK like any other customer and are reconciled into a real identity later by the event
 feed, through the same `customer_alias` merge machinery. A blocked OTP is a worse outcome than a
-missing timeline entry, so nothing here ever returns anything but a resolved id (`409` is the one
-exception -- see below -- and it's a genuine identity conflict, not an absence).
+missing timeline entry, so nothing here ever returns anything but a resolved id -- including a
+`customer_id`/`external_id` whose destination turns out to already be active under a _different_
+customer: resolution resolves to that other customer rather than reject the send (`T-018`).
 
 Two pieces of the design are explicitly not built yet: the **event feed** that keeps the
 projection current from the master system (create/update/merge events; build-order step 10), and

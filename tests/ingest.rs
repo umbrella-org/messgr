@@ -1055,7 +1055,10 @@ async fn external_id_request_resolves_to_the_same_customer_on_replay() {
 }
 
 #[tokio::test]
-async fn same_destination_under_two_customer_ids_is_conflicted() {
+async fn same_destination_under_two_customer_ids_resolves_to_the_first() {
+    // Regression for T-018: this used to assert 409 — src/customer/resolve.rs
+    // used to reject the second send with AddressConflict, contradicting
+    // DESIGN.md §4.7's "never reject a send because resolution failed".
     let fixture = setup("en-US").await;
     let vault = vault_keystore();
     let (identity_pem, _cert_subject) =
@@ -1073,7 +1076,8 @@ async fn same_destination_under_two_customer_ids_is_conflicted() {
     );
 
     let destination = "+15551000";
-    let mut first_body = sample_body(Uuid::new_v4());
+    let customer_a = Uuid::new_v4();
+    let mut first_body = sample_body(customer_a);
     first_body["destination"] = serde_json::json!(destination);
     let response = client
         .post(&url)
@@ -1093,7 +1097,36 @@ async fn same_destination_under_two_customer_ids_is_conflicted() {
         .send()
         .await
         .expect("second request failed");
-    assert_eq!(response.status(), 409);
+    assert_eq!(response.status(), 201, "resolution must not reject the send");
+    let body: serde_json::Value = response.json().await.expect("parsing response failed");
+    let comms_request_id: Uuid = body["comms_request_id"]
+        .as_str()
+        .expect("comms_request_id must be a string")
+        .parse()
+        .expect("comms_request_id must be a uuid");
 
+    let tenant_pool = connect_tenant_pool(
+        &fixture.control_pool,
+        &fixture.control_url,
+        fixture.tenant_id,
+        &fixture.database_name,
+        5,
+    )
+    .await
+    .expect("connecting to tenant pool failed")
+    .pool;
+
+    let resolved_customer_id: Uuid =
+        sqlx::query_scalar("SELECT customer_id FROM comms_request WHERE id = $1")
+            .bind(comms_request_id)
+            .fetch_one(&tenant_pool)
+            .await
+            .expect("comms_request row must exist");
+    assert_eq!(
+        resolved_customer_id, customer_a,
+        "the second send must resolve to the first (winning) customer, not its own asserted id"
+    );
+
+    tenant_pool.close().await;
     teardown(&fixture, Some(&_cert_subject)).await;
 }

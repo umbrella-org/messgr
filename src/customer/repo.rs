@@ -196,8 +196,8 @@ pub async fn insert_external_id(
 
 /// Returns whether the row was actually inserted — `false` means the
 /// `(kind, value_hmac)` unique index rejected it; the caller re-fetches and
-/// compares `customer_id` to distinguish "lost the race" (decision 8) from
-/// "conflicts with a different customer" (decision 9).
+/// resolves to the winner either way, whether that's a lost race against
+/// itself (decision 8) or against a different customer (T-018).
 #[allow(clippy::too_many_arguments)]
 pub async fn insert_address(
     tx: &mut PgTransaction<'_>,

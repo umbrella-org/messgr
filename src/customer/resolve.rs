@@ -7,6 +7,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::customer_dek::lifecycle::{CustomerDekError, get_or_create_dek};
+use crate::customer_dek::repo as customer_dek_repo;
 use crate::destination_hmac;
 use crate::encryption::{self, EncryptionError};
 use crate::key_cache::KeyCache;
@@ -36,11 +37,6 @@ pub enum ResolveError {
     Database(sqlx::Error),
     Vault(KeyStoreError),
     Encryption(EncryptionError),
-    /// The destination's `value_hmac` is already active under a different
-    /// customer — a genuine identity conflict, not absence (decision 9).
-    AddressConflict {
-        existing_customer_id: Uuid,
-    },
 }
 
 impl std::fmt::Display for ResolveError {
@@ -53,12 +49,6 @@ impl std::fmt::Display for ResolveError {
             Self::Encryption(err) => {
                 write!(f, "customer resolution failed (encryption): {err}")
             }
-            Self::AddressConflict {
-                existing_customer_id,
-            } => write!(
-                f,
-                "destination is already active under a different customer ({existing_customer_id})"
-            ),
         }
     }
 }
@@ -69,7 +59,6 @@ impl std::error::Error for ResolveError {
             Self::Database(err) => Some(err),
             Self::Vault(err) => Some(err),
             Self::Encryption(err) => Some(err),
-            Self::AddressConflict { .. } => None,
         }
     }
 }
@@ -244,22 +233,27 @@ pub async fn resolve(
         });
     }
 
-    // Decision 9: the (kind, value_hmac) index rejected the insert. Whether
-    // this is a lost race against ourselves (same customer_id) or a genuine
-    // conflict with a different customer is decided by the re-fetch below.
+    // The (kind, value_hmac) index rejected the insert — a lost race, either
+    // against ourselves (same customer_id) or against a different customer
+    // who now holds this destination. Either way, resolve to the winner
+    // rather than reject the send (§4.7, T-018): every other lost-race
+    // branch in this function already does this.
     tx.rollback().await?;
     let winner = repo::find_active_address_by_hmac(pool, kind, &value_hmac)
         .await?
         .expect("a row must exist immediately after losing insert_address's race");
-    if winner.customer_id != customer_id {
-        return Err(ResolveError::AddressConflict {
-            existing_customer_id: winner.customer_id,
-        });
-    }
+    let winner_locale = if winner.customer_id == customer_id {
+        locale
+    } else {
+        match repo::find_by_id(pool, winner.customer_id).await? {
+            Some(row) => non_provisional_locale(&row),
+            None => None,
+        }
+    };
     Ok(Resolved {
-        customer_id,
+        customer_id: winner.customer_id,
         address_id: winner.id,
-        locale,
+        locale: winner_locale,
     })
 }
 
@@ -342,10 +336,13 @@ async fn mint_provisional_customer_and_address(
     let address_id = Uuid::new_v4();
     let now = Utc::now();
 
-    let dek =
-        get_or_create_dek(pool, keystore, dek_cache, vault_mount, customer_id).await?;
+    // Not `get_or_create_dek`: `customer_id` is always fresh here, so its
+    // cache/DB lookups are guaranteed misses. Persisting the wrapped DEK is
+    // deferred past the transaction below (T-018) — a lost race must not
+    // leave a `customer_dek` row with no matching `customer` row.
+    let dek = keystore.create_dek(vault_mount).await?;
     let ciphertext =
-        encryption::encrypt(&dek, address_id.as_bytes(), destination.as_bytes())?;
+        encryption::encrypt(&dek.plaintext, address_id.as_bytes(), destination.as_bytes())?;
 
     let mut tx = pool.begin().await?;
     repo::insert_customer(
@@ -373,9 +370,15 @@ async fn mint_provisional_customer_and_address(
 
     if inserted {
         tx.commit().await?;
+        // Only now is `customer_id` permanent — safe to persist its DEK.
+        customer_dek_repo::insert_if_absent(pool, customer_id, &dek.wrapped, now).await?;
+        dek_cache.put(customer_id, dek.plaintext);
         return Ok((customer_id, address_id));
     }
 
+    // Lost the race: `dek` is simply dropped here, never persisted or
+    // cached. Vault's `generate-data-key` call left no server-side artifact
+    // for this discarded datakey, so there is nothing to clean up.
     tx.rollback().await?;
     let winner = repo::find_active_address_by_hmac(pool, kind, value_hmac)
         .await?

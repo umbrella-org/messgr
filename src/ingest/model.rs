@@ -85,10 +85,6 @@ pub enum IngestError {
     Database(sqlx::Error),
     Encryption(EncryptionError),
     Vault(KeyStoreError),
-    /// The destination's `value_hmac` is already active under a different
-    /// customer (decision 9) — a real identity conflict, not resolution
-    /// finding nothing.
-    AddressConflict(Uuid),
 }
 
 impl From<ResolveError> for IngestError {
@@ -97,9 +93,6 @@ impl From<ResolveError> for IngestError {
             ResolveError::Database(err) => Self::Database(err),
             ResolveError::Vault(err) => Self::Vault(err),
             ResolveError::Encryption(err) => Self::Encryption(err),
-            ResolveError::AddressConflict {
-                existing_customer_id,
-            } => Self::AddressConflict(existing_customer_id),
         }
     }
 }
@@ -189,10 +182,6 @@ impl std::fmt::Display for IngestError {
             Self::Database(err) => write!(f, "database error: {err}"),
             Self::Encryption(err) => write!(f, "encryption error: {err}"),
             Self::Vault(err) => write!(f, "vault error: {err}"),
-            Self::AddressConflict(existing_customer_id) => write!(
-                f,
-                "destination is already active under a different customer ({existing_customer_id})"
-            ),
         }
     }
 }
@@ -213,7 +202,6 @@ impl IntoResponse for IngestError {
             | Self::InvalidResolutionInput => StatusCode::UNPROCESSABLE_ENTITY,
             Self::TemplateNotFound => StatusCode::NOT_FOUND,
             Self::TenantNotConfigured => StatusCode::FAILED_DEPENDENCY,
-            Self::AddressConflict(_) => StatusCode::CONFLICT,
             Self::MissingPeerCertificate
             | Self::Render(_)
             | Self::Database(_)
