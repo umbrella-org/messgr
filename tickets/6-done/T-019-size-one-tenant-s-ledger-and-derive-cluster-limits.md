@@ -238,3 +238,4 @@ cost: estimated S, actual S — all five findings were sub-hour prose fixes; no 
 - 2026-09-03 — READY → IN DEVELOPMENT: picked up
 - 2026-09-03 — IN DEVELOPMENT → IN REVIEW: acceptance green
 - 2026-09-03 — IN REVIEW → DONE: review clean, 4 fixed inline + 1 noted
+- 2026-09-03 — merged to main (PR #23, c9d6fd3)

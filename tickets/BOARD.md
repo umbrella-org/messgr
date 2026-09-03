@@ -75,7 +75,7 @@ Last updated: 2026-09-03
 | T-015 | Customer projection + resolution at ingest | yes — MERGED: PR #18 (`feat/T-015-customer-projection-resolution`, 83f73aa) |
 | T-016 | Kill switches | yes — MERGED: PR #19 (`6059a13`) |
 | T-017 | CI: create messgr_cold tablespace before partition-lifecycle tests | yes — MERGED: PR #17 (`feat/T-017-ci-messgr-cold-tablespace`, b5c66bd) |
-| T-019 | Size one tenant's ledger and derive cluster limits | no — publish-gated |
+| T-019 | Size one tenant's ledger and derive cluster limits | yes — merged to main (PR #23, c9d6fd3) |
 | T-020 | Make tenant pool identity unrepresentable to mis-wire | yes — MERGED: PR #21 merged to main (da48e9c) |
 | T-021 | Outbox lease lifecycle and dispatcher retry with backoff | yes — merged to main (PR #22, d042eb9) |
 | T-028 | messgr-control: stats subcommand for per-tenant message volume | yes — merged to main (PR #20, ed46117) |
