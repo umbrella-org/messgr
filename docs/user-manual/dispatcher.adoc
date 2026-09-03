@@ -4,8 +4,21 @@
 LOCKED` leases, `LISTEN`/`NOTIFY` wakeup via a trigger on `outbox` inserts with a 1s poll
 fallback) that calls the `Sender` trait (`T-012`) and writes exactly one `comms_event` row plus
 one `comms_request.final_status` update per outbox row, deleting it on completion (DESIGN.md
-§4.1, §4.2, §4.4, §9). One process per tenant, one attempt per message -- no leader election or
-retry/backoff yet; those are later build-order steps.
+§4.1, §4.2, §4.4, §9). One process per tenant; leader election (`pg_try_advisory_lock`-based HA)
+is still a later build-order step.
+
+`T-021` adds retry with backoff for retryable send failures (DESIGN.md §2.4 step 6, §12.2): a
+5xx-equivalent provider status or a transport-level failure clears the row's lease and
+reschedules `next_attempt_at` with exponential backoff and jitter (30s base, doubling, capped at
+30 minutes) rather than failing on the first attempt, up to 8 attempts before it finally
+terminal-fails. A 4xx-equivalent provider rejection still fails immediately -- it is a
+permanent rejection, not a transient one. A transient `repo::claim` database error now retries
+(logged, 1s delay) instead of panicking that channel's task. `messgr-dispatcher` also sweeps
+every stale lease for its tenant at startup, before any claim loop runs, so a row left leased by
+a killed-and-restarted process (a crash before any terminal write or reschedule ran) is
+reclaimed immediately rather than staying stuck -- safe only because exactly one dispatcher
+instance runs per tenant today; this sweep is revisited once leader election ships and a
+restart is no longer guaranteed to be the sole claimant.
 
 `T-016` adds kill-switch enforcement (DESIGN.md §5.2): a shared, in-process cache of currently
 engaged switches, refreshed by a dedicated `LISTEN kill_switch` connection with a 30-second poll
@@ -34,8 +47,11 @@ just dispatcher-run
 ----
 
 Within about a second (the poll fallback; a `NOTIFY` on insert makes it near-instant),
-`comms_request.final_status` moves to `sent` (or `failed`, on a non-2xx/unreachable provider), a
-matching `comms_event` row appears, and the `outbox` row is gone.
+`comms_request.final_status` moves to `sent` on success. On a 4xx-equivalent provider rejection
+it moves to `failed` immediately; on a 5xx-equivalent status or an unreachable provider the row
+instead stays queued with `next_attempt_at` pushed forward by backoff, retried up to 8 times
+before `final_status` finally becomes `failed`. Either terminal outcome writes exactly one
+matching `comms_event` row and removes the `outbox` row.
 
 TIP: `VAULT_WRAPPED_SECRET_ID` is single-use (10-minute TTL) -- unwrapping it a second time (e.g.
 restarting the dispatcher against a wrapped id that was already consumed) fails. Re-provisioning

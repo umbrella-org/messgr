@@ -5,6 +5,7 @@ use std::sync::{Arc, RwLock};
 use std::time::Duration as StdDuration;
 
 use chrono::{Duration as ChronoDuration, Utc};
+use rand::Rng;
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -22,6 +23,24 @@ use super::repo;
 pub const CLAIM_BATCH_SIZE: i64 = 20;
 pub const LEASE_DURATION: ChronoDuration = ChronoDuration::minutes(2);
 const POLL_INTERVAL: StdDuration = StdDuration::from_secs(1);
+/// How long `run_channel_loop` waits before retrying a failed `repo::claim`
+/// call (T-021 decision 5) — mirrors `drain.rs`'s own `RETRY_DELAY`
+/// precedent for `claim_for_scope` errors (not shared: that constant is
+/// private to that module). A claim failure blocks nothing but this
+/// channel's own next iteration, so the retry is unbounded.
+const CLAIM_RETRY_DELAY: StdDuration = StdDuration::from_secs(1);
+
+/// A retryable send failure is terminal-failed instead of rescheduled once
+/// `outbox.attempts` reaches this many (T-021 decision 2) — `attempts` is
+/// already bumped by `repo::claim`'s own `UPDATE` before `try_process` runs,
+/// so this is also the count of attempts actually made.
+const MAX_SEND_ATTEMPTS: i16 = 8;
+/// Backoff base, multiplier, and cap for a retryable send failure (T-021
+/// decision 2) — DESIGN.md names "exponential backoff and jitter" (§2.4
+/// step 6) but no numbers; confirmed with the user during refinement.
+const BACKOFF_BASE: ChronoDuration = ChronoDuration::seconds(30);
+const BACKOFF_MULTIPLIER: i64 = 2;
+const BACKOFF_CAP: ChronoDuration = ChronoDuration::minutes(30);
 
 /// Everything one channel's claim loop needs, opened once at startup and
 /// shared across every row it processes. `kill_switches`/`draining` are
@@ -135,6 +154,33 @@ impl From<std::string::FromUtf8Error> for DispatchError {
     }
 }
 
+/// Exponential backoff with jitter for a retryable send failure (T-021
+/// decision 2), keyed on `outbox.attempts` at the time of the failure that
+/// just happened (1 for the first attempt, ...). Exponent capped at 6 —
+/// `BACKOFF_BASE * BACKOFF_MULTIPLIER^6` already exceeds `BACKOFF_CAP`, so
+/// growing it further has no effect once `.min(BACKOFF_CAP)` applies.
+/// Jitter is uniform 0-50% of the capped delay, added on top, matching
+/// §6.1's own jitter style for quiet-hours rescheduling.
+fn backoff_delay(attempts: i16) -> ChronoDuration {
+    let exponent = attempts.saturating_sub(1).min(6) as u32;
+    let delay_ms = BACKOFF_BASE
+        .num_milliseconds()
+        .saturating_mul(BACKOFF_MULTIPLIER.saturating_pow(exponent))
+        .min(BACKOFF_CAP.num_milliseconds());
+    let jitter_ms = rand::thread_rng().gen_range(0..=(delay_ms / 2).max(1));
+    ChronoDuration::milliseconds(delay_ms + jitter_ms)
+}
+
+/// `Some(status)` for a `Provider` rejection, `None` for a transport-level
+/// `Http` failure — matches `try_process`'s pre-T-021 terminal-write shape
+/// for `provider_status`.
+fn provider_status_of(err: &SenderError) -> Option<String> {
+    match err {
+        SenderError::Provider { status, .. } => Some(status.to_string()),
+        SenderError::Http(_) => None,
+    }
+}
+
 /// `pub` (not private) so integration tests can drive one claimed row's
 /// decrypt/send/write-terminal path directly, without standing up a whole
 /// `run_channel_loop`.
@@ -181,20 +227,15 @@ pub async fn try_process(
             )
             .await?;
         }
-        Err(SenderError::Provider { status, .. }) => {
-            repo::write_terminal(
+        Err(err) if err.is_retryable() && row.attempts < MAX_SEND_ATTEMPTS => {
+            repo::reschedule_retry(
                 &ctx.pool,
-                row.created_at,
                 row.comms_request_id,
-                row.customer_id,
-                "failed",
-                None,
-                Some(&status.to_string()),
-                "failed",
+                Utc::now() + backoff_delay(row.attempts),
             )
             .await?;
         }
-        Err(SenderError::Http(_)) => {
+        Err(err) => {
             repo::write_terminal(
                 &ctx.pool,
                 row.created_at,
@@ -202,7 +243,7 @@ pub async fn try_process(
                 row.customer_id,
                 "failed",
                 None,
-                None,
+                provider_status_of(&err).as_deref(),
                 "failed",
             )
             .await?;
@@ -241,15 +282,27 @@ pub async fn run_channel_loop(ctx: Arc<DispatcherContext>, channel: String) {
     loop {
         let leased_until = Utc::now() + LEASE_DURATION;
         let exclusion = ctx.claim_exclusion(&channel).await;
-        let claimed = repo::claim(
-            &ctx.pool,
-            &channel,
-            CLAIM_BATCH_SIZE,
-            leased_until,
-            &exclusion,
-        )
-        .await
-        .expect("dispatcher: claim query failed");
+        let claimed = loop {
+            match repo::claim(
+                &ctx.pool,
+                &channel,
+                CLAIM_BATCH_SIZE,
+                leased_until,
+                &exclusion,
+            )
+            .await
+            {
+                Ok(rows) => break rows,
+                Err(err) => {
+                    tracing::error!(
+                        %channel,
+                        %err,
+                        "dispatcher: claim query failed, retrying"
+                    );
+                    tokio::time::sleep(CLAIM_RETRY_DELAY).await;
+                }
+            }
+        };
 
         if claimed.is_empty() {
             tokio::select! {

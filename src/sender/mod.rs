@@ -52,6 +52,20 @@ impl From<reqwest::Error> for SenderError {
     }
 }
 
+impl SenderError {
+    /// DESIGN.md §2.4 step 6 (T-021 decision 1): a 4xx-equivalent provider
+    /// rejection is a permanent rejection (bad destination, bad payload,
+    /// auth failure with this credential) and terminal; a transport-level
+    /// failure or a 5xx-equivalent provider status is treated as transient
+    /// and retried with backoff.
+    pub fn is_retryable(&self) -> bool {
+        match self {
+            Self::Http(_) => true,
+            Self::Provider { status, .. } => *status >= 500,
+        }
+    }
+}
+
 /// A destination to send `body` to, and the provider's outcome or error.
 #[async_trait]
 pub trait Sender: Send + Sync {
