@@ -7,7 +7,6 @@
 use chrono::{DateTime, NaiveDate, Utc};
 use sqlx::PgPool;
 
-use crate::profile::Profile;
 use crate::tenant::pool::connect_tenant_pool;
 use crate::tenant::repo as tenant_repo;
 
@@ -27,7 +26,6 @@ pub async fn tenant_message_stats(
     base_db_url: &str,
     tenant_slug: &str,
     since: Option<NaiveDate>,
-    profile: Profile,
 ) -> Result<Vec<ChannelStatusCount>, sqlx::Error> {
     let tenant = tenant_repo::find_by_slug(control_pool, tenant_slug)
         .await?
@@ -37,8 +35,14 @@ pub async fn tenant_message_stats(
             )
         })?;
 
-    let tenant_pool =
-        connect_tenant_pool(base_db_url, &tenant.database_name, 5, profile).await?;
+    let tenant_pool = connect_tenant_pool(
+        control_pool,
+        base_db_url,
+        tenant.id,
+        &tenant.database_name,
+        5,
+    )
+    .await?;
 
     let since_ts: Option<DateTime<Utc>> = since
         .and_then(|d| d.and_hms_opt(0, 0, 0))
@@ -58,9 +62,9 @@ pub async fn tenant_message_stats(
         "#,
     )
     .bind(since_ts)
-    .fetch_all(&tenant_pool)
+    .fetch_all(&tenant_pool.pool)
     .await;
 
-    tenant_pool.close().await;
+    tenant_pool.pool.close().await;
     result
 }

@@ -7,7 +7,6 @@
 use chrono::{DateTime, Datelike, Months, NaiveDate, Utc};
 use sqlx::PgPool;
 
-use crate::profile::Profile;
 use crate::tenant::pool::connect_tenant_pool;
 use crate::tenant::repo as tenant_repo;
 use crate::tenant_config::model::TenantConfig;
@@ -71,7 +70,6 @@ pub async fn run_for_tenant(
     base_db_url: &str,
     tenant_slug: &str,
     as_of: DateTime<Utc>,
-    profile: Profile,
 ) -> Result<LifecycleReport, PartitionLifecycleError> {
     let tenant = tenant_repo::find_by_slug(control_pool, tenant_slug)
         .await?
@@ -79,12 +77,18 @@ pub async fn run_for_tenant(
             rejected(format!("no tenant registered with slug {tenant_slug:?}"))
         })?;
 
-    let tenant_pool =
-        connect_tenant_pool(base_db_url, &tenant.database_name, 5, profile).await?;
+    let tenant_pool = connect_tenant_pool(
+        control_pool,
+        base_db_url,
+        tenant.id,
+        &tenant.database_name,
+        5,
+    )
+    .await?;
 
-    let result = run_inner(&tenant_pool, as_of).await;
+    let result = run_inner(&tenant_pool.pool, as_of).await;
 
-    tenant_pool.close().await;
+    tenant_pool.pool.close().await;
     result
 }
 

@@ -1,7 +1,6 @@
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::profile::Profile;
 use crate::tenant::pool::connect_tenant_pool;
 use crate::tenant::repo as tenant_repo;
 
@@ -79,7 +78,6 @@ pub async fn register_producer(
     cert_subject: &str,
     owner_team: &str,
     contact: &str,
-    profile: Profile,
     actor: &str,
 ) -> Result<RegisterOutcome, ProducerError> {
     let tenant = match tenant_repo::find_by_slug(control_pool, tenant_slug).await? {
@@ -102,12 +100,18 @@ pub async fn register_producer(
         }
     };
 
-    let tenant_pool =
-        connect_tenant_pool(base_db_url, &tenant.database_name, 5, profile).await?;
+    let tenant_pool = connect_tenant_pool(
+        control_pool,
+        base_db_url,
+        tenant.id,
+        &tenant.database_name,
+        5,
+    )
+    .await?;
 
     let result = register_producer_inner(
         control_pool,
-        &tenant_pool,
+        &tenant_pool.pool,
         tenant.id,
         name,
         cert_subject,
@@ -117,7 +121,7 @@ pub async fn register_producer(
     )
     .await;
 
-    tenant_pool.close().await;
+    tenant_pool.pool.close().await;
     result
 }
 
@@ -259,7 +263,6 @@ pub async fn disable_producer(
     base_db_url: &str,
     tenant_slug: &str,
     name: &str,
-    profile: Profile,
     actor: &str,
 ) -> Result<DisableOutcome, ProducerError> {
     let tenant = match tenant_repo::find_by_slug(control_pool, tenant_slug).await? {
@@ -282,14 +285,20 @@ pub async fn disable_producer(
         }
     };
 
-    let tenant_pool =
-        connect_tenant_pool(base_db_url, &tenant.database_name, 5, profile).await?;
+    let tenant_pool = connect_tenant_pool(
+        control_pool,
+        base_db_url,
+        tenant.id,
+        &tenant.database_name,
+        5,
+    )
+    .await?;
 
     let result =
-        disable_producer_inner(control_pool, &tenant_pool, tenant.id, name, actor)
+        disable_producer_inner(control_pool, &tenant_pool.pool, tenant.id, name, actor)
             .await;
 
-    tenant_pool.close().await;
+    tenant_pool.pool.close().await;
     result
 }
 
@@ -353,7 +362,6 @@ pub async fn list_producers(
     control_pool: &PgPool,
     base_db_url: &str,
     tenant_slug: &str,
-    profile: Profile,
 ) -> Result<Vec<Producer>, ProducerError> {
     let tenant = tenant_repo::find_by_slug(control_pool, tenant_slug)
         .await?
@@ -361,10 +369,16 @@ pub async fn list_producers(
             rejected(format!("no tenant registered with slug {tenant_slug:?}"))
         })?;
 
-    let tenant_pool =
-        connect_tenant_pool(base_db_url, &tenant.database_name, 5, profile).await?;
-    let producers = repo::list(&tenant_pool).await;
-    tenant_pool.close().await;
+    let tenant_pool = connect_tenant_pool(
+        control_pool,
+        base_db_url,
+        tenant.id,
+        &tenant.database_name,
+        5,
+    )
+    .await?;
+    let producers = repo::list(&tenant_pool.pool).await;
+    tenant_pool.pool.close().await;
 
     Ok(producers?)
 }
