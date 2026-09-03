@@ -233,3 +233,5 @@ describe `POST /comms`'s resolution/error contract to producers, which this tick
 - 2026-09-02 — scope widened, retitled (TO DO). source: audit: design/implementation audit found `resolve()`'s AddressConflict path rejects a send, contradicting DESIGN.md §4.7's "never reject a send because resolution failed" — same `(kind, value_hmac)` index as this ticket's existing scope, folded in rather than filed separately.
 - 2026-09-04 — TO DO → READY: plan complete
 - 2026-09-04 — READY → IN DEVELOPMENT: picked up
+- 2026-09-04 — plan amended inline: Task 5 also had to fix `tests/ingest.rs`'s `same_destination_under_two_customer_ids_is_conflicted` (asserted `409` at the HTTP layer) — missed during refinement and the pickup applicability audit, which only checked `tests/customer.rs`. Renamed to `same_destination_under_two_customer_ids_resolves_to_the_first` and rewritten to assert `201` and that the second send's `comms_request.customer_id` resolves to the first (winning) customer.
+- 2026-09-04 — IN DEVELOPMENT → IN REVIEW: acceptance green
