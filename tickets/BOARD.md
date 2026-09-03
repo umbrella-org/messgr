@@ -13,10 +13,11 @@ Last updated: 2026-09-03
 
 ## IN DEVELOPMENT
 
-### messgr (0/1)
+### messgr (1/1)
 
 | id | title | depends-on |
 |---|---|---|
+| T-020 | Make tenant pool identity unrepresentable to mis-wire | [] |
 
 ## IN REVIEW
 
@@ -38,7 +39,6 @@ Last updated: 2026-09-03
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
-| T-020 | Make tenant pool identity unrepresentable to mis-wire | critical | medium | L | [] |  |
 
 ## TO DO (impact order, per child)
 

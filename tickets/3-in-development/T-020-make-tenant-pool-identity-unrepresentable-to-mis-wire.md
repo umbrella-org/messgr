@@ -135,3 +135,4 @@ No user-facing surface. DESIGN.md §2.1 already prescribes this exact fix in pro
 
 - 2026-09-02 — created (TO DO). source: audit: design/implementation audit found the isolation assertion in src/tenant/pool.rs compares a value to itself, so it cannot fire on a real mis-wiring; src/db.rs's own test doc comment already admits the checkout-time arm is dead.
 - 2026-09-03 — TO DO → READY: plan complete
+- 2026-09-03 — READY → IN DEVELOPMENT: picked up
