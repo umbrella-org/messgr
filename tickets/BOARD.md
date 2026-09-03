@@ -9,7 +9,7 @@ hand — edit the tickets. Hand-written planning notes live in [`NOTES.md`](NOTE
 **WIP limits (per child-project):**
 - `messgr`: `3-in-development/` ≤ 1 · `4-in-review/` ≤ 1
 
-Last updated: 2026-09-02
+Last updated: 2026-09-03
 
 ## IN DEVELOPMENT
 
@@ -38,6 +38,7 @@ Last updated: 2026-09-02
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
+| T-020 | Make tenant pool identity unrepresentable to mis-wire | critical | medium | L | [] |  |
 
 ## TO DO (impact order, per child)
 
@@ -45,7 +46,6 @@ Last updated: 2026-09-02
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
-| T-020 | Make tenant pool identity unrepresentable to mis-wire | critical | medium | M | [] |  |
 | T-021 | Outbox lease lifecycle and dispatcher retry with backoff | critical | high | L | [] |  |
 | T-019 | Size one tenant's ledger and derive cluster limits | high | low | S | [] |  |
 | T-018 | Fix the two open races on customer_address's (kind, value_hmac) index | high | medium | M | [] |  |
