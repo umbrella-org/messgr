@@ -139,3 +139,4 @@ No user-facing surface. DESIGN.md §2.1 already prescribes this exact fix in pro
 - 2026-09-03 — TO DO → READY: plan complete
 - 2026-09-03 — READY → IN DEVELOPMENT: picked up
 - 2026-09-03 — plan amended inline: Task 3/4 widened — removing `profile` from `connect_tenant_pool` left it unused (only forwarded, never otherwise read) in every enclosing wrapper function, which `just lint`'s `-D warnings` would reject; removing it there cascades to those wrappers' own callers, adding `src/bin/control.rs`, `tests/producer.rs`, and `tests/template.rs` to the file list.
+- 2026-09-03 — IN DEVELOPMENT → IN REVIEW: acceptance green
