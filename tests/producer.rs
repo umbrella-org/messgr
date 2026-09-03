@@ -194,10 +194,9 @@ async fn two_tenants_registering_the_same_producer_name_are_isolated() {
         "the same producer name in two tenants must get two distinct producer ids"
     );
 
-    let producers_a =
-        list_producers(&control_pool, &control_url, &slug_a)
-            .await
-            .expect("listing producers for tenant A failed");
+    let producers_a = list_producers(&control_pool, &control_url, &slug_a)
+        .await
+        .expect("listing producers for tenant A failed");
     assert_eq!(
         producers_a.len(),
         1,
@@ -403,10 +402,9 @@ async fn cert_subject_already_bound_to_a_different_tenant_is_rejected() {
          (this is the cross-tenant impersonation case)"
     );
 
-    let producers_b =
-        list_producers(&control_pool, &control_url, &slug_b)
-            .await
-            .expect("listing producers for tenant B failed");
+    let producers_b = list_producers(&control_pool, &control_url, &slug_b)
+        .await
+        .expect("listing producers for tenant B failed");
     assert!(
         producers_b.is_empty(),
         "the rejected registration must not create a producer row in tenant B"

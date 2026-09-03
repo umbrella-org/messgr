@@ -117,10 +117,11 @@ impl TestTenant {
             provision_test_tenant(&control_pool, &control_url, &vault, &slug, &db_name)
                 .await;
 
-        let tenant_pool = connect_tenant_pool(&control_pool, &control_url, tenant_id, &db_name, 5)
-            .await
-            .expect("connecting tenant pool failed")
-            .pool;
+        let tenant_pool =
+            connect_tenant_pool(&control_pool, &control_url, tenant_id, &db_name, 5)
+                .await
+                .expect("connecting tenant pool failed")
+                .pool;
 
         TestTenant {
             control_pool,

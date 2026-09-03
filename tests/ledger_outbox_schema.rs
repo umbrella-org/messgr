@@ -113,13 +113,15 @@ impl TestTenant {
         // current_database() tripwire (db.rs) rather than the schema itself.
         let slug = unique_name(&format!("test_lo_{prefix}"));
         let db_name = unique_name(&format!("test_db_lo_{prefix}"));
-        let tenant_id = provision_test_tenant(&control_pool, &control_url, &vault, &slug, &db_name)
-            .await;
+        let tenant_id =
+            provision_test_tenant(&control_pool, &control_url, &vault, &slug, &db_name)
+                .await;
 
-        let tenant_pool = connect_tenant_pool(&control_pool, &control_url, tenant_id, &db_name, 5)
-            .await
-            .expect("connecting tenant pool failed")
-            .pool;
+        let tenant_pool =
+            connect_tenant_pool(&control_pool, &control_url, tenant_id, &db_name, 5)
+                .await
+                .expect("connecting tenant pool failed")
+                .pool;
 
         TestTenant {
             control_pool,

@@ -212,12 +212,14 @@ async fn create_ahead_is_idempotent_after_provisioning() {
     let slug = unique_name("test_plc_idempotent");
     let db_name = unique_name("test_plc_idempotent_db");
     let tenant_id =
-        provision_test_tenant(&control_pool, &control_url, &vault, &slug, &db_name).await;
+        provision_test_tenant(&control_pool, &control_url, &vault, &slug, &db_name)
+            .await;
 
-    let tenant_pool = connect_tenant_pool(&control_pool, &control_url, tenant_id, &db_name, 5)
-        .await
-        .expect("connecting tenant pool failed")
-        .pool;
+    let tenant_pool =
+        connect_tenant_pool(&control_pool, &control_url, tenant_id, &db_name, 5)
+            .await
+            .expect("connecting tenant pool failed")
+            .pool;
 
     let as_of = Utc::now();
     let first = lifecycle::run(&tenant_pool, as_of, None)
@@ -256,12 +258,14 @@ async fn the_next_month_bootstrap_partition_accepts_a_real_insert() {
     let slug = unique_name("test_plc_next_month");
     let db_name = unique_name("test_plc_next_month_db");
     let tenant_id =
-        provision_test_tenant(&control_pool, &control_url, &vault, &slug, &db_name).await;
+        provision_test_tenant(&control_pool, &control_url, &vault, &slug, &db_name)
+            .await;
 
-    let tenant_pool = connect_tenant_pool(&control_pool, &control_url, tenant_id, &db_name, 5)
-        .await
-        .expect("connecting tenant pool failed")
-        .pool;
+    let tenant_pool =
+        connect_tenant_pool(&control_pool, &control_url, tenant_id, &db_name, 5)
+            .await
+            .expect("connecting tenant pool failed")
+            .pool;
 
     let as_of = Utc::now();
     lifecycle::run(&tenant_pool, as_of, None)
@@ -311,12 +315,14 @@ async fn a_partition_inside_the_retention_window_moves_but_is_not_dropped() {
     let slug = unique_name("test_plc_move");
     let db_name = unique_name("test_plc_move_db");
     let tenant_id =
-        provision_test_tenant(&control_pool, &control_url, &vault, &slug, &db_name).await;
+        provision_test_tenant(&control_pool, &control_url, &vault, &slug, &db_name)
+            .await;
 
-    let tenant_pool = connect_tenant_pool(&control_pool, &control_url, tenant_id, &db_name, 5)
-        .await
-        .expect("connecting tenant pool failed")
-        .pool;
+    let tenant_pool =
+        connect_tenant_pool(&control_pool, &control_url, tenant_id, &db_name, 5)
+            .await
+            .expect("connecting tenant pool failed")
+            .pool;
 
     let as_of = Utc::now();
     let old_month = months_ago(as_of, 20); // inside a 7-year (84-month) retention window
@@ -409,12 +415,14 @@ async fn a_partition_past_the_retention_boundary_is_detached_and_dropped() {
     let slug = unique_name("test_plc_drop");
     let db_name = unique_name("test_plc_drop_db");
     let tenant_id =
-        provision_test_tenant(&control_pool, &control_url, &vault, &slug, &db_name).await;
+        provision_test_tenant(&control_pool, &control_url, &vault, &slug, &db_name)
+            .await;
 
-    let tenant_pool = connect_tenant_pool(&control_pool, &control_url, tenant_id, &db_name, 5)
-        .await
-        .expect("connecting tenant pool failed")
-        .pool;
+    let tenant_pool =
+        connect_tenant_pool(&control_pool, &control_url, tenant_id, &db_name, 5)
+            .await
+            .expect("connecting tenant pool failed")
+            .pool;
 
     let as_of = Utc::now();
     let ancient_month = months_ago(as_of, 96); // 8 years -- past a 7-year (84-month) retention
@@ -481,12 +489,14 @@ async fn no_tenant_config_means_no_drop_ever() {
     let slug = unique_name("test_plc_unconfigured");
     let db_name = unique_name("test_plc_unconfigured_db");
     let tenant_id =
-        provision_test_tenant(&control_pool, &control_url, &vault, &slug, &db_name).await;
+        provision_test_tenant(&control_pool, &control_url, &vault, &slug, &db_name)
+            .await;
 
-    let tenant_pool = connect_tenant_pool(&control_pool, &control_url, tenant_id, &db_name, 5)
-        .await
-        .expect("connecting tenant pool failed")
-        .pool;
+    let tenant_pool =
+        connect_tenant_pool(&control_pool, &control_url, tenant_id, &db_name, 5)
+            .await
+            .expect("connecting tenant pool failed")
+            .pool;
 
     let as_of = Utc::now();
     let ancient_month = months_ago(as_of, 96);
@@ -524,12 +534,14 @@ async fn a_non_conforming_partition_name_is_never_touched() {
     let slug = unique_name("test_plc_nonconforming");
     let db_name = unique_name("test_plc_nonconforming_db");
     let tenant_id =
-        provision_test_tenant(&control_pool, &control_url, &vault, &slug, &db_name).await;
+        provision_test_tenant(&control_pool, &control_url, &vault, &slug, &db_name)
+            .await;
 
-    let tenant_pool = connect_tenant_pool(&control_pool, &control_url, tenant_id, &db_name, 5)
-        .await
-        .expect("connecting tenant pool failed")
-        .pool;
+    let tenant_pool =
+        connect_tenant_pool(&control_pool, &control_url, tenant_id, &db_name, 5)
+            .await
+            .expect("connecting tenant pool failed")
+            .pool;
 
     let as_of = Utc::now();
     let ancient_month = months_ago(as_of, 96);
