@@ -75,3 +75,34 @@ pub trait Sender: Send + Sync {
         body: &str,
     ) -> Result<SendOutcome, SenderError>;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn provider(status: u16) -> SenderError {
+        SenderError::Provider {
+            status,
+            body: String::new(),
+        }
+    }
+
+    #[test]
+    fn provider_status_retryability_boundary() {
+        assert!(!provider(400).is_retryable(), "4xx is terminal");
+        assert!(!provider(499).is_retryable(), "still 4xx, terminal");
+        assert!(provider(500).is_retryable(), "5xx is retryable");
+        assert!(provider(599).is_retryable(), "still 5xx, retryable");
+    }
+
+    #[tokio::test]
+    async fn http_transport_error_is_always_retryable() {
+        let client = reqwest::Client::new();
+        let err = client
+            .get("http://127.0.0.1:1")
+            .send()
+            .await
+            .expect_err("connecting to a closed port must fail");
+        assert!(SenderError::from(err).is_retryable());
+    }
+}

@@ -1,6 +1,6 @@
 # messgr — Design
 
-**Version 1** · 2026-09-02 · `be36441`
+**Version 2** · 2026-09-03 · `6b84dea` (T-021 review: corrected the crashed-dispatcher lease-reclaim mechanism)
 
 Centralized communications orchestration and audit ledger for customer messaging across SMS, email, and WhatsApp.
 
@@ -202,8 +202,16 @@ from this.
 **4. Claim.** The tenant's active dispatcher (leader-elected via advisory lock, §2.3, §9) runs
 one claim loop per channel, `UPDATE ... SET leased_until ... FOR UPDATE SKIP LOCKED ... ORDER BY
 priority, next_attempt_at`, so transactional rows are always claimed ahead of marketing ones
-(§4.2, §8). A crashed dispatcher's leases simply expire and the standby (or a recovered leader)
-reclaims the rows — no reaper.
+(§4.2, §8). **Correction (T-021 review): there is no time-based lease expiry.** The claim
+predicate is `leased_until IS NULL`, never a comparison against `now()`, so a lease does not
+"simply expire" on any clock. Until leader election ships (§9, still open), a crashed
+dispatcher's rows are reclaimed by that same tenant's `messgr-dispatcher` sweeping every stale
+lease at process startup, before any claim loop runs — safe only because exactly one instance
+runs per tenant today, so a fresh start cannot be racing a still-live claimant. This is revisited
+once leader election exists and a restart is no longer guaranteed to be the sole claimant; at
+that point a genuine time-based expiry (or an equivalent reclaim tied to the standby's takeover)
+becomes necessary, since two live processes could otherwise both consider themselves entitled to
+sweep.
 
 **5. Gate chain.** Every claimed row is evaluated against the full chain **at this moment**, not
 against the state that existed at ingest: expiry, kill switch, producer quota, verification,
@@ -380,7 +388,7 @@ RETURNING *;
 
 `ORDER BY priority` is what makes transactional preempt marketing. There is no separate share-of-budget mechanism — see §8.
 
-Leases (rather than a `status = 'processing'` column) mean a crashed dispatcher's work becomes claimable automatically once the lease expires. No reaper job.
+Leases (rather than a `status = 'processing'` column) mean a crashed dispatcher's work becomes claimable again without a separate reaper job — see the correction above: the actual mechanism shipped by T-021 is a startup-time sweep, not a clock-based expiry, since leader election doesn't exist yet.
 
 **Correction: the claim predicate and the retry path were never reconciled, and the gap is load-bearing.** `outbox_claim` is a partial index `WHERE leased_until IS NULL` — a leased row is invisible to it until the lease's own timeout passes, regardless of `next_attempt_at`. §2.4 step 6 describes a retryable provider failure as bumping `attempts` and rescheduling `next_attempt_at` "with backoff and jitter; the row stays in the outbox" — but says nothing about `leased_until`. If the retry path leaves the existing lease in place, the row is unclaimable until that lease's fixed 2-minute timeout expires regardless of the computed backoff, silently overriding whatever backoff was intended; if instead nothing ever clears `leased_until` at all, a row that fails once **before** reaching a terminal write is stranded forever, since only a terminal write (step 6, `sent` or a non-retryable failure) or the lease's own expiry ever frees it. The design must state this explicitly: a retryable failure clears `leased_until` to `NULL` in the same statement that reschedules `next_attempt_at`, so the outbox's one release mechanism is "write a terminal state" **or** "explicitly clear the lease on a rescheduled retry" — never a bare timeout race between the two.
 
@@ -1233,7 +1241,7 @@ Centralizing communications creates a single point of failure. The mitigations m
 | Postgres primary down | Ingestion fails (retryable). Dispatchers stall — which incidentally means nothing is being sent, so the urgency of a kill switch drops. UI degrades to read-only against the replica. Recovery is standard Postgres failover. |
 | Primary degraded but sending continues, and a kill switch is needed | **The awkward case.** The admin panel writes switches to the primary, so a partially-failed primary is exactly when the control is hardest to reach. Mitigations: the kill-switch write path is a single tiny transaction on its own small connection pool, so it survives conditions that starve bulk traffic; and the runbook includes the direct `psql` statement to engage a switch, tested and kept alongside the on-call notes. Do not let the only path to stopping the system be a web form. |
 | One provider down | Circuit breaker opens; that channel's queued messages back off and retry, draining when the provider recovers. Other channels unaffected. **Except OTP — see §12.1.** |
-| Dispatcher crash | Leases expire, standby acquires the advisory lock, work resumes. At-least-once delivery — see below. |
+| Dispatcher crash | No leader election yet (§9, still open), so today "standby acquires the advisory lock" does not apply — the same process restarts, and its own startup sweep (§4.2's correction) clears its stale leases before claiming again. At-least-once delivery — see below. |
 | Marketing backlog | Transactional preempts via claim-order priority, not a share-of-budget cap — that mechanism was specified and cut (§8) because it duplicated `ORDER BY priority` for a tunable nobody would tune. Auth is on a separate path entirely. |
 | One tenant's dispatcher wedges | Contained to that tenant — one process, one database, one advisory lock (§9). Standby takes over. No other tenant observes anything. |
 | One tenant saturates cluster IO | **Bounded, not prevented** — Postgres has no per-database IO or CPU quota. `CONNECTION LIMIT` and `statement_timeout` cap concurrency and runaway queries; per-database IO monitoring identifies the culprit. Remediation is relocating that tenant to its own cluster — a dump and restore, not a redesign (§9). |

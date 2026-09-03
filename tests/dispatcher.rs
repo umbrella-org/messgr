@@ -644,6 +644,157 @@ async fn retries_exhausted_after_max_attempts_terminal_fails() {
 }
 
 #[tokio::test]
+async fn seventh_attempt_still_reschedules_one_short_of_the_cap() {
+    let vault = vault_keystore();
+    let tenant = provision_test_tenant(&vault).await;
+    let cache = small_cache();
+
+    let mock_server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/messages"))
+        .respond_with(
+            ResponseTemplate::new(500).set_body_string("provider unavailable"),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let (comms_request_id, created_at, _customer_id) =
+        write_ready_outbox_row(&tenant, &vault, &cache, "+15550100", "hello there")
+            .await;
+
+    let sender: Arc<dyn Sender> =
+        Arc::new(HttpSender::new(mock_server.uri(), "test-key".to_string()));
+    let ctx = DispatcherContext {
+        pool: tenant.tenant_pool.clone(),
+        keystore: Arc::new(vault_keystore()),
+        cache: Arc::new(cache),
+        mount: tenant.mount.clone(),
+        sender,
+        kill_switches: Arc::new(KillSwitchCache::new()),
+        draining: Arc::new(RwLock::new(HashMap::new())),
+    };
+
+    let mut claimed = repo::claim(
+        &tenant.tenant_pool,
+        "sms",
+        10,
+        Utc::now() + chrono::Duration::minutes(2),
+        &no_exclusion(),
+    )
+    .await
+    .expect("claim failed");
+    assert_eq!(claimed.len(), 1);
+
+    // One short of MAX_SEND_ATTEMPTS (8) -- the guard `row.attempts <
+    // MAX_SEND_ATTEMPTS` must still admit this and reschedule, not
+    // terminal-fail. Catches an off-by-one that terminal-fails a beat early.
+    sqlx::query("UPDATE outbox SET attempts = 7 WHERE comms_request_id = $1")
+        .bind(comms_request_id)
+        .execute(&tenant.tenant_pool)
+        .await
+        .expect("bumping attempts failed");
+    claimed[0].attempts = 7;
+
+    try_process(&ctx, &claimed[0])
+        .await
+        .expect("try_process failed");
+
+    let final_status: Option<String> = sqlx::query_scalar(
+        "SELECT final_status FROM comms_request WHERE created_at = $1 AND id = $2",
+    )
+    .bind(created_at)
+    .bind(comms_request_id)
+    .fetch_one(&tenant.tenant_pool)
+    .await
+    .expect("fetching final_status failed");
+    assert_eq!(
+        final_status, None,
+        "attempts == 7 (one short of the cap) must still reschedule, not terminal-fail"
+    );
+
+    let (leased_until, next_attempt_at): (Option<DateTime<Utc>>, DateTime<Utc>) = sqlx::query_as(
+        "SELECT leased_until, next_attempt_at FROM outbox WHERE comms_request_id = $1",
+    )
+    .bind(comms_request_id)
+    .fetch_one(&tenant.tenant_pool)
+    .await
+    .expect("fetching outbox row failed");
+    assert_eq!(leased_until, None);
+    assert!(next_attempt_at > Utc::now());
+
+    tenant.cleanup().await;
+}
+
+#[tokio::test]
+async fn attempts_past_the_cap_still_terminal_fails() {
+    let vault = vault_keystore();
+    let tenant = provision_test_tenant(&vault).await;
+    let cache = small_cache();
+
+    let mock_server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/messages"))
+        .respond_with(
+            ResponseTemplate::new(500).set_body_string("provider unavailable"),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let (comms_request_id, created_at, _customer_id) =
+        write_ready_outbox_row(&tenant, &vault, &cache, "+15550100", "hello there")
+            .await;
+
+    let sender: Arc<dyn Sender> =
+        Arc::new(HttpSender::new(mock_server.uri(), "test-key".to_string()));
+    let ctx = DispatcherContext {
+        pool: tenant.tenant_pool.clone(),
+        keystore: Arc::new(vault_keystore()),
+        cache: Arc::new(cache),
+        mount: tenant.mount.clone(),
+        sender,
+        kill_switches: Arc::new(KillSwitchCache::new()),
+        draining: Arc::new(RwLock::new(HashMap::new())),
+    };
+
+    let mut claimed = repo::claim(
+        &tenant.tenant_pool,
+        "sms",
+        10,
+        Utc::now() + chrono::Duration::minutes(2),
+        &no_exclusion(),
+    )
+    .await
+    .expect("claim failed");
+    assert_eq!(claimed.len(), 1);
+
+    // Past the cap -- should never happen in practice (nothing reschedules
+    // past 8), but the guard must still terminal-fail rather than reschedule
+    // forever if it ever does.
+    sqlx::query("UPDATE outbox SET attempts = 9 WHERE comms_request_id = $1")
+        .bind(comms_request_id)
+        .execute(&tenant.tenant_pool)
+        .await
+        .expect("bumping attempts failed");
+    claimed[0].attempts = 9;
+
+    try_process(&ctx, &claimed[0])
+        .await
+        .expect("try_process failed");
+
+    let final_status: Option<String> = sqlx::query_scalar(
+        "SELECT final_status FROM comms_request WHERE created_at = $1 AND id = $2",
+    )
+    .bind(created_at)
+    .bind(comms_request_id)
+    .fetch_one(&tenant.tenant_pool)
+    .await
+    .expect("fetching final_status failed");
+    assert_eq!(final_status.as_deref(), Some("failed"));
+
+    tenant.cleanup().await;
+}
+
+#[tokio::test]
 async fn startup_sweep_reclaims_a_lease_left_by_a_simulated_crash() {
     let vault = vault_keystore();
     let tenant = provision_test_tenant(&vault).await;

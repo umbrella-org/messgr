@@ -167,6 +167,8 @@ fn backoff_delay(attempts: i16) -> ChronoDuration {
         .num_milliseconds()
         .saturating_mul(BACKOFF_MULTIPLIER.saturating_pow(exponent))
         .min(BACKOFF_CAP.num_milliseconds());
+    // `.max(1)` guards `gen_range` against an empty range if BACKOFF_BASE were
+    // ever 0 — a no-op today since it's always 30s (T-021 review, F6).
     let jitter_ms = rand::thread_rng().gen_range(0..=(delay_ms / 2).max(1));
     ChronoDuration::milliseconds(delay_ms + jitter_ms)
 }
