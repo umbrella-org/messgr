@@ -61,8 +61,9 @@ None. `depends-on: []`; branch cuts cleanly from `main` at T-020's merge.
    attempt number that just failed. `attempts` sequence 1..7 reschedule (delays 30s, 60s, 2m,
    4m, 8m, 16m, 30m — the 7th and any later one hits the 30-minute cap); `attempts == 8` failing
    is terminal (`failed`, exhausted retries) instead of rescheduling. Confirmed with the user
-   during refinement — DESIGN.md specifies "exponential backoff and jitter" (§2.4 step 6, §12.2)
-   but no numbers.
+   during refinement — DESIGN.md specifies "exponential backoff and jitter" (§2.4 step 6, §9)
+   but no numbers. (Correction, T-021 review: the original citation said "§12.2", which doesn't
+   exist — the actual sentence is in §9.)
 3. **`repo::reschedule_retry` writes no `comms_event` row.** DESIGN.md §2.4 step 6 describes a
    retryable failure as bumping `attempts` and rescheding `next_attempt_at`, "the row stays in
    the outbox" — no event write is named, unlike the `sent`/`failed` terminal writes (§4.4).
@@ -252,7 +253,39 @@ order step 7 remains open).
 
 ## Review
 
-<!-- empty until IN REVIEW -->
+- [x] Reviewer independence settled (step 0): **delegated**. The reviewing agent authored this
+  branch in the same session, so steps 2-4a were delegated to a freshly spawned, independent
+  sub-agent with no memory of writing the code, briefed adversarially. Every delegated finding
+  below was re-verified by hand (file:line, `git diff`, or a direct grep/rerun) before being
+  recorded — delegation buys independence, not accuracy.
+- [x] Implementation audit (steps 1, 2): **met**. Every Task (1-6) and Confirmed decision (1-7)
+  verified done, in the files named, matching the spec. `just fmt && just lint && just test &&
+  just docs-check` all green (32/4/0/0/9/... every test binary "0 failed"; `tests/dispatcher.rs`
+  11/11 after this review's own additions). Backoff/attempts-cap arithmetic traced through by
+  hand at every boundary (1, 7, 8, 9) — correct, no off-by-one.
+- [x] Quality audit (step 3): **met**, with two test-gaps found and fixed inline (F4, F5 below).
+- [x] Consistency audit (step 4): one finding (F1 below) — DESIGN.md's lease-reclaim description
+  was made false by this branch and is fixed inline as part of this review, per the addendum's
+  Step 5 mandate not to defer a design correction to a follow-up ticket.
+- [x] Documentation audit (step 4a): **met**. `docs/user-manual/dispatcher.adoc` re-checked claim
+  by claim against the shipped code (backoff numbers, 8-attempt cap, 4xx-immediate-fail,
+  claim-retry behaviour, startup sweep) — accurate. `just docs-check` clean.
+- [x] Docs-readability pass (step 4b): **conscious skip** — no docs-readability reviewer
+  configured in this host session.
+
+| id | severity | class | disposition | description | evidence | suggestion |
+|---|---|---|---|---|---|---|
+| F1 | non-blocking | stale-xref | fixed inline | DESIGN.md's §4.2/§9/§12 lease-reclaim description asserted a time-based expiry and standby takeover ("leases simply expire", "Leases expire, standby acquires the advisory lock") that this branch proves were never implemented and replaces with a startup sweep under the current single-instance assumption. | `DESIGN.md:205-206` (pre-fix), `:383`, `:1236`; ticket Description ¶3 | Amended in this review (see commit `15e5031`): corrected §4.2's "no reaper" line, §4.2's claim-predicate correction paragraph, and the §12 failure-modes table row; bumped the version stamp to v2. |
+| F2 | non-blocking | other | fixed inline | Ticket's own Confirmed decision 2 cited "DESIGN.md §12.2" for the backoff/jitter mention — no such heading exists; the actual sentence is in §9. | `DESIGN.md` has no `### 12.2`; the sentence is at `DESIGN.md:1110` (§9) | Ticket text corrected above, this review. |
+| F3 | non-blocking | other | noted | `src/dispatcher/drain.rs::write_expired`'s doc comment claims a row given up on "stays leased until its lease naturally expires" — never true (no time-based expiry exists anywhere in this codebase), and pre-existing (not made false by this branch, so not `fixed inline` per the rules §5 causation test). | `src/dispatcher/drain.rs:41-42` | Reword to "stays leased until the next dispatcher restart's startup sweep clears it" next time this file is touched. |
+| F4 | non-blocking | test-gap | fixed inline | `SenderError::is_retryable` had no direct unit test — only indirect coverage via two integration fixtures at 400/500. A mutation to the `>= 500` boundary or the `Http` arm would not necessarily be caught. | `src/sender/mod.rs` had no `#[cfg(test)]` module | Fixed inline (user-approved, this review): added `sender::tests::provider_status_retryability_boundary` (400/499/500/599) and `sender::tests::http_transport_error_is_always_retryable`, commit `15e5031`. |
+| F5 | non-blocking | test-gap | fixed inline | The `attempts` cap boundary was only tested at the extremes (1 and 8); attempts=7 (must still retry) and attempts=9 (must never occur, but must still terminal-fail if it did) were untested. A one-early or one-late guard mutation would not be caught. | `tests/dispatcher.rs` pre-fix only had attempts=1 and attempts=8 cases | Fixed inline (user-approved, this review): added `seventh_attempt_still_reschedules_one_short_of_the_cap` and `attempts_past_the_cap_still_terminal_fails`, commit `15e5031`. |
+| F6 | non-blocking | design | fixed inline | `backoff_delay`'s jitter used `gen_range(0..=(delay_ms / 2).max(1))` — a silent, undocumented deviation from the Implementation Plan's literal Task 4 text (`gen_range(0..=delay_ms / 2)`), harmless today since `delay_ms` is always ≥ 30000 but unexplained in the code. | `src/dispatcher/worker.rs:170` (pre-fix, no comment) | Fixed inline: added a doc comment explaining the defensive `.max(1)` guard, commit `15e5031`. |
+
+**Disposition summary:** 6 non-blocking findings — 5 `fixed inline` (F1, F2, F4, F5, F6), 1 `noted`
+(F3). No blocking findings; no follow-up tickets spawned.
+
+cost: estimated L, actual L
 
 ## History
 
@@ -260,3 +293,4 @@ order step 7 remains open).
 - 2026-09-03 — TO DO → READY: plan complete
 - 2026-09-03 — READY → IN DEVELOPMENT: picked up
 - 2026-09-03 — IN DEVELOPMENT → IN REVIEW: acceptance green
+- 2026-09-03 — IN REVIEW → DONE: review clean; 6 non-blocking findings, 5 fixed inline, 1 noted
