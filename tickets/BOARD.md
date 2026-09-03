@@ -13,10 +13,11 @@ Last updated: 2026-09-04
 
 ## IN DEVELOPMENT
 
-### messgr (0/1)
+### messgr (1/1)
 
 | id | title | depends-on |
 |---|---|---|
+| T-018 | Fix the two open races on customer_address's (kind, value_hmac) index | [] |
 
 ## IN REVIEW
 
@@ -38,7 +39,6 @@ Last updated: 2026-09-04
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
-| T-018 | Fix the two open races on customer_address's (kind, value_hmac) index | high | medium | M | [] |  |
 
 ## TO DO (impact order, per child)
 

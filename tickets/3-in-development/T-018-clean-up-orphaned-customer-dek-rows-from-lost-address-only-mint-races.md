@@ -232,3 +232,4 @@ describe `POST /comms`'s resolution/error contract to producers, which this tick
 - 2026-09-01 — created (TO DO). source: review: T-015's review (F2) found a lost address-only mint race leaves an orphaned, unreachable `customer_dek` row — narrow but genuine, batched here since it needs design thought (restructure vs. sweep), not a one-line fix.
 - 2026-09-02 — scope widened, retitled (TO DO). source: audit: design/implementation audit found `resolve()`'s AddressConflict path rejects a send, contradicting DESIGN.md §4.7's "never reject a send because resolution failed" — same `(kind, value_hmac)` index as this ticket's existing scope, folded in rather than filed separately.
 - 2026-09-04 — TO DO → READY: plan complete
+- 2026-09-04 — READY → IN DEVELOPMENT: picked up
