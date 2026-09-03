@@ -184,3 +184,4 @@ No independent or delegated sub-agent audit was spawned — this host has no sep
 - 2026-09-03 — plan amended inline: Task 3/4 widened — removing `profile` from `connect_tenant_pool` left it unused (only forwarded, never otherwise read) in every enclosing wrapper function, which `just lint`'s `-D warnings` would reject; removing it there cascades to those wrappers' own callers, adding `src/bin/control.rs`, `tests/producer.rs`, and `tests/template.rs` to the file list.
 - 2026-09-03 — IN DEVELOPMENT → IN REVIEW: acceptance green
 - 2026-09-03 — IN REVIEW → DONE: verified: acceptance green, mutation-sensitivity manually confirmed, 2 non-blocking stale-xref findings fixed inline
+- 2026-09-03 — MERGED: PR #21 merged to main (da48e9c)
