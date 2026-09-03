@@ -9,7 +9,7 @@ hand — edit the tickets. Hand-written planning notes live in [`NOTES.md`](NOTE
 **WIP limits (per child-project):**
 - `messgr`: `3-in-development/` ≤ 1 · `4-in-review/` ≤ 1
 
-Last updated: 2026-09-03
+Last updated: 2026-09-04
 
 ## IN DEVELOPMENT
 
@@ -38,6 +38,7 @@ Last updated: 2026-09-03
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
+| T-018 | Fix the two open races on customer_address's (kind, value_hmac) index | high | medium | M | [] |  |
 
 ## TO DO (impact order, per child)
 
@@ -45,7 +46,6 @@ Last updated: 2026-09-03
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
-| T-018 | Fix the two open races on customer_address's (kind, value_hmac) index | high | medium | M | [] |  |
 | T-022 | Apply ledger and queue schema corrections to migrations | high | medium | M | [] |  |
 | T-023 | Read provider credentials from Vault instead of environment variables | high | medium | M | [] |  |
 | T-024 | CI check that every PII-holding table is covered by erasure or a named exemption | high | medium | M | [] |  |
