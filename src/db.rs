@@ -148,8 +148,7 @@ mod tests {
         .await;
 
         let join_error = result.expect_err(
-            "assert_current_database must panic on a mismatched expectation, the same way \
-             before_acquire would on a real checkout",
+            "assert_current_database must panic on a mismatched expectation",
         );
         let panic_payload = join_error.into_panic();
         let message = panic_payload
