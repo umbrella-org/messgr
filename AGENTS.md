@@ -6,7 +6,10 @@ Guidance for AI agents working in this repository.
 
 **messgr** — a centralized communications orchestration system and audit ledger for a bank: every SMS, email, and WhatsApp message sent to a customer, in one place, with an API and a UI over it.
 
-**Status: design only.** `DESIGN.md` is the single artifact. No code exists yet. Do not scaffold an implementation unless asked.
+**Status: design only.** The design is the single artifact — `DESIGN.md` at the root indexes it,
+split across [`development/design/`](development/design/) one file per top-level section (see
+[`development/README.md`](development/README.md)). No code exists yet. Do not scaffold an
+implementation unless asked.
 
 `DESIGN.md` is long because it records *why* decisions were made and what was rejected, not just what was chosen. That rationale is the valuable part — when editing, preserve it. Several sections deliberately document mistakes made during design (see "Corrections on the record" below); do not tidy those away.
 
@@ -61,7 +64,7 @@ The pattern in the first two: **backup and recovery boundaries are coarser than 
 
 ## Review addendum
 
-[`review-addendum.md`](review-addendum.md) layers project-specific review rules on top of the
+[`development/review-addendum.md`](development/review-addendum.md) layers project-specific review rules on top of the
 brine review protocol — wired as `review_addendum` on the `messgr` project in `pickle.toml`.
 There is no overarching addendum: `messgr` is the only registered child, so a second file above
 it would run alongside this one on every review with nothing left to say. Read it before
