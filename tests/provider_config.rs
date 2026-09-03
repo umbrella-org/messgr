@@ -89,7 +89,6 @@ async fn provision_test_tenant(
         slug,
         "eu",
         database_name,
-        Profile::Dev,
         "test-actor",
         vault.client(),
     )
@@ -108,11 +107,15 @@ async fn list_returns_empty_before_any_config_is_set() {
 
     let slug = unique_name("test_provider_config_empty");
     let db_name = unique_name("test_db_pc_empty");
-    provision_test_tenant(&control_pool, &control_url, &vault, &slug, &db_name).await;
+    let tenant_id =
+        provision_test_tenant(&control_pool, &control_url, &vault, &slug, &db_name)
+            .await;
 
-    let tenant_pool = connect_tenant_pool(&control_url, &db_name, 2, Profile::Dev)
-        .await
-        .expect("connecting tenant pool failed");
+    let tenant_pool =
+        connect_tenant_pool(&control_pool, &control_url, tenant_id, &db_name, 2)
+            .await
+            .expect("connecting tenant pool failed")
+            .pool;
 
     let rows = repo::list(&tenant_pool, "sms")
         .await
@@ -136,23 +139,26 @@ async fn setting_and_listing_round_trips_every_typed_field() {
 
     let slug = unique_name("test_provider_config_roundtrip");
     let db_name = unique_name("test_db_pc_roundtrip");
-    provision_test_tenant(&control_pool, &control_url, &vault, &slug, &db_name).await;
+    let tenant_id =
+        provision_test_tenant(&control_pool, &control_url, &vault, &slug, &db_name)
+            .await;
 
     let outcome = set_provider_config(
         &control_pool,
         &control_url,
         &slug,
         sample_input(1, 10),
-        Profile::Dev,
         "test-actor",
     )
     .await
     .expect("setting provider_config failed");
     assert_eq!(outcome.outcome, "created");
 
-    let tenant_pool = connect_tenant_pool(&control_url, &db_name, 2, Profile::Dev)
-        .await
-        .expect("connecting tenant pool failed");
+    let tenant_pool =
+        connect_tenant_pool(&control_pool, &control_url, tenant_id, &db_name, 2)
+            .await
+            .expect("connecting tenant pool failed")
+            .pool;
     let rows = repo::list(&tenant_pool, "sms")
         .await
         .expect("listing provider_config failed");
@@ -177,14 +183,15 @@ async fn a_second_priority_extends_the_list_in_priority_order() {
 
     let slug = unique_name("test_provider_config_ordered");
     let db_name = unique_name("test_db_pc_ordered");
-    provision_test_tenant(&control_pool, &control_url, &vault, &slug, &db_name).await;
+    let tenant_id =
+        provision_test_tenant(&control_pool, &control_url, &vault, &slug, &db_name)
+            .await;
 
     set_provider_config(
         &control_pool,
         &control_url,
         &slug,
         sample_input(2, 20),
-        Profile::Dev,
         "test-actor",
     )
     .await
@@ -194,15 +201,16 @@ async fn a_second_priority_extends_the_list_in_priority_order() {
         &control_url,
         &slug,
         sample_input(1, 10),
-        Profile::Dev,
         "test-actor",
     )
     .await
     .expect("setting priority 1 failed");
 
-    let tenant_pool = connect_tenant_pool(&control_url, &db_name, 2, Profile::Dev)
-        .await
-        .expect("connecting tenant pool failed");
+    let tenant_pool =
+        connect_tenant_pool(&control_pool, &control_url, tenant_id, &db_name, 2)
+            .await
+            .expect("connecting tenant pool failed")
+            .pool;
     let rows = repo::list(&tenant_pool, "sms")
         .await
         .expect("listing provider_config failed");
@@ -230,14 +238,15 @@ async fn resetting_with_identical_inputs_is_idempotent_and_does_not_duplicate_th
 
     let slug = unique_name("test_provider_config_idempotent");
     let db_name = unique_name("test_db_pc_idempotent");
-    provision_test_tenant(&control_pool, &control_url, &vault, &slug, &db_name).await;
+    let tenant_id =
+        provision_test_tenant(&control_pool, &control_url, &vault, &slug, &db_name)
+            .await;
 
     let first = set_provider_config(
         &control_pool,
         &control_url,
         &slug,
         sample_input(1, 10),
-        Profile::Dev,
         "test-actor",
     )
     .await
@@ -249,16 +258,17 @@ async fn resetting_with_identical_inputs_is_idempotent_and_does_not_duplicate_th
         &control_url,
         &slug,
         sample_input(1, 10),
-        Profile::Dev,
         "test-actor",
     )
     .await
     .expect("second set failed");
     assert_eq!(second.outcome, "idempotent");
 
-    let tenant_pool = connect_tenant_pool(&control_url, &db_name, 2, Profile::Dev)
-        .await
-        .expect("connecting tenant pool failed");
+    let tenant_pool =
+        connect_tenant_pool(&control_pool, &control_url, tenant_id, &db_name, 2)
+            .await
+            .expect("connecting tenant pool failed")
+            .pool;
     let count: i64 = sqlx::query_scalar("SELECT count(*) FROM provider_config")
         .fetch_one(&tenant_pool)
         .await
@@ -279,14 +289,15 @@ async fn resetting_with_different_inputs_updates_the_row() {
 
     let slug = unique_name("test_provider_config_update");
     let db_name = unique_name("test_db_pc_update");
-    provision_test_tenant(&control_pool, &control_url, &vault, &slug, &db_name).await;
+    let tenant_id =
+        provision_test_tenant(&control_pool, &control_url, &vault, &slug, &db_name)
+            .await;
 
     set_provider_config(
         &control_pool,
         &control_url,
         &slug,
         sample_input(1, 10),
-        Profile::Dev,
         "test-actor",
     )
     .await
@@ -297,16 +308,17 @@ async fn resetting_with_different_inputs_updates_the_row() {
         &control_url,
         &slug,
         sample_input(1, 20),
-        Profile::Dev,
         "test-actor",
     )
     .await
     .expect("second set failed");
     assert_eq!(second.outcome, "updated");
 
-    let tenant_pool = connect_tenant_pool(&control_url, &db_name, 2, Profile::Dev)
-        .await
-        .expect("connecting tenant pool failed");
+    let tenant_pool =
+        connect_tenant_pool(&control_pool, &control_url, tenant_id, &db_name, 2)
+            .await
+            .expect("connecting tenant pool failed")
+            .pool;
     let rows = repo::list(&tenant_pool, "sms")
         .await
         .expect("listing provider_config failed");
@@ -334,7 +346,6 @@ async fn set_provider_config_against_an_unknown_tenant_slug_is_rejected_and_audi
         &control_url,
         &unknown_slug,
         sample_input(1, 10),
-        Profile::Dev,
         &unique_actor,
     )
     .await;

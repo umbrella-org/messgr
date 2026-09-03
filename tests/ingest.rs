@@ -218,6 +218,7 @@ fn mtls_client(
 struct Fixture {
     control_pool: PgPool,
     control_url: String,
+    tenant_id: Uuid,
     tenant_slug: String,
     database_name: String,
     server_common_name: String,
@@ -241,13 +242,12 @@ async fn setup(locale: &str) -> Fixture {
     let tenant_slug = unique_name("test_tenant_ingest");
     let database_name = unique_name("test_db_ingest");
 
-    provision_tenant(
+    let provision_outcome = provision_tenant(
         &control_pool,
         &control_url,
         &tenant_slug,
         "eu",
         &database_name,
-        Profile::Dev,
         "test-actor",
         vault.client(),
     )
@@ -259,7 +259,6 @@ async fn setup(locale: &str) -> Fixture {
         &control_url,
         &tenant_slug,
         sample_tenant_config(locale),
-        Profile::Dev,
         "test-actor",
     )
     .await
@@ -274,7 +273,6 @@ async fn setup(locale: &str) -> Fixture {
         "sms",
         locale,
         "Hi {{name}}, your balance is {{balance}}.",
-        Profile::Dev,
         "test-actor",
     )
     .await
@@ -306,6 +304,7 @@ async fn setup(locale: &str) -> Fixture {
     Fixture {
         control_pool,
         control_url,
+        tenant_id: provision_outcome.tenant_id,
         tenant_slug,
         database_name,
         server_common_name,
@@ -333,7 +332,6 @@ async fn register_test_producer(
         &cert_subject,
         "test-team",
         "oncall@example.com",
-        Profile::Dev,
         "test-actor",
     )
     .await
@@ -425,13 +423,15 @@ async fn create_comms_writes_ledger_and_outbox_and_idempotency_replays() {
         .expect("comms_request_id must be a uuid");
 
     let tenant_pool = connect_tenant_pool(
+        &fixture.control_pool,
         &fixture.control_url,
+        fixture.tenant_id,
         &fixture.database_name,
         5,
-        Profile::Dev,
     )
     .await
-    .expect("connecting to tenant pool failed");
+    .expect("connecting to tenant pool failed")
+    .pool;
 
     let (channel, class, destination_hmac, destination_ciphertext, payload_ciphertext): (
         String,
@@ -570,13 +570,15 @@ async fn concurrent_identical_requests_do_not_double_send() {
     );
 
     let tenant_pool = connect_tenant_pool(
+        &fixture.control_pool,
         &fixture.control_url,
+        fixture.tenant_id,
         &fixture.database_name,
         5,
-        Profile::Dev,
     )
     .await
-    .expect("connecting to tenant pool failed");
+    .expect("connecting to tenant pool failed")
+    .pool;
     let row_count: i64 = sqlx::query_scalar("SELECT count(*) FROM comms_request")
         .fetch_one(&tenant_pool)
         .await
@@ -651,7 +653,6 @@ async fn disabled_producer_certificate_is_rejected() {
         &fixture.control_url,
         &fixture.tenant_slug,
         "disabled-caller",
-        Profile::Dev,
         "test-actor",
     )
     .await
@@ -804,13 +805,15 @@ async fn request_validation_rejects_bad_input_before_any_write() {
     assert_eq!(response.status(), 404);
 
     let tenant_pool = connect_tenant_pool(
+        &fixture.control_pool,
         &fixture.control_url,
+        fixture.tenant_id,
         &fixture.database_name,
         5,
-        Profile::Dev,
     )
     .await
-    .expect("connecting to tenant pool failed");
+    .expect("connecting to tenant pool failed")
+    .pool;
     let row_count: i64 = sqlx::query_scalar("SELECT count(*) FROM comms_request")
         .fetch_one(&tenant_pool)
         .await
@@ -860,13 +863,15 @@ async fn resolved_address_id_is_a_real_customer_address_row() {
         .expect("comms_request_id must be a uuid");
 
     let tenant_pool = connect_tenant_pool(
+        &fixture.control_pool,
         &fixture.control_url,
+        fixture.tenant_id,
         &fixture.database_name,
         5,
-        Profile::Dev,
     )
     .await
-    .expect("connecting to tenant pool failed");
+    .expect("connecting to tenant pool failed")
+    .pool;
 
     let address_id: Uuid =
         sqlx::query_scalar("SELECT address_id FROM outbox WHERE comms_request_id = $1")
@@ -915,13 +920,15 @@ async fn address_only_request_without_customer_id_or_external_id_succeeds() {
     assert_eq!(response.status(), 201, "expected 201 Created");
 
     let tenant_pool = connect_tenant_pool(
+        &fixture.control_pool,
         &fixture.control_url,
+        fixture.tenant_id,
         &fixture.database_name,
         5,
-        Profile::Dev,
     )
     .await
-    .expect("connecting to tenant pool failed");
+    .expect("connecting to tenant pool failed")
+    .pool;
     let customer_count: i64 = sqlx::query_scalar("SELECT count(*) FROM customer")
         .fetch_one(&tenant_pool)
         .await
@@ -1006,13 +1013,15 @@ async fn external_id_request_resolves_to_the_same_customer_on_replay() {
     assert_eq!(response.status(), 201);
 
     let tenant_pool = connect_tenant_pool(
+        &fixture.control_pool,
         &fixture.control_url,
+        fixture.tenant_id,
         &fixture.database_name,
         5,
-        Profile::Dev,
     )
     .await
-    .expect("connecting to tenant pool failed");
+    .expect("connecting to tenant pool failed")
+    .pool;
     let customer_id: Uuid = sqlx::query_scalar(
         "SELECT customer_id FROM customer_external_id WHERE system = $1 AND external_id = $2",
     )

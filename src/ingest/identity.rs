@@ -42,7 +42,6 @@ impl FromRequestParts<AppState> for ProducerContext {
                 &*state.keystore,
                 identity.tenant_id,
                 state.tenant_pool_max_connections,
-                state.profile,
             )
             .await?;
 

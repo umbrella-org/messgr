@@ -70,13 +70,15 @@ async fn main() {
         .unwrap_or_else(|| panic!("no tenant registered with slug {tenant_slug:?}"));
 
     let tenant_pool = connect_tenant_pool(
+        &control_pool,
         &config.control_database_url,
+        tenant.id,
         &tenant.database_name,
         config.database_max_connections,
-        config.profile,
     )
     .await
-    .expect("failed to connect to the tenant database");
+    .expect("failed to connect to the tenant database")
+    .pool;
 
     // Per-tenant AppRole login (T-013 decision 7) -- this is the
     // single-tenant-per-process case `connect_as_tenant`'s own doc comment

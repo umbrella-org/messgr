@@ -17,7 +17,6 @@ use zeroize::Zeroizing;
 use crate::key_cache::KeyCache;
 use crate::keystore::{KeyStore, KeyStoreError};
 use crate::kill_switch::cache::{KillSwitchCache, run_refresh_loop};
-use crate::profile::Profile;
 use crate::tenant::model::Tenant;
 use crate::tenant::pool::connect_tenant_pool;
 use crate::tenant::repo as tenant_repo;
@@ -132,7 +131,6 @@ impl TenantRegistry {
         keystore: &dyn KeyStore,
         tenant_id: Uuid,
         max_connections: u32,
-        profile: Profile,
     ) -> Result<Arc<TenantContext>, RegistryError> {
         if let Some(context) = self.contexts.read().await.get(&tenant_id) {
             return Ok(context.clone());
@@ -149,11 +147,12 @@ impl TenantRegistry {
             .await?
             .ok_or(RegistryError::UnknownTenant(tenant_id))?;
 
-        let pool = connect_tenant_pool(
+        let tenant_pool = connect_tenant_pool(
+            control_pool,
             control_database_url,
+            tenant_id,
             &tenant.database_name,
             max_connections,
-            profile,
         )
         .await?;
 
@@ -161,7 +160,7 @@ impl TenantRegistry {
         // tenant, no `tenant_id` column, the database itself is the
         // tenant), so it's loaded from the pool just opened, not
         // `control_pool`.
-        let config = tenant_config_repo::load(&pool)
+        let config = tenant_config_repo::load(&tenant_pool.pool)
             .await?
             .ok_or(RegistryError::NotConfigured(tenant_id))?;
 
@@ -173,7 +172,7 @@ impl TenantRegistry {
         );
 
         let kill_switches = Arc::new(KillSwitchCache::new());
-        let poll_pool = pool.clone();
+        let poll_pool = tenant_pool.pool.clone();
         let poll_cache = kill_switches.clone();
         tokio::spawn(async move {
             run_refresh_loop(
@@ -188,7 +187,7 @@ impl TenantRegistry {
 
         let context = Arc::new(TenantContext {
             tenant,
-            pool,
+            pool: tenant_pool.pool,
             config,
             pepper,
             dek_cache,

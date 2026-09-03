@@ -2,7 +2,6 @@ use chrono::Utc;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::profile::Profile;
 use crate::tenant::pool::connect_tenant_pool;
 use crate::tenant::repo as tenant_repo;
 
@@ -73,7 +72,6 @@ pub async fn approve_template(
     channel: &str,
     locale: &str,
     body: &str,
-    profile: Profile,
     actor: &str,
 ) -> Result<ApproveOutcome, ApproveError> {
     let tenant = match tenant_repo::find_by_slug(control_pool, tenant_slug).await? {
@@ -97,12 +95,18 @@ pub async fn approve_template(
         }
     };
 
-    let tenant_pool =
-        connect_tenant_pool(base_db_url, &tenant.database_name, 5, profile).await?;
+    let tenant_pool = connect_tenant_pool(
+        control_pool,
+        base_db_url,
+        tenant.id,
+        &tenant.database_name,
+        5,
+    )
+    .await?;
 
     let result = approve_template_inner(
         control_pool,
-        &tenant_pool,
+        &tenant_pool.pool,
         tenant.id,
         template_id,
         version,
@@ -113,7 +117,7 @@ pub async fn approve_template(
     )
     .await;
 
-    tenant_pool.close().await;
+    tenant_pool.pool.close().await;
     result
 }
 
@@ -188,14 +192,19 @@ pub async fn show_template(
     template_id: &str,
     version: i32,
     locale: &str,
-    profile: Profile,
 ) -> Result<Option<Template>, ApproveError> {
     let tenant = resolve_tenant(control_pool, tenant_slug).await?;
 
-    let tenant_pool =
-        connect_tenant_pool(base_db_url, &tenant.database_name, 5, profile).await?;
-    let template = repo::find(&tenant_pool, template_id, version, locale).await;
-    tenant_pool.close().await;
+    let tenant_pool = connect_tenant_pool(
+        control_pool,
+        base_db_url,
+        tenant.id,
+        &tenant.database_name,
+        5,
+    )
+    .await?;
+    let template = repo::find(&tenant_pool.pool, template_id, version, locale).await;
+    tenant_pool.pool.close().await;
 
     Ok(template?)
 }
@@ -207,14 +216,19 @@ pub async fn list_template_versions(
     base_db_url: &str,
     tenant_slug: &str,
     template_id: &str,
-    profile: Profile,
 ) -> Result<Vec<Template>, ApproveError> {
     let tenant = resolve_tenant(control_pool, tenant_slug).await?;
 
-    let tenant_pool =
-        connect_tenant_pool(base_db_url, &tenant.database_name, 5, profile).await?;
-    let templates = repo::list_versions(&tenant_pool, template_id).await;
-    tenant_pool.close().await;
+    let tenant_pool = connect_tenant_pool(
+        control_pool,
+        base_db_url,
+        tenant.id,
+        &tenant.database_name,
+        5,
+    )
+    .await?;
+    let templates = repo::list_versions(&tenant_pool.pool, template_id).await;
+    tenant_pool.pool.close().await;
 
     Ok(templates?)
 }
@@ -233,14 +247,19 @@ pub async fn render_preview(
     version: i32,
     locale: &str,
     variables: &std::collections::HashMap<String, String>,
-    profile: Profile,
 ) -> Result<String, ApproveError> {
     let tenant = resolve_tenant(control_pool, tenant_slug).await?;
 
-    let tenant_pool =
-        connect_tenant_pool(base_db_url, &tenant.database_name, 5, profile).await?;
-    let template = repo::find(&tenant_pool, template_id, version, locale).await;
-    tenant_pool.close().await;
+    let tenant_pool = connect_tenant_pool(
+        control_pool,
+        base_db_url,
+        tenant.id,
+        &tenant.database_name,
+        5,
+    )
+    .await?;
+    let template = repo::find(&tenant_pool.pool, template_id, version, locale).await;
+    tenant_pool.pool.close().await;
 
     let template = template?.ok_or_else(|| {
         ApproveError::Rejected(format!(

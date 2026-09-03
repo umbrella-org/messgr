@@ -82,7 +82,6 @@ async fn provision_test_tenant(
         slug,
         "eu",
         database_name,
-        Profile::Dev,
         "test-actor",
         vault.client(),
     )

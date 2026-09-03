@@ -12,8 +12,6 @@
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use sqlx::{Executor, PgPool, Row};
 
-use crate::profile::Profile;
-
 pub async fn connect(
     database_url: &str,
     max_connections: u32,
@@ -24,20 +22,19 @@ pub async fn connect(
         .await
 }
 
-/// Connects a pool and asserts, on every new physical connection and — when
-/// `profile.checks_pool_identity()` — on every checkout, that
+/// Connects a pool and asserts, once, on the first physical connection, that
 /// `current_database()` equals `expected_db`. A mismatch panics rather than
 /// returning a swallowable error: a mis-wired tenant pool is exactly the bug
-/// this check exists to make impossible to ignore.
+/// this check exists to make impossible to ignore. Fires only at creation —
+/// a live connection can never change which database it's bound to mid-life,
+/// so a checkout-time recheck could not observe anything this doesn't
+/// already catch (DESIGN.md §2.1).
 pub async fn connect_with_expected_database(
     options: PgConnectOptions,
     max_connections: u32,
     expected_db: &str,
-    profile: Profile,
 ) -> Result<PgPool, sqlx::Error> {
     let expected_for_connect = expected_db.to_string();
-    let expected_for_acquire = expected_db.to_string();
-    let checks_on_acquire = profile.checks_pool_identity();
 
     let pool = PgPoolOptions::new()
         .max_connections(max_connections)
@@ -46,15 +43,6 @@ pub async fn connect_with_expected_database(
             Box::pin(async move {
                 assert_current_database(conn, &expected).await?;
                 Ok(())
-            })
-        })
-        .before_acquire(move |conn, _meta| {
-            let expected = expected_for_acquire.clone();
-            Box::pin(async move {
-                if checks_on_acquire {
-                    assert_current_database(conn, &expected).await?;
-                }
-                Ok(true)
             })
         })
         .connect_with(options)
@@ -128,17 +116,10 @@ mod tests {
         );
     }
 
-    /// DESIGN.md §14 requires the `current_database()` assertion to fire "at
-    /// pool creation *and* at checkout" (review finding T-001/F3). The
-    /// creation arm (`after_connect`) is exercised end to end in
-    /// `tests/tenancy.rs`'s mis-wired-pool test; a live Postgres connection
-    /// can never actually change which database it is bound to mid-life, so
-    /// there is no way to make a *real* pool checkout observe a mismatch
-    /// `after_connect` did not already catch. What this proves instead is
-    /// that `assert_current_database` — the exact function
-    /// `before_acquire` calls on every checkout when
-    /// `profile.checks_pool_identity()` — panics on a mismatch, using a
-    /// connection acquired the normal way from an honestly-connected pool.
+    /// `assert_current_database` is the private helper `after_connect` calls
+    /// on every pool's first connection (DESIGN.md §2.1) — this proves it
+    /// panics on a mismatch, using a connection acquired the normal way from
+    /// an honestly-connected pool.
     ///
     /// Review finding T-001/F13: an earlier version of this test connected
     /// and acquired *inside* the spawned task, then asserted only
@@ -151,8 +132,7 @@ mod tests {
     /// `tests/tenancy.rs` already do) and by asserting on the panic's actual
     /// message rather than merely its existence.
     #[tokio::test]
-    async fn assert_current_database_panics_on_the_mismatch_before_acquire_would_catch()
-    {
+    async fn assert_current_database_panics_on_the_mismatch() {
         dotenvy::dotenv().ok();
         let url = std::env::var("CONTROL_DATABASE_URL")
             .expect("CONTROL_DATABASE_URL must be set for tests");
@@ -168,8 +148,7 @@ mod tests {
         .await;
 
         let join_error = result.expect_err(
-            "assert_current_database must panic on a mismatched expectation, the same way \
-             before_acquire would on a real checkout",
+            "assert_current_database must panic on a mismatched expectation",
         );
         let panic_payload = join_error.into_panic();
         let message = panic_payload

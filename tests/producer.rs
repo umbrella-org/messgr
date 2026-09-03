@@ -78,7 +78,6 @@ async fn provision_test_tenant(
         slug,
         "eu",
         database_name,
-        Profile::Dev,
         "test-actor",
         vault.client(),
     )
@@ -120,7 +119,6 @@ async fn register_writes_both_the_tenant_row_and_the_control_mapping() {
         &cert_subject,
         "fraud",
         "fraud-oncall@example.com",
-        Profile::Dev,
         "test-actor",
     )
     .await
@@ -135,7 +133,7 @@ async fn register_writes_both_the_tenant_row_and_the_control_mapping() {
     assert_eq!(cert.tenant_id, tenant_id);
     assert_eq!(cert.producer_id, outcome.producer_id);
 
-    let producers = list_producers(&control_pool, &control_url, &slug, Profile::Dev)
+    let producers = list_producers(&control_pool, &control_url, &slug)
         .await
         .expect("listing producers failed");
     assert_eq!(producers.len(), 1);
@@ -173,7 +171,6 @@ async fn two_tenants_registering_the_same_producer_name_are_isolated() {
         &cert_a,
         "team-a",
         "a@example.com",
-        Profile::Dev,
         "test-actor",
     )
     .await
@@ -187,7 +184,6 @@ async fn two_tenants_registering_the_same_producer_name_are_isolated() {
         &cert_b,
         "team-b",
         "b@example.com",
-        Profile::Dev,
         "test-actor",
     )
     .await
@@ -198,10 +194,9 @@ async fn two_tenants_registering_the_same_producer_name_are_isolated() {
         "the same producer name in two tenants must get two distinct producer ids"
     );
 
-    let producers_a =
-        list_producers(&control_pool, &control_url, &slug_a, Profile::Dev)
-            .await
-            .expect("listing producers for tenant A failed");
+    let producers_a = list_producers(&control_pool, &control_url, &slug_a)
+        .await
+        .expect("listing producers for tenant A failed");
     assert_eq!(
         producers_a.len(),
         1,
@@ -239,7 +234,6 @@ async fn idempotent_reregistration_writes_a_second_audit_row_and_no_duplicate() 
         &cert_subject,
         "team",
         "team@example.com",
-        Profile::Dev,
         "test-actor",
     )
     .await
@@ -254,7 +248,6 @@ async fn idempotent_reregistration_writes_a_second_audit_row_and_no_duplicate() 
         &cert_subject,
         "team",
         "team@example.com",
-        Profile::Dev,
         "test-actor",
     )
     .await
@@ -262,7 +255,7 @@ async fn idempotent_reregistration_writes_a_second_audit_row_and_no_duplicate() 
     assert_eq!(second.outcome, "idempotent");
     assert_eq!(second.producer_id, first.producer_id);
 
-    let producers = list_producers(&control_pool, &control_url, &slug, Profile::Dev)
+    let producers = list_producers(&control_pool, &control_url, &slug)
         .await
         .expect("listing producers failed");
     assert_eq!(
@@ -320,7 +313,6 @@ async fn conflicting_reregistration_is_rejected_and_audited() {
         &cert_subject,
         "team",
         "team@example.com",
-        Profile::Dev,
         "test-actor",
     )
     .await
@@ -334,7 +326,6 @@ async fn conflicting_reregistration_is_rejected_and_audited() {
         &other_cert_subject,
         "team",
         "team@example.com",
-        Profile::Dev,
         "test-actor",
     )
     .await;
@@ -388,7 +379,6 @@ async fn cert_subject_already_bound_to_a_different_tenant_is_rejected() {
         &cert_subject,
         "team-a",
         "a@example.com",
-        Profile::Dev,
         "test-actor",
     )
     .await
@@ -402,7 +392,6 @@ async fn cert_subject_already_bound_to_a_different_tenant_is_rejected() {
         &cert_subject,
         "team-b",
         "b@example.com",
-        Profile::Dev,
         "test-actor",
     )
     .await;
@@ -413,10 +402,9 @@ async fn cert_subject_already_bound_to_a_different_tenant_is_rejected() {
          (this is the cross-tenant impersonation case)"
     );
 
-    let producers_b =
-        list_producers(&control_pool, &control_url, &slug_b, Profile::Dev)
-            .await
-            .expect("listing producers for tenant B failed");
+    let producers_b = list_producers(&control_pool, &control_url, &slug_b)
+        .await
+        .expect("listing producers for tenant B failed");
     assert!(
         producers_b.is_empty(),
         "the rejected registration must not create a producer row in tenant B"
@@ -449,7 +437,6 @@ async fn disable_keeps_the_cert_mapping_and_is_idempotent() {
         &cert_subject,
         "team",
         "team@example.com",
-        Profile::Dev,
         "test-actor",
     )
     .await
@@ -460,14 +447,13 @@ async fn disable_keeps_the_cert_mapping_and_is_idempotent() {
         &control_url,
         &slug,
         "disable-producer",
-        Profile::Dev,
         "test-actor",
     )
     .await
     .expect("first disable failed");
     assert_eq!(first_disable.outcome, "disabled");
 
-    let producers = list_producers(&control_pool, &control_url, &slug, Profile::Dev)
+    let producers = list_producers(&control_pool, &control_url, &slug)
         .await
         .expect("listing producers failed");
     assert_eq!(producers.len(), 1);
@@ -486,7 +472,6 @@ async fn disable_keeps_the_cert_mapping_and_is_idempotent() {
         &control_url,
         &slug,
         "disable-producer",
-        Profile::Dev,
         "test-actor",
     )
     .await
@@ -521,7 +506,6 @@ async fn register_and_disable_against_an_unknown_tenant_slug_are_rejected_and_au
         "CN=some-producer.internal",
         "team",
         "team@example.com",
-        Profile::Dev,
         &unique_actor,
     )
     .await;
@@ -535,7 +519,6 @@ async fn register_and_disable_against_an_unknown_tenant_slug_are_rejected_and_au
         &control_url,
         &unknown_slug,
         "some-producer",
-        Profile::Dev,
         &unique_actor,
     )
     .await;
@@ -606,7 +589,6 @@ async fn resolve_producer_resolves_a_registered_cert_subject() {
         &cert_subject,
         "team",
         "team@example.com",
-        Profile::Dev,
         "test-actor",
     )
     .await
@@ -662,7 +644,6 @@ async fn resolve_producer_distinguishes_disabled_from_unknown() {
         &cert_subject,
         "team",
         "team@example.com",
-        Profile::Dev,
         "test-actor",
     )
     .await
@@ -673,7 +654,6 @@ async fn resolve_producer_distinguishes_disabled_from_unknown() {
         &control_url,
         &slug,
         "resolve-disabled-producer",
-        Profile::Dev,
         "test-actor",
     )
     .await
@@ -727,7 +707,6 @@ async fn resolve_producer_rejects_a_suspended_tenant() {
         &cert_subject,
         "team",
         "team@example.com",
-        Profile::Dev,
         "test-actor",
     )
     .await
@@ -784,7 +763,6 @@ async fn idempotent_reregistration_does_not_silently_reenable_a_disabled_produce
         &cert_subject,
         "team",
         "team@example.com",
-        Profile::Dev,
         "test-actor",
     )
     .await
@@ -795,7 +773,6 @@ async fn idempotent_reregistration_does_not_silently_reenable_a_disabled_produce
         &control_url,
         &slug,
         "reenable-producer",
-        Profile::Dev,
         "test-actor",
     )
     .await
@@ -811,7 +788,6 @@ async fn idempotent_reregistration_does_not_silently_reenable_a_disabled_produce
         &cert_subject,
         "team",
         "team@example.com",
-        Profile::Dev,
         "test-actor",
     )
     .await
@@ -857,7 +833,6 @@ async fn resolve_producer_never_leaks_across_tenants() {
         &cert_a,
         "team-a",
         "a@example.com",
-        Profile::Dev,
         "test-actor",
     )
     .await
@@ -871,7 +846,6 @@ async fn resolve_producer_never_leaks_across_tenants() {
         &cert_b,
         "team-b",
         "b@example.com",
-        Profile::Dev,
         "test-actor",
     )
     .await

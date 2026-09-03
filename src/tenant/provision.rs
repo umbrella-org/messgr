@@ -2,8 +2,6 @@ use sqlx::{Executor, PgPool, Row};
 use uuid::Uuid;
 use vaultrs::client::VaultClient;
 
-use crate::profile::Profile;
-
 use super::{pool::connect_tenant_pool, repo, vault};
 
 /// The outcome of a successful `provision_tenant` call.
@@ -89,7 +87,6 @@ pub async fn provision_tenant(
     slug: &str,
     region: &str,
     database_name: &str,
-    profile: Profile,
     actor: &str,
     vault_client: &VaultClient,
 ) -> Result<ProvisionOutcome, ProvisionError> {
@@ -154,17 +151,18 @@ pub async fn provision_tenant(
     ensure_database_exists(control_pool, database_name).await?;
 
     let tenant_pool =
-        connect_tenant_pool(base_db_url, database_name, 5, profile).await?;
+        connect_tenant_pool(control_pool, base_db_url, tenant_id, database_name, 5)
+            .await?;
     // `migrate!`'s path is resolved relative to CARGO_MANIFEST_DIR, not this
     // file's location.
     sqlx::migrate!("./migrations/tenant")
-        .run(&tenant_pool)
+        .run(&tenant_pool.pool)
         .await
         .map_err(|err| sqlx::Error::Configuration(err.to_string().into()))?;
 
-    let version = current_schema_version(&tenant_pool).await?;
+    let version = current_schema_version(&tenant_pool.pool).await?;
     repo::record_schema_version(control_pool, tenant_id, version).await?;
-    tenant_pool.close().await;
+    tenant_pool.pool.close().await;
 
     repo::mark_active(control_pool, tenant_id).await?;
 

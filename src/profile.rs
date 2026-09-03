@@ -1,10 +1,8 @@
 //! Deployment profile, read once from `MESSGR_PROFILE`.
 //!
-//! Established here (DESIGN.md §2.1's `current_database()` pool-mismatch
-//! assertion) because two other guards documented elsewhere reuse the exact
-//! same shape: `MockProvider` refusing to start outside `dev` (§11.1), and
-//! dev-mode Vault refusing non-dev callers (§7.6). One enum, not three ad hoc
-//! flags.
+//! One enum, not several ad hoc flags: `MockProvider` refuses to start
+//! outside `dev` (§11.1), and dev-mode Vault refuses non-dev callers (§7.6)
+//! — both guards documented elsewhere reuse this exact shape.
 
 use std::env;
 
@@ -37,14 +35,6 @@ impl Profile {
         }
     }
 
-    /// Whether the per-checkout `current_database()` assertion (§2.1) should
-    /// run. True for `Dev`/`Staging`; skipped in `Production` to avoid
-    /// per-acquire overhead in the hot path — the one-time `after_connect`
-    /// check still runs unconditionally regardless of profile.
-    pub fn checks_pool_identity(&self) -> bool {
-        matches!(self, Self::Dev | Self::Staging)
-    }
-
     pub fn is_dev(&self) -> bool {
         matches!(self, Self::Dev)
     }
@@ -65,12 +55,5 @@ mod tests {
         assert_eq!(Profile::parse("production"), Some(Profile::Production));
         assert_eq!(Profile::parse("prod"), Some(Profile::Production));
         assert_eq!(Profile::parse("nonsense"), None);
-    }
-
-    #[test]
-    fn pool_identity_checks_skip_only_production() {
-        assert!(Profile::Dev.checks_pool_identity());
-        assert!(Profile::Staging.checks_pool_identity());
-        assert!(!Profile::Production.checks_pool_identity());
     }
 }

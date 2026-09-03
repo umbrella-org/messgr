@@ -137,7 +137,6 @@ pub async fn pre_provision_for_tenant(
     tenant_slug: &str,
     keystore: &dyn KeyStore,
     customer_ids: &[Uuid],
-    profile: crate::profile::Profile,
     actor: &str,
 ) -> Result<PreProvisionOutcome, CustomerDekError> {
     let tenant = crate::tenant::repo::find_by_slug(control_pool, tenant_slug)
@@ -149,17 +148,22 @@ pub async fn pre_provision_for_tenant(
         })?;
 
     let tenant_pool = crate::tenant::pool::connect_tenant_pool(
+        control_pool,
         base_db_url,
+        tenant.id,
         &tenant.database_name,
         5,
-        profile,
     )
     .await?;
 
-    let result =
-        pre_provision_deks(&tenant_pool, keystore, &tenant.vault_mount, customer_ids)
-            .await;
-    tenant_pool.close().await;
+    let result = pre_provision_deks(
+        &tenant_pool.pool,
+        keystore,
+        &tenant.vault_mount,
+        customer_ids,
+    )
+    .await;
+    tenant_pool.pool.close().await;
     let outcome = result?;
 
     crate::platform_audit::record(

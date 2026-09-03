@@ -402,7 +402,6 @@ async fn main() {
                 &slug,
                 &region,
                 &database_name,
-                config.profile,
                 &actor,
                 vault_keystore.client(),
             )
@@ -442,7 +441,6 @@ async fn main() {
                     &cert_subject,
                     &owner_team,
                     &contact,
-                    config.profile,
                     &actor,
                 )
                 .await
@@ -463,7 +461,6 @@ async fn main() {
                     &config.control_database_url,
                     &tenant_slug,
                     &name,
-                    config.profile,
                     &actor,
                 )
                 .await
@@ -478,7 +475,6 @@ async fn main() {
                     &control_pool,
                     &config.control_database_url,
                     &tenant_slug,
-                    config.profile,
                 )
                 .await
                 .unwrap_or_else(|err| {
@@ -590,7 +586,6 @@ async fn main() {
                     &config.control_database_url,
                     &tenant_slug,
                     input,
-                    config.profile,
                     &actor,
                 )
                 .await
@@ -605,7 +600,6 @@ async fn main() {
                     &control_pool,
                     &config.control_database_url,
                     &tenant_slug,
-                    config.profile,
                 )
                 .await
                 .unwrap_or_else(|err| {
@@ -647,7 +641,6 @@ async fn main() {
                         &tenant_slug,
                         &vault_keystore,
                         &customer_id,
-                        config.profile,
                         &actor,
                     )
                     .await
@@ -687,7 +680,6 @@ async fn main() {
                     &channel,
                     &locale,
                     &body,
-                    config.profile,
                     &actor,
                 )
                 .await
@@ -713,7 +705,6 @@ async fn main() {
                     &template_id,
                     version,
                     &locale,
-                    config.profile,
                 )
                 .await
                 .unwrap_or_else(|err| {
@@ -747,7 +738,6 @@ async fn main() {
                     &config.control_database_url,
                     &tenant_slug,
                     &template_id,
-                    config.profile,
                 )
                 .await
                 .unwrap_or_else(|err| {
@@ -793,7 +783,6 @@ async fn main() {
                     version,
                     &locale,
                     &variables,
-                    config.profile,
                 )
                 .await
                 .unwrap_or_else(|err| {
@@ -830,7 +819,6 @@ async fn main() {
                     &config.control_database_url,
                     &tenant_slug,
                     input,
-                    config.profile,
                     &actor,
                 )
                 .await
@@ -849,7 +837,6 @@ async fn main() {
                     &config.control_database_url,
                     &tenant_slug,
                     &channel,
-                    config.profile,
                 )
                 .await
                 .unwrap_or_else(|err| {
@@ -883,7 +870,6 @@ async fn main() {
                     &config.control_database_url,
                     &tenant_slug,
                     chrono::Utc::now(),
-                    config.profile,
                 )
                 .await
                 .unwrap_or_else(|err| {
@@ -907,7 +893,6 @@ async fn main() {
                 &config.control_database_url,
                 &tenant_slug,
                 since,
-                config.profile,
             )
             .await
             .unwrap_or_else(|err| {

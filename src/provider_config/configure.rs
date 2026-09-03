@@ -1,6 +1,5 @@
 use sqlx::PgPool;
 
-use crate::profile::Profile;
 use crate::tenant::pool::connect_tenant_pool;
 use crate::tenant::repo as tenant_repo;
 
@@ -64,7 +63,6 @@ pub async fn set_provider_config(
     base_db_url: &str,
     tenant_slug: &str,
     input: ProviderConfigInput,
-    profile: Profile,
     actor: &str,
 ) -> Result<ConfigureOutcome, ConfigureError> {
     let tenant = match tenant_repo::find_by_slug(control_pool, tenant_slug).await? {
@@ -78,14 +76,25 @@ pub async fn set_provider_config(
         }
     };
 
-    let tenant_pool =
-        connect_tenant_pool(base_db_url, &tenant.database_name, 5, profile).await?;
+    let tenant_pool = connect_tenant_pool(
+        control_pool,
+        base_db_url,
+        tenant.id,
+        &tenant.database_name,
+        5,
+    )
+    .await?;
 
-    let result =
-        set_provider_config_inner(control_pool, &tenant_pool, tenant.id, actor, input)
-            .await;
+    let result = set_provider_config_inner(
+        control_pool,
+        &tenant_pool.pool,
+        tenant.id,
+        actor,
+        input,
+    )
+    .await;
 
-    tenant_pool.close().await;
+    tenant_pool.pool.close().await;
     result
 }
 
@@ -119,7 +128,6 @@ pub async fn list_provider_config(
     base_db_url: &str,
     tenant_slug: &str,
     channel: &str,
-    profile: Profile,
 ) -> Result<Vec<ProviderConfig>, ConfigureError> {
     let tenant = tenant_repo::find_by_slug(control_pool, tenant_slug)
         .await?
@@ -127,10 +135,16 @@ pub async fn list_provider_config(
             rejected(format!("no tenant registered with slug {tenant_slug:?}"))
         })?;
 
-    let tenant_pool =
-        connect_tenant_pool(base_db_url, &tenant.database_name, 5, profile).await?;
-    let rows = repo::list(&tenant_pool, channel).await;
-    tenant_pool.close().await;
+    let tenant_pool = connect_tenant_pool(
+        control_pool,
+        base_db_url,
+        tenant.id,
+        &tenant.database_name,
+        5,
+    )
+    .await?;
+    let rows = repo::list(&tenant_pool.pool, channel).await;
+    tenant_pool.pool.close().await;
 
     Ok(rows?)
 }

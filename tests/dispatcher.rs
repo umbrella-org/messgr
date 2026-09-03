@@ -110,23 +110,28 @@ async fn provision_test_tenant(vault: &VaultKeyStore) -> TestTenant {
     let slug = unique_name("test_dispatcher");
     let database_name = unique_name("test_db_dispatcher");
 
-    provision_tenant(
+    let provision_outcome = provision_tenant(
         &control_pool,
         &control_url,
         &slug,
         "eu",
         &database_name,
-        Profile::Dev,
         "test-actor",
         vault.client(),
     )
     .await
     .expect("provisioning test tenant failed");
 
-    let tenant_pool =
-        connect_tenant_pool(&control_url, &database_name, 5, Profile::Dev)
-            .await
-            .expect("connecting tenant pool failed");
+    let tenant_pool = connect_tenant_pool(
+        &control_pool,
+        &control_url,
+        provision_outcome.tenant_id,
+        &database_name,
+        5,
+    )
+    .await
+    .expect("connecting tenant pool failed")
+    .pool;
 
     TestTenant {
         control_pool,
