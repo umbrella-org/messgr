@@ -258,3 +258,4 @@ order step 7 remains open).
 
 - 2026-09-02 — created (TO DO). source: audit: design/implementation audit found try_process has no retry path at all (every SenderError variant is written terminal) and run_channel_loop panics its whole channel task on a transient claim-query error.
 - 2026-09-03 — TO DO → READY: plan complete
+- 2026-09-03 — READY → IN DEVELOPMENT: picked up
