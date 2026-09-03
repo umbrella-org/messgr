@@ -64,8 +64,11 @@ back into the same file; it has no code dependency and no `depends-on:` ticket.
    This undercounts tenants with heavy `read`/`complaint` event traffic; state it as a baseline,
    not a ceiling.
 4. **Physical storage multiplier: 1.6×** applied to raw row bytes to approximate index overhead
-   (`comms_request` carries four indexes, `comms_event` one) and page/TOAST overhead. This is a
+   (`comms_request` carries five physical indexes counting its `PRIMARY KEY`, `comms_event`
+   two counting its `UNIQUE` constraint's own index) and page/TOAST overhead. This is a
    rule-of-thumb, not a measurement — say so in the document.
+   [Corrected during review: originally said four/one, counting only the explicit
+   `CREATE INDEX` statements and missing the `PRIMARY KEY`/`UNIQUE` constraint indexes.]
 5. **Target cluster storage ceiling for the tenant-packing calculation: ~10 TB usable per
    cluster**, confirmed with the user during refinement. State it as the planning assumption it
    is, not a hard platform limit.
@@ -182,7 +185,50 @@ Still-open, Decisions taken). No separate doc, no user-facing surface outside DE
 
 ## Review
 
-<!-- empty until IN REVIEW -->
+**Reviewer independence (step 0):** delegated. The orchestrating reviewer authored the
+`feat/T-019-size-tenant-ledger` branch in this same session, so audits (steps 2-4a) were run
+by an independent, freshly-spawned sub-agent, briefed adversarially with `AGENTS.md`,
+`CLAUDE.md`, the ticket, and the branch diff, and instructed to re-derive the sizing
+arithmetic from scratch rather than trust the document. Every finding it returned was
+independently re-verified by hand before being recorded below (recomputed the arithmetic
+myself in Python, re-read the cited DESIGN.md lines, re-ran `just docs-check`) — delegation
+buys independence, not accuracy. Severity below overrides the delegate's call on F1, per
+step 0's boundary that classification stays with the orchestrating reviewer.
+
+| id | severity | class | disposition | description | evidence | suggestion |
+|---|---|---|---|---|---|---|
+| F1 | non-blocking | docs-gap | fixed inline | Task 1 requires showing the arithmetic behind every figure, and the acceptance test requires every number to trace to shown arithmetic — but the ~250B `comms_request` and ~85B `comms_event` fixed-row figures were asserted with no column-by-column breakdown, unlike the payload figures. Reclassified from the delegate's "blocking": the numbers themselves were independently re-derived and correct, so nothing shipped wrong — this is a documentation-completeness gap against the ticket's own acceptance test, fixable without a rework round. | DESIGN.md §2.1 (pre-fix): "run to roughly **250 bytes** per row including Postgres's own per-tuple header and null-bitmap overhead" — no per-column figures shown | Added the column-by-column decomposition for both figures (commit `f1d4049`); independently recomputed 219.4+30≈249B and 58.0+27≈85B, matching. |
+| F2 | non-blocking | stale-xref | fixed inline | Confirmed design decision 4 said "`comms_request` carries four indexes, `comms_event` one" — stale from before the pickup applicability-gate audit corrected the count to five/two (PK and UNIQUE constraint indexes included). DESIGN.md's shipped text already used the corrected 5/2; only the ticket's own plan prose still said 4/1. | Ticket `## Implementation Plan` decision 4 (pre-fix) vs. DESIGN.md §2.1: "`comms_request` carries five physical indexes... `comms_event` carries two" | Corrected decision 4's wording to five/two, with a bracketed note recording the correction (this file, above). |
+| F3 | non-blocking | docs-gap | fixed inline | §7.5's GB restatement was the one figure in the diff without a local "estimate, not measurement" qualifier — it relied on the reader tracing back to §2.1's disclaimer, which the acceptance test's "somewhere near it" wording arguably permits but doesn't clearly satisfy. | DESIGN.md §7.5 (pre-fix): "**In GB, not months (T-019):**... Using §2.1's per-tenant growth figures..." | Reworded the heading to "(T-019, estimate — see §2.1)" and "growth estimates" (commit `f1d4049`). |
+| F4 | non-blocking | design | noted | §2.1's new sizing paragraph doesn't forward-cite §7.5 or §13, even though both sections' new prose depends on §2.1's figures (they do cite back). Asymmetric but not contradictory, and not required by the ticket's own tasks. | DESIGN.md §2.1 vs. §7.5/§13's "Using §2.1's..." / "applied to §2.1's sizing table" back-references | No fix needed — one-directional citation is a stylistic asymmetry, not an error; a future edit to §2.1 could add forward pointers if it grows further. |
+| F5 | non-blocking | stale-xref | fixed inline | DESIGN.md's own version stamp (`**Version 2** · 2026-09-03 · 6b84dea (T-021 review: ...)`) was never bumped despite this ticket changing what §2.1/§7.5/§13/Decisions-taken/Still-open assert — review-addendum.md step 5 requires bumping the stamp whenever a review changes DESIGN.md's assertions; here the change happened at implementation time rather than review time, but the stamp was stale either way and review is where governing-document reconciliation (protocol step 7) belongs. | DESIGN.md line 3 (pre-fix) | Bumped to `**Version 3** · 2026-09-03 · 0d8f82d (T-019 review: per-tenant storage sizing, cluster and restore-RTO limits)` (commit `f1d4049`), following the precedent set by Version 2's citation of T-021's own "acceptance green, move to in-review" commit rather than its literal diff commit. |
+
+Areas the independent audit checked with no defect: the full sizing arithmetic chain
+re-derived from scratch — SMS/email/WhatsApp/auth row sizes, the blended
+`comms_request`/`comms_event` per-message figure, the 1.6× multiplier, the 100k/1M/5M-per-day
+annual and 7-year totals, §7.5's 1.5-year hot-tablespace figures, and §13's RTO table — every
+figure reproduced exactly from the stated assumptions, no arithmetic errors found; Still-open
+#15 correctly resolved and #14 correctly left untouched; no contradiction introduced elsewhere
+in DESIGN.md; AGENTS.md hard invariants 6/7 (erasure surface, per-customer DEKs) not
+implicated — pure prose, no schema/table/column change; review-addendum steps 2
+(NULL-semantics/lease-release/secrets/erasure-statement/new-column checks) and 3
+(mutation-testable assertions) not applicable — no code, no schema, no tests in this diff;
+`just docs-check` clean both before and after the inline fixes; section-heading count
+unchanged (49 `##`/`###` headings before and after), no stale `§N` cross-reference introduced.
+Impact sweep (step 8): grepped `tickets/1-to-do/` and `tickets/2-ready/` for `T-019` —
+no ticket references it or depends on it; nothing to patch.
+
+Re-ran the acceptance test myself after the inline fixes: `just docs-check` (exit 0);
+hand-reproduced the 100k/day and 5M/day endpoints from the stated assumptions in Python,
+matching DESIGN.md's figures; confirmed every introduced number carries an explicit
+estimate/assumption qualifier; confirmed no `##`/`###` heading was added, removed, or
+renumbered (`git diff main...feat/T-019-size-tenant-ledger -- DESIGN.md` touches only
+existing-section prose and two table additions).
+
+**Disposition summary:** 0 blocking. 5 non-blocking: 4 fixed inline (F1, F2, F3, F5), 1 noted
+(F4).
+
+cost: estimated S, actual S — all five findings were sub-hour prose fixes; no scope growth.
 
 ## History
 
@@ -191,3 +237,4 @@ Still-open, Decisions taken). No separate doc, no user-facing surface outside DE
 - 2026-09-03 — TO DO → READY: plan complete
 - 2026-09-03 — READY → IN DEVELOPMENT: picked up
 - 2026-09-03 — IN DEVELOPMENT → IN REVIEW: acceptance green
+- 2026-09-03 — IN REVIEW → DONE: review clean, 4 fixed inline + 1 noted
