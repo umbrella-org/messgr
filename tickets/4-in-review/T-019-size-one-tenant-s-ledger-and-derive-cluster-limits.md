@@ -190,3 +190,4 @@ Still-open, Decisions taken). No separate doc, no user-facing surface outside DE
 - 2026-09-03 — TO DO → READY: implementation plan complete, all seven gate items present.
 - 2026-09-03 — TO DO → READY: plan complete
 - 2026-09-03 — READY → IN DEVELOPMENT: picked up
+- 2026-09-03 — IN DEVELOPMENT → IN REVIEW: acceptance green
