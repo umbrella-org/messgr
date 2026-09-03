@@ -1,6 +1,6 @@
 # messgr — Design
 
-**Version 2** · 2026-09-03 · `6b84dea` (T-021 review: corrected the crashed-dispatcher lease-reclaim mechanism)
+**Version 3** · 2026-09-03 · `0d8f82d` (T-019 review: per-tenant storage sizing, cluster and restore-RTO limits)
 
 Centralized communications orchestration and audit ledger for customer messaging across SMS, email, and WhatsApp.
 
@@ -101,6 +101,37 @@ cluster-uk/
 ```
 
 At this tenant count, a shared schema with `tenant_id` filtering would buy savings that round to zero — one migration instead of twenty, one pool instead of twenty — while carrying costs that land hard on large-institution customers: no way to recover one tenant without touching the others, no per-tenant retention (shared partitions cannot be detached), a multi-day purge to offboard, and a security questionnaire answered with "your data shares a table with another bank, separated by a `WHERE` clause". Per-tenant databases make retention and offboarding fall out of ordinary Postgres operations, and make single-tenant recovery a logical extraction rather than surgery on shared partitions — though **not** a one-command operation; see §13 for what restoring one tenant actually involves.
+
+**Per-tenant storage sizing (T-019).** Still-open #15 named the prerequisite this closes: nothing about cluster capacity, tenant packing, or restore RTO can be quoted without first sizing one tenant's ledger. The figures below are estimates built on stated assumptions, not measurements against a real template inventory — replace them once real templates and traffic exist.
+
+*Row size.* `comms_request`'s fixed columns run to roughly **250 bytes** per row (estimate): four `uuid` columns at 16 B each (64 B: `tenant_id`, `id`, `customer_id`, `producer_id`), `created_at` 8 B, `channel`/`class` text averaging ~7 B/~10 B, `template_id` assumed ~20 chars (~21 B), `template_version` 4 B, `campaign_id` present only on the ~30% of rows that carry a campaign (~6 B weighted), `destination_hmac` a fixed 32-byte HMAC (~33 B with its varlena header), `destination_ciphertext` assuming a ~20-character address plus AES-GCM's 28-byte nonce+tag (~49 B), `scheduled_for`/`expires_at` mostly NULL (~0 B weighted — a NULL column costs only a null-bitmap bit, not its full width), `final_status`/`finalized_at` set on the ~90% of rows that reach a terminal state (~17 B weighted) — summing to ~219 B of column data, plus Postgres's own ~30 B per-tuple overhead (heap tuple header, null bitmap, alignment padding). `payload_ciphertext` (§7) then dominates: plaintext plus AES-256-GCM's 12-byte nonce and 16-byte tag, plus a varlena header. Assuming (confirmed during refinement) an average rendered body of 160 bytes for SMS (§1's own constraint line), ~3,000 bytes for email, and ~400 bytes for WhatsApp, and NULL for `class = 'auth'` (§7.4):
+
+| Channel/class | Payload + crypto overhead | Row total |
+|---|---|---|
+| SMS (marketing/transactional) | ~190 B | ~440 B |
+| Email | ~3,032 B | ~3,280 B |
+| WhatsApp | ~430 B | ~680 B |
+| Auth (no payload, §7.4) | 0 B | ~250 B |
+
+`comms_event` (§4.4) fixed columns run to roughly **85 bytes** per row (estimate): `comms_request_id`/`customer_id` at 16 B each, `occurred_at` 8 B, `event_type` text averaging ~9 B, `provider_ref` empty (~1 B) on the two dispatch-internal events in three and a ~16-byte real reference on the provider-sourced one (~6 B weighted), `provider_status` NULL except on the provider-sourced event (~3 B weighted) — ~58 B of column data plus ~27 B of Postgres per-tuple overhead. Assuming three events per message on average (`queued`, `sent`, plus one terminal provider-sourced event carrying an average 500-byte raw delivery-receipt JSON, encrypted under the same AES-GCM overhead — §4.4's correction that gave every event a real dedup key applies regardless of size), that terminal event runs ~615 B and the other two ~85 B each: **~790 B of `comms_event` storage per message**, blended.
+
+Blending `comms_request` row size across a representative per-tenant mix (confirmed during refinement) of 60% SMS / 25% email / 10% WhatsApp / 5% auth gives ~1,165 B/message, plus the ~790 B/message of `comms_event` above: **~1,955 B/message raw**. `comms_request` carries five physical indexes (the four `CREATE INDEX` statements plus the `PRIMARY KEY`); `comms_event` carries two (the `customer_id` index plus the `UNIQUE` constraint's own index). Applying a **1.6× rule-of-thumb multiplier** for that index overhead plus page/TOAST overhead — a planning approximation, not derived arithmetically from the index count — gives **~3.1 KB of physical storage per message**.
+
+*Annual and 7-year growth, across §1's stated 100k–5M messages/day range* (steady-state; ignores organic growth within the 7-year window, which would push every figure below higher):
+
+| Volume | Annual growth | 7-year total |
+|---|---|---|
+| 100k msgs/day | ~114 GB | **~0.8 TB** |
+| 1M msgs/day | ~1.14 TB | **~8.0 TB** |
+| 5M msgs/day | ~5.7 TB | **~40 TB** |
+
+*Tenants per cluster.* Against a ~10 TB usable-per-cluster planning ceiling (confirmed during refinement), packing is sharply tiered rather than a single number — the 50× volume range means the top and bottom of it do not share a cluster the same way:
+
+- **Small tenants (~100k/day, ~0.8 TB/7yr):** roughly a dozen fit comfortably in one cluster.
+- **Mid tenants (~1M/day, ~8 TB/7yr):** effectively one per cluster — a second already forces >16 TB.
+- **Large tenants (top of range, ~5M/day, ~40 TB/7yr):** a single tenant's full-retention footprint alone is **4× the planning ceiling**, and crosses it within under two years of accumulation. These tenants need a cluster sized to themselves, not a shared one, and "how many tenants share a cluster" has no single answer above the small-tenant tier.
+
+This replaces the earlier unquantified "not thousands of small tenants" assumption with an actual, if rough, number: comfortable sharing exists only at the small end of the stated volume range; the large end is effectively a dedicated-cluster case regardless of how packing is planned.
 
 **`tenant_id` is on every table as a plain column. There is no Row Level Security.**
 
@@ -1010,6 +1041,8 @@ Consequence, and it belongs in the contract rather than in a config table: **bac
 
 Partitions older than 18 months move to a slower storage tablespace (writable — see §7.2). Nothing is deleted until the 7-year boundary, at which point the whole partition is detached and dropped.
 
+**In GB, not months (T-019, estimate — see §2.1):** 18 months of accumulation is the amount of data sitting on the fast tablespace at any time before the oldest partitions start moving to slow storage. Using §2.1's per-tenant growth estimates, that is roughly **~170 GB** for a 100k/day tenant, **~1.7 TB** for a 1M/day tenant, and **~8.6 TB** for a 5M/day tenant — the last of which is, by itself, nearly the entire ~10 TB per-cluster planning ceiling §2.1 uses, before any cold-tier data is even counted. Ops capacity planning for the fast tablespace should size against this figure per tenant tier, not against the flat "18 months."
+
 ### 7.6 Key management — HashiCorp Vault
 
 No HSM is available, so Vault is the root of trust. Vault also absorbs the rest of the secrets story (DB credentials, provider API keys, internal PKI), which is the main reason to prefer it over rolling a key table with a KEK in a config file.
@@ -1308,6 +1341,16 @@ Three nodes for Vault rather than one is not gold-plating: with manual Shamir un
 
 This is still far cleaner than extracting one tenant's rows from shared partitioned tables, and it remains a real argument for database-per-tenant — but it is not the one-command operation that "per-tenant PITR" suggests. Three things it requires: a written and **rehearsed** runbook, standing spare capacity (or a rapid provisioning path) for the recovery instance, and an RTO quoted to tenants that reflects a full-cluster restore rather than a single-database one.
 
+**Single-tenant restore RTO (T-019), as a function of cluster size — planning estimates, not measurements; no runbook has been rehearsed yet.** Assume ~300 GB/hour for the full-cluster base-restore-plus-WAL-replay step, ~150 GB/hour for the subsequent single-tenant `pg_dump`/restore step (dump/restore is slower than raw block replay — indexes rebuild), and a fixed ~4-hour provisioning/runbook-execution overhead, applied to §2.1's sizing table:
+
+| Cluster profile | Full-cluster restore | Tenant dump/restore | Total RTO |
+|---|---|---|---|
+| ~10 TB, small tenants packed (§2.1) | ~33 hours | ~5 hours (0.8 TB tenant) | **~1.8 days** |
+| ~10 TB, one mid-size tenant (§2.1) | ~33 hours | ~53 hours (8 TB tenant) | **~3.8 days** |
+| ~40 TB, one top-of-range tenant (§2.1) | ~133 hours | ~267 hours (40 TB tenant) | **~17 days** |
+
+The top row is quotable today. The bottom row is not: at the top of the 100k–5M/day range, the dump/restore step alone — extracting a tenant whose own footprint *is* most of the cluster — costs over a week under these throughput assumptions, before any provisioning delay. This is a real gap, not a rounding error, and it should not be smoothed into a single "RTO" figure quoted to every tenant regardless of size. Closing it needs one of: parallelized dump/restore (`pg_dump -j`) validated against a rehearsed runbook, standing warm-spare recovery capacity sized for the largest tenant rather than the average one, or a retention/tiering conversation with top-of-range tenants about what RTO their volume actually permits. None of those is decided here — this ticket sizes the problem, it does not solve it.
+
 **Note on the stack:** Rust is well-suited to the dispatcher's concurrency profile. The friction to plan for is integration surface rather than the language itself — SAML/OIDC, on-prem SMTP or Exchange, and bank middleware clients all have thinner Rust ecosystems than JVM or .NET. Budget time for those adapters, or front them with a small existing service where a mature client already exists.
 
 ---
@@ -1388,6 +1431,7 @@ Steps 1–7 are the minimum viable system. Everything after 11 can ship incremen
 | 27 | Staleness gate cut | `POST /comms` has always required an explicit `destination`, on every class, so a gate guarding a projection-resolved address guarded a path the API cannot take. Removed from the gate chain, `tenant_config`, and Still-open (§4.8, §5). |
 | 28 | Kill-switch "held" state is checked before claim, not after | The obvious alternative — claim, get gate-blocked, lease expires, re-claim — is a busy-wait for the life of the switch. The dispatcher excludes matching rows from the claim query's candidate set while a switch is cached active (§5.2). |
 | 29 | Auth kill switch's two-person approval is out-of-band for now | `auth_enabled` ships as a control-database column with no enforcing tool (T-016): an operator flips it via a documented `psql` runbook and records both approvers in `platform_audit`. Nothing mechanically requires two distinct people yet, because neither the admin panel (step 14) nor `otp-api` (step 17) — the flag's only reader — exists to build real dual control against (§5.2). |
+| 30 | Per-tenant sizing figures adopted as planning estimates (T-019) | ~3.1 KB/message blended, ~0.8/8/40 TB per tenant over 7 years across the 100k/1M/5M-per-day range. Drives a tiered tenants-per-cluster figure and an RTO range, replacing unquantified assumptions in §2.1, §7.5, §13. Built on stated payload-size, traffic-mix, and cluster-ceiling assumptions, not measurements — revisit once real templates and traffic exist. |
 
 ## Still open
 
@@ -1405,4 +1449,4 @@ Steps 1–7 are the minimum viable system. Everything after 11 can ship incremen
 12. **Cloud OTP posture** — will cloud tenants accept `otp-api` with its network hop, or should on-prem auth alongside cloud comms be the recommended pattern for tenants with strict auth SLAs? (§3.1)
 13. **Tenant offboarding SLA** — how quickly must data become unreadable after termination? Key destruction is immediate; `DROP DATABASE` and backup expiry are not. Same §7.3 backup-window caveat applies per tenant. Also: is terminate-and-archive (§7.7) offered commercially, and at what price? It carries multi-year key-custody obligations after the relationship ends.
 14. **Regional backup policy** — one window per region, so it must satisfy the strictest tenant on that cluster. Sets the erasure-completion date quoted to all of them (§7.3).
-15. **Single-tenant restore RTO** — what recovery time can be quoted, given it requires a full-cluster restore to a side instance? Depends on cluster size and whether spare capacity stands by (§13). **Unresolved prerequisite: no per-tenant storage estimate exists anywhere in this document.** The ledger holds rendered bodies (§7) for seven years across a 50× volume range (100k–5M messages/day per tenant, §1), so an email-heavy tenant's `payload_ciphertext` dominates its size and therefore the cluster's. Size one tenant first; cluster size — and with it this RTO, the slow-storage migration point (§7.5), and how many tenants can reasonably share a cluster (§2.1) — all follow from that number.
+15. ~~**Single-tenant restore RTO**~~ — resolved by sizing (T-019, §2.1, §13): ~1.8 days for a cluster of small tenants, ~3.8 days for one mid-size tenant, and ~17 days for a top-of-range tenant whose own footprint is most of the cluster — the last of which is not a quotable RTO today. Still open: which of §13's mitigations (parallelized dump/restore, warm-spare capacity sized for the largest tenant, or a retention/tiering conversation with top-of-range tenants) closes that gap, and a rehearsed runbook to validate any of the throughput assumptions T-019 used.
