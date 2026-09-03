@@ -1546,6 +1546,7 @@ dependencies = [
  "dotenvy",
  "hmac",
  "lru",
+ "rand 0.8.7",
  "reqwest 0.12.28",
  "rustls",
  "rustls-pemfile",

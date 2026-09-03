@@ -318,7 +318,8 @@ async fn successful_send_writes_sent_event_and_final_status_and_deletes_the_outb
 }
 
 #[tokio::test]
-async fn failed_send_writes_failed_event_and_final_status_with_no_requeue() {
+async fn terminal_provider_rejection_writes_failed_event_and_final_status_with_no_requeue()
+ {
     let vault = vault_keystore();
     let tenant = provision_test_tenant(&vault).await;
     let cache = small_cache();
@@ -326,9 +327,7 @@ async fn failed_send_writes_failed_event_and_final_status_with_no_requeue() {
     let mock_server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/messages"))
-        .respond_with(
-            ResponseTemplate::new(500).set_body_string("provider unavailable"),
-        )
+        .respond_with(ResponseTemplate::new(400).set_body_string("bad destination"))
         .mount(&mock_server)
         .await;
 
@@ -382,6 +381,251 @@ async fn failed_send_writes_failed_event_and_final_status_with_no_requeue() {
     .expect("fetching comms_event rows failed");
     assert_eq!(
         events,
+        vec![("failed".to_string(), None, Some("400".to_string()))]
+    );
+
+    let outbox_count: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM outbox WHERE comms_request_id = $1")
+            .bind(comms_request_id)
+            .fetch_one(&tenant.tenant_pool)
+            .await
+            .expect("counting outbox rows failed");
+    assert_eq!(
+        outbox_count, 0,
+        "a terminal (4xx-equivalent) rejection must be removed from the queue, not requeued"
+    );
+
+    tenant.cleanup().await;
+}
+
+#[tokio::test]
+async fn transient_provider_failure_requeues_with_cleared_lease_and_backoff() {
+    let vault = vault_keystore();
+    let tenant = provision_test_tenant(&vault).await;
+    let cache = small_cache();
+
+    let mock_server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/messages"))
+        .respond_with(
+            ResponseTemplate::new(500).set_body_string("provider unavailable"),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let (comms_request_id, created_at, _customer_id) =
+        write_ready_outbox_row(&tenant, &vault, &cache, "+15550100", "hello there")
+            .await;
+
+    let sender: Arc<dyn Sender> =
+        Arc::new(HttpSender::new(mock_server.uri(), "test-key".to_string()));
+    let ctx = DispatcherContext {
+        pool: tenant.tenant_pool.clone(),
+        keystore: Arc::new(vault_keystore()),
+        cache: Arc::new(cache),
+        mount: tenant.mount.clone(),
+        sender,
+        kill_switches: Arc::new(KillSwitchCache::new()),
+        draining: Arc::new(RwLock::new(HashMap::new())),
+    };
+
+    let claimed = repo::claim(
+        &tenant.tenant_pool,
+        "sms",
+        10,
+        Utc::now() + chrono::Duration::minutes(2),
+        &no_exclusion(),
+    )
+    .await
+    .expect("claim failed");
+    assert_eq!(claimed.len(), 1);
+
+    try_process(&ctx, &claimed[0])
+        .await
+        .expect("try_process failed");
+
+    let final_status: Option<String> = sqlx::query_scalar(
+        "SELECT final_status FROM comms_request WHERE created_at = $1 AND id = $2",
+    )
+    .bind(created_at)
+    .bind(comms_request_id)
+    .fetch_one(&tenant.tenant_pool)
+    .await
+    .expect("fetching final_status failed");
+    assert_eq!(
+        final_status, None,
+        "a retryable failure must not finalize the ledger row"
+    );
+
+    let event_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM comms_event WHERE comms_request_id = $1",
+    )
+    .bind(comms_request_id)
+    .fetch_one(&tenant.tenant_pool)
+    .await
+    .expect("counting comms_event rows failed");
+    assert_eq!(
+        event_count, 0,
+        "a reschedule writes no comms_event row (T-021 decision 3)"
+    );
+
+    let (leased_until, next_attempt_at): (Option<DateTime<Utc>>, DateTime<Utc>) = sqlx::query_as(
+        "SELECT leased_until, next_attempt_at FROM outbox WHERE comms_request_id = $1",
+    )
+    .bind(comms_request_id)
+    .fetch_one(&tenant.tenant_pool)
+    .await
+    .expect("fetching outbox row failed");
+    assert_eq!(
+        leased_until, None,
+        "a retryable failure must clear the lease in the same statement as the reschedule"
+    );
+    assert!(
+        next_attempt_at > Utc::now(),
+        "a retryable failure must reschedule into the future"
+    );
+
+    tenant.cleanup().await;
+}
+
+#[tokio::test]
+async fn transient_http_failure_requeues() {
+    let vault = vault_keystore();
+    let tenant = provision_test_tenant(&vault).await;
+    let cache = small_cache();
+
+    let (comms_request_id, _created_at, _customer_id) =
+        write_ready_outbox_row(&tenant, &vault, &cache, "+15550100", "hello there")
+            .await;
+
+    // An unreachable base URL fails at the transport layer, before any HTTP
+    // response exists -- SenderError::Http, not SenderError::Provider.
+    let sender: Arc<dyn Sender> = Arc::new(HttpSender::new(
+        "http://127.0.0.1:1".to_string(),
+        "test-key".to_string(),
+    ));
+    let ctx = DispatcherContext {
+        pool: tenant.tenant_pool.clone(),
+        keystore: Arc::new(vault_keystore()),
+        cache: Arc::new(cache),
+        mount: tenant.mount.clone(),
+        sender,
+        kill_switches: Arc::new(KillSwitchCache::new()),
+        draining: Arc::new(RwLock::new(HashMap::new())),
+    };
+
+    let claimed = repo::claim(
+        &tenant.tenant_pool,
+        "sms",
+        10,
+        Utc::now() + chrono::Duration::minutes(2),
+        &no_exclusion(),
+    )
+    .await
+    .expect("claim failed");
+    assert_eq!(claimed.len(), 1);
+
+    try_process(&ctx, &claimed[0])
+        .await
+        .expect("try_process failed");
+
+    let (leased_until, next_attempt_at): (Option<DateTime<Utc>>, DateTime<Utc>) = sqlx::query_as(
+        "SELECT leased_until, next_attempt_at FROM outbox WHERE comms_request_id = $1",
+    )
+    .bind(comms_request_id)
+    .fetch_one(&tenant.tenant_pool)
+    .await
+    .expect("fetching outbox row failed");
+    assert_eq!(
+        leased_until, None,
+        "a transport-level failure must clear the lease in the same statement as the reschedule"
+    );
+    assert!(
+        next_attempt_at > Utc::now(),
+        "a transport-level failure must reschedule into the future"
+    );
+
+    tenant.cleanup().await;
+}
+
+#[tokio::test]
+async fn retries_exhausted_after_max_attempts_terminal_fails() {
+    let vault = vault_keystore();
+    let tenant = provision_test_tenant(&vault).await;
+    let cache = small_cache();
+
+    let mock_server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/messages"))
+        .respond_with(
+            ResponseTemplate::new(500).set_body_string("provider unavailable"),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let (comms_request_id, created_at, _customer_id) =
+        write_ready_outbox_row(&tenant, &vault, &cache, "+15550100", "hello there")
+            .await;
+
+    let sender: Arc<dyn Sender> =
+        Arc::new(HttpSender::new(mock_server.uri(), "test-key".to_string()));
+    let ctx = DispatcherContext {
+        pool: tenant.tenant_pool.clone(),
+        keystore: Arc::new(vault_keystore()),
+        cache: Arc::new(cache),
+        mount: tenant.mount.clone(),
+        sender,
+        kill_switches: Arc::new(KillSwitchCache::new()),
+        draining: Arc::new(RwLock::new(HashMap::new())),
+    };
+
+    let mut claimed = repo::claim(
+        &tenant.tenant_pool,
+        "sms",
+        10,
+        Utc::now() + chrono::Duration::minutes(2),
+        &no_exclusion(),
+    )
+    .await
+    .expect("claim failed");
+    assert_eq!(claimed.len(), 1);
+
+    // Simulate the 8th claim (MAX_SEND_ATTEMPTS) without actually retrying
+    // seven times -- claim's own UPDATE already bumped attempts to 1.
+    sqlx::query("UPDATE outbox SET attempts = 8 WHERE comms_request_id = $1")
+        .bind(comms_request_id)
+        .execute(&tenant.tenant_pool)
+        .await
+        .expect("bumping attempts failed");
+    claimed[0].attempts = 8;
+
+    try_process(&ctx, &claimed[0])
+        .await
+        .expect("try_process failed");
+
+    let final_status: Option<String> = sqlx::query_scalar(
+        "SELECT final_status FROM comms_request WHERE created_at = $1 AND id = $2",
+    )
+    .bind(created_at)
+    .bind(comms_request_id)
+    .fetch_one(&tenant.tenant_pool)
+    .await
+    .expect("fetching final_status failed");
+    assert_eq!(
+        final_status.as_deref(),
+        Some("failed"),
+        "exhausted retries must terminal-fail rather than reschedule again"
+    );
+
+    let events: Vec<(String, Option<String>, Option<String>)> = sqlx::query_as(
+        "SELECT event_type, provider_ref, provider_status FROM comms_event WHERE comms_request_id = $1",
+    )
+    .bind(comms_request_id)
+    .fetch_all(&tenant.tenant_pool)
+    .await
+    .expect("fetching comms_event rows failed");
+    assert_eq!(
+        events,
         vec![("failed".to_string(), None, Some("500".to_string()))]
     );
 
@@ -393,7 +637,220 @@ async fn failed_send_writes_failed_event_and_final_status_with_no_requeue() {
             .expect("counting outbox rows failed");
     assert_eq!(
         outbox_count, 0,
-        "a single-attempt failure must still be removed from the queue, not requeued"
+        "an exhausted row must be removed from the queue"
+    );
+
+    tenant.cleanup().await;
+}
+
+#[tokio::test]
+async fn seventh_attempt_still_reschedules_one_short_of_the_cap() {
+    let vault = vault_keystore();
+    let tenant = provision_test_tenant(&vault).await;
+    let cache = small_cache();
+
+    let mock_server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/messages"))
+        .respond_with(
+            ResponseTemplate::new(500).set_body_string("provider unavailable"),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let (comms_request_id, created_at, _customer_id) =
+        write_ready_outbox_row(&tenant, &vault, &cache, "+15550100", "hello there")
+            .await;
+
+    let sender: Arc<dyn Sender> =
+        Arc::new(HttpSender::new(mock_server.uri(), "test-key".to_string()));
+    let ctx = DispatcherContext {
+        pool: tenant.tenant_pool.clone(),
+        keystore: Arc::new(vault_keystore()),
+        cache: Arc::new(cache),
+        mount: tenant.mount.clone(),
+        sender,
+        kill_switches: Arc::new(KillSwitchCache::new()),
+        draining: Arc::new(RwLock::new(HashMap::new())),
+    };
+
+    let mut claimed = repo::claim(
+        &tenant.tenant_pool,
+        "sms",
+        10,
+        Utc::now() + chrono::Duration::minutes(2),
+        &no_exclusion(),
+    )
+    .await
+    .expect("claim failed");
+    assert_eq!(claimed.len(), 1);
+
+    // One short of MAX_SEND_ATTEMPTS (8) -- the guard `row.attempts <
+    // MAX_SEND_ATTEMPTS` must still admit this and reschedule, not
+    // terminal-fail. Catches an off-by-one that terminal-fails a beat early.
+    sqlx::query("UPDATE outbox SET attempts = 7 WHERE comms_request_id = $1")
+        .bind(comms_request_id)
+        .execute(&tenant.tenant_pool)
+        .await
+        .expect("bumping attempts failed");
+    claimed[0].attempts = 7;
+
+    try_process(&ctx, &claimed[0])
+        .await
+        .expect("try_process failed");
+
+    let final_status: Option<String> = sqlx::query_scalar(
+        "SELECT final_status FROM comms_request WHERE created_at = $1 AND id = $2",
+    )
+    .bind(created_at)
+    .bind(comms_request_id)
+    .fetch_one(&tenant.tenant_pool)
+    .await
+    .expect("fetching final_status failed");
+    assert_eq!(
+        final_status, None,
+        "attempts == 7 (one short of the cap) must still reschedule, not terminal-fail"
+    );
+
+    let (leased_until, next_attempt_at): (Option<DateTime<Utc>>, DateTime<Utc>) = sqlx::query_as(
+        "SELECT leased_until, next_attempt_at FROM outbox WHERE comms_request_id = $1",
+    )
+    .bind(comms_request_id)
+    .fetch_one(&tenant.tenant_pool)
+    .await
+    .expect("fetching outbox row failed");
+    assert_eq!(leased_until, None);
+    assert!(next_attempt_at > Utc::now());
+
+    tenant.cleanup().await;
+}
+
+#[tokio::test]
+async fn attempts_past_the_cap_still_terminal_fails() {
+    let vault = vault_keystore();
+    let tenant = provision_test_tenant(&vault).await;
+    let cache = small_cache();
+
+    let mock_server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/messages"))
+        .respond_with(
+            ResponseTemplate::new(500).set_body_string("provider unavailable"),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let (comms_request_id, created_at, _customer_id) =
+        write_ready_outbox_row(&tenant, &vault, &cache, "+15550100", "hello there")
+            .await;
+
+    let sender: Arc<dyn Sender> =
+        Arc::new(HttpSender::new(mock_server.uri(), "test-key".to_string()));
+    let ctx = DispatcherContext {
+        pool: tenant.tenant_pool.clone(),
+        keystore: Arc::new(vault_keystore()),
+        cache: Arc::new(cache),
+        mount: tenant.mount.clone(),
+        sender,
+        kill_switches: Arc::new(KillSwitchCache::new()),
+        draining: Arc::new(RwLock::new(HashMap::new())),
+    };
+
+    let mut claimed = repo::claim(
+        &tenant.tenant_pool,
+        "sms",
+        10,
+        Utc::now() + chrono::Duration::minutes(2),
+        &no_exclusion(),
+    )
+    .await
+    .expect("claim failed");
+    assert_eq!(claimed.len(), 1);
+
+    // Past the cap -- should never happen in practice (nothing reschedules
+    // past 8), but the guard must still terminal-fail rather than reschedule
+    // forever if it ever does.
+    sqlx::query("UPDATE outbox SET attempts = 9 WHERE comms_request_id = $1")
+        .bind(comms_request_id)
+        .execute(&tenant.tenant_pool)
+        .await
+        .expect("bumping attempts failed");
+    claimed[0].attempts = 9;
+
+    try_process(&ctx, &claimed[0])
+        .await
+        .expect("try_process failed");
+
+    let final_status: Option<String> = sqlx::query_scalar(
+        "SELECT final_status FROM comms_request WHERE created_at = $1 AND id = $2",
+    )
+    .bind(created_at)
+    .bind(comms_request_id)
+    .fetch_one(&tenant.tenant_pool)
+    .await
+    .expect("fetching final_status failed");
+    assert_eq!(final_status.as_deref(), Some("failed"));
+
+    tenant.cleanup().await;
+}
+
+#[tokio::test]
+async fn startup_sweep_reclaims_a_lease_left_by_a_simulated_crash() {
+    let vault = vault_keystore();
+    let tenant = provision_test_tenant(&vault).await;
+    let cache = small_cache();
+
+    write_ready_outbox_row(&tenant, &vault, &cache, "+15550100", "hello there").await;
+
+    // Claim it and go no further -- simulates a crash mid try_process,
+    // before any terminal write or reschedule ever ran.
+    let claimed = repo::claim(
+        &tenant.tenant_pool,
+        "sms",
+        10,
+        Utc::now() + chrono::Duration::minutes(2),
+        &no_exclusion(),
+    )
+    .await
+    .expect("claim failed");
+    assert_eq!(claimed.len(), 1);
+    let leased_id = claimed[0].comms_request_id;
+
+    // Without the sweep, this row would stay leased forever -- repo::claim's
+    // own predicate never compares leased_until to now() (T-021's own
+    // corrected framing).
+    let second_claim_before_sweep = repo::claim(
+        &tenant.tenant_pool,
+        "sms",
+        10,
+        Utc::now() + chrono::Duration::minutes(2),
+        &no_exclusion(),
+    )
+    .await
+    .expect("second claim failed");
+    assert!(
+        second_claim_before_sweep.is_empty(),
+        "a leased row must not be claimable before the sweep runs"
+    );
+
+    let cleared = repo::clear_stale_leases(&tenant.tenant_pool)
+        .await
+        .expect("clear_stale_leases failed");
+    assert_eq!(cleared, 1);
+
+    let reclaimed = repo::claim(
+        &tenant.tenant_pool,
+        "sms",
+        10,
+        Utc::now() + chrono::Duration::minutes(2),
+        &no_exclusion(),
+    )
+    .await
+    .expect("reclaim after sweep failed");
+    assert_eq!(reclaimed.len(), 1);
+    assert_eq!(
+        reclaimed[0].comms_request_id, leased_id,
+        "the sweep must make the exact same row claimable again, immediately"
     );
 
     tenant.cleanup().await;

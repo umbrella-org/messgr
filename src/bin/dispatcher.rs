@@ -1,10 +1,13 @@
 //! `messgr-dispatcher` (T-013): a per-tenant, per-channel claim loop that
 //! turns an `outbox` row into a `comms_event` + `final_status` write. One
 //! process per tenant (DESIGN.md §9) -- leader election
-//! (`pg_try_advisory_lock`) and retry/backoff are later tickets (build
-//! order step 7); this binary runs exactly one instance per tenant and
-//! treats a send failure as terminal on the first attempt (T-013 decision
-//! 2).
+//! (`pg_try_advisory_lock`) is still a later ticket (build order step 7's
+//! other half); this binary runs exactly one instance per tenant.
+//!
+//! T-021 adds retry with backoff for retryable send failures and a
+//! startup sweep that clears any stale lease left by a crashed prior run
+//! (safe only because exactly one instance runs per tenant -- revisit once
+//! leader election ships).
 //!
 //! T-016 adds kill-switch enforcement: a shared `KillSwitchCache`, refreshed
 //! by a dedicated `LISTEN kill_switch` connection with a 30-second poll
@@ -19,6 +22,7 @@ use std::time::Duration;
 use messgr::config::Config;
 use messgr::db;
 use messgr::dispatcher::drain::{discard_engaged_scope, run_release_drain};
+use messgr::dispatcher::repo;
 use messgr::dispatcher::worker::{DispatcherContext, run_channel_loop};
 use messgr::key_cache::KeyCache;
 use messgr::keystore::{KeyStore, VaultKeyStore};
@@ -79,6 +83,18 @@ async fn main() {
     .await
     .expect("failed to connect to the tenant database")
     .pool;
+
+    // T-021 decision 4: clear every stale lease before any claim loop
+    // starts. Safe because exactly one dispatcher instance runs per tenant
+    // today (no leader election yet, T-013 decision 3) -- a fresh process
+    // start cannot be racing a still-live claimant.
+    let cleared_leases = repo::clear_stale_leases(&tenant_pool)
+        .await
+        .expect("clearing stale outbox leases failed");
+    tracing::info!(
+        cleared_leases,
+        "messgr-dispatcher: cleared stale outbox leases on startup"
+    );
 
     // Per-tenant AppRole login (T-013 decision 7) -- this is the
     // single-tenant-per-process case `connect_as_tenant`'s own doc comment

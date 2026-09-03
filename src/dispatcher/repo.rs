@@ -165,6 +165,48 @@ pub async fn load_ciphertexts(
     .await
 }
 
+/// Clears the lease and reschedules a retryable failure in one statement
+/// (DESIGN.md's corrected §4.2, T-021 decision 3) — never a bare timeout
+/// race between "write a terminal state" and "explicitly clear the lease on
+/// a rescheduled retry". Writes no `comms_event` row: §2.4 step 6 names only
+/// `attempts`/`next_attempt_at` for this path, "the row stays in the
+/// outbox" — no event write, unlike the `sent`/`failed` terminal writes.
+pub async fn reschedule_retry(
+    pool: &PgPool,
+    comms_request_id: Uuid,
+    next_attempt_at: DateTime<Utc>,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE outbox SET leased_until = NULL, next_attempt_at = $2 \
+         WHERE comms_request_id = $1",
+    )
+    .bind(comms_request_id)
+    .bind(next_attempt_at)
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
+/// Clears every stale lease for this tenant (T-021 decision 4) — called once
+/// at `messgr-dispatcher` startup, before any claim loop runs. Safe because
+/// exactly one dispatcher instance runs per tenant today (no leader
+/// election yet, T-013 decision 3): a fresh process start cannot be racing
+/// a still-live claimant, so any lease still set belongs to a run that is
+/// no longer around to finish it. `repo::claim`'s own predicate never
+/// compares `leased_until` to `now()`, so without this sweep a row left
+/// leased by a crash (or any pre-terminal-write failure) would stay leased
+/// forever rather than for the nominal lease duration.
+pub async fn clear_stale_leases(pool: &PgPool) -> Result<u64, sqlx::Error> {
+    let result = sqlx::query(
+        "UPDATE outbox SET leased_until = NULL WHERE leased_until IS NOT NULL",
+    )
+    .execute(pool)
+    .await?;
+
+    Ok(result.rows_affected())
+}
+
 /// Writes the one permitted `comms_request` mutation (§4.1), the
 /// corresponding `comms_event` row (§4.4), and removes the row from the
 /// queue (§4.2) — all in one transaction, so a crash between them can never

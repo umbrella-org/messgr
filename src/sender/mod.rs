@@ -52,6 +52,20 @@ impl From<reqwest::Error> for SenderError {
     }
 }
 
+impl SenderError {
+    /// DESIGN.md §2.4 step 6 (T-021 decision 1): a 4xx-equivalent provider
+    /// rejection is a permanent rejection (bad destination, bad payload,
+    /// auth failure with this credential) and terminal; a transport-level
+    /// failure or a 5xx-equivalent provider status is treated as transient
+    /// and retried with backoff.
+    pub fn is_retryable(&self) -> bool {
+        match self {
+            Self::Http(_) => true,
+            Self::Provider { status, .. } => *status >= 500,
+        }
+    }
+}
+
 /// A destination to send `body` to, and the provider's outcome or error.
 #[async_trait]
 pub trait Sender: Send + Sync {
@@ -60,4 +74,35 @@ pub trait Sender: Send + Sync {
         destination: &str,
         body: &str,
     ) -> Result<SendOutcome, SenderError>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn provider(status: u16) -> SenderError {
+        SenderError::Provider {
+            status,
+            body: String::new(),
+        }
+    }
+
+    #[test]
+    fn provider_status_retryability_boundary() {
+        assert!(!provider(400).is_retryable(), "4xx is terminal");
+        assert!(!provider(499).is_retryable(), "still 4xx, terminal");
+        assert!(provider(500).is_retryable(), "5xx is retryable");
+        assert!(provider(599).is_retryable(), "still 5xx, retryable");
+    }
+
+    #[tokio::test]
+    async fn http_transport_error_is_always_retryable() {
+        let client = reqwest::Client::new();
+        let err = client
+            .get("http://127.0.0.1:1")
+            .send()
+            .await
+            .expect_err("connecting to a closed port must fail");
+        assert!(SenderError::from(err).is_retryable());
+    }
 }
