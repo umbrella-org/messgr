@@ -5,7 +5,7 @@ use std::sync::{Arc, RwLock};
 use std::time::Duration as StdDuration;
 
 use chrono::{Duration as ChronoDuration, Utc};
-use rand::Rng;
+use rand::RngExt;
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -169,7 +169,7 @@ fn backoff_delay(attempts: i16) -> ChronoDuration {
         .min(BACKOFF_CAP.num_milliseconds());
     // `.max(1)` guards `gen_range` against an empty range if BACKOFF_BASE were
     // ever 0 — a no-op today since it's always 30s (T-021 review, F6).
-    let jitter_ms = rand::thread_rng().gen_range(0..=(delay_ms / 2).max(1));
+    let jitter_ms = rand::rng().random_range(0..=(delay_ms / 2).max(1));
     ChronoDuration::milliseconds(delay_ms + jitter_ms)
 }
 
