@@ -229,7 +229,63 @@ reads and the message reaches `final_status = sent`.
 
 ## Review
 
-<!-- empty until IN REVIEW -->
+- [x] Reviewer independence settled (step 0): reviewing session had no hand in this branch (fresh
+  session, post-`/clear`) — already independent. Audits (steps 1-4a) still delegated to a fresh,
+  worktree-isolated sub-agent briefed adversarially, for context isolation and a heavier read of
+  the diff; every delegated finding below was re-verified by hand against the actual files before
+  being recorded here (step 0's "delegation buys independence, not accuracy").
+- [x] Implementation audit — acceptance test re-run, tasks & criteria verified (steps 1, 2): all
+  6 commands (`just build`, `just lint`, `cargo test --test tenant_vault`, `cargo test --lib
+  tenant::vault`, `just test`, `just docs-check`) pass clean on live Postgres + dev Vault. Every
+  task (1-4) and confirmed decision (1-6) verified done exactly as specified, in the files named
+  — no deviations. Manual e2e check corroborated via a live `scripts/e2e.sh` run's
+  `dispatcher.log` (clean startup, no missing-env-var panic) and `comms_request` (2111 rows
+  `final_status = sent`, 0 left in `outbox`) rather than a fresh script run of my own (a collision
+  with an already-running e2e walkthrough against the same Docker daemon), noted rather than
+  silently assumed.
+- [x] Quality audit (step 3): idiomatic, matches existing panic-on-misconfiguration style. The new
+  isolation test (`tenant_a_vault_credentials_can_read_its_own_provider_secret_but_not_tenant_bs`)
+  mutation-tested per the addendum's standard — narrowing `policy_hcl_for`'s new KV path from
+  `secret/data/{tenant_slug}/*` to `secret/data/*` turned it red with the expected
+  permission-denied message; reverting turned it green again. Genuinely load-bearing, not a
+  vacuous `is_err()`.
+- [x] Consistency audit (step 4): found 3 stale doc-comment/config references this branch made
+  false (F1-F3) and 1 wording mismatch in newly-authored docs (F4) — all fixed inline, see table.
+  `policy_hcl_for`'s one call site (`provision_vault`) and `read_provider_credential`'s one call
+  site (`dispatcher.rs`) both updated consistently; no other stale `DISPATCHER_<CH>_API_KEY`
+  references remain in the tree after F1-F3's fixes.
+- [x] Documentation audit (step 4a): `docs/user-manual/control-plane-cli.adoc` and
+  `dispatcher.adoc` updated as specified and accurate against the new code (post F4 fix);
+  `src/bin/control.rs`'s doc comments updated. `just docs-check` clean.
+- [x] Docs-readability pass (step 4b): no docs-readability reviewer configured in this host —
+  conscious skip.
+- [x] Findings recorded with severity, class, disposition (step 5): see table below.
+- [x] Ticket moved (step 6): no blocking findings → `tickets/6-done/`.
+- [x] Other references / governing documents reconciled (step 7): grepped `DESIGN.md` and
+  `development/design/*.md` for `credential_path`/`DISPATCHER_*_API_KEY`/Vault-secrets
+  cross-references — none stale; decision #5 in
+  `development/design/14-decisions-and-open-questions.md` already correctly states Vault owns
+  provider credentials, and needed no edit. `development/design/11-failure-modes.md:39`'s
+  "SMS provider config is hot-reloadable" claim remains unimplemented (config is read once at
+  dispatcher startup) — see F5; this predates T-023 (`provider_config` had zero readers before
+  this ticket, so the claim was equally unimplemented either side of this branch) and is not
+  something this branch broke, so it is `noted`, not `fixed inline`.
+- [x] Remaining-tickets impact sweep (step 8): re-read `T-024` (CI erasure-coverage check) and
+  `T-025` (operability/error-handling cleanup) in `2-ready/`/`1-to-do/` — neither depends on or
+  references T-023; no assumption invalidated.
+- [x] Summary + commit message & MR attributes presented for approval (step 9): below.
+
+| id | severity | class | disposition | description | evidence | suggestion |
+|---|---|---|---|---|---|---|
+| F1 | non-blocking | stale-xref | fixed inline | `HttpSender::new`'s doc comment still said Vault credential resolution was deferred to a later ticket with "no KV-secret-read plumbing" — that plumbing now exists and is wired from `dispatcher.rs` | `src/sender/http.rs:19-21` (pre-fix) | fixed inline: doc comment now points at the actual caller/mechanism |
+| F2 | non-blocking | stale-xref | fixed inline | `dispatcher-run`'s justfile comment still listed `DISPATCHER_<CHANNEL>_API_KEY` as required; it's no longer read | `justfile:231-234` (pre-fix) | fixed inline: comment now names Vault KV as the credential source |
+| F3 | non-blocking | stale-xref | fixed inline | `.env.example` — the file a developer actually copies to run the dispatcher locally — still documented and set `DISPATCHER_SMS_API_KEY=dev-key`; untouched by this branch's diff | `.env.example:13-22` (pre-fix) | fixed inline: comment updated, `_API_KEY` line removed |
+| F4 | non-blocking | spec-unclear | fixed inline | `control-plane-cli.adoc`'s new failover paragraph called the descope "Still Open," but the ticket's own Description item 4 phrases it as a made decision ("Resolved at refinement... out of scope") — cosmetic mismatch, no functional impact | `docs/user-manual/control-plane-cli.adoc:186-187` (pre-fix) | fixed inline: wording aligned with Description item 4 |
+| F5 | non-blocking | design | noted | `development/design/11-failure-modes.md:39` claims SMS provider config is hot-reloadable without a deploy/restart; `provider_config` is in fact read once at dispatcher startup (this ticket gave it its first reader at all, still a one-time read) — a real gap against the OTP-cutover story in §12.1, but pre-existing and not introduced by this branch | `development/design/11-failure-modes.md:39`; `src/bin/dispatcher.rs:154-182` | noted: a future ticket implementing config hot-reload should also close this |
+
+Disposition summary: 4 fixed inline (F1-F4), 1 noted (F5). 0 folded, 0 new tickets.
+
+cost: estimated M, actual M
 
 ## History
 
@@ -238,3 +294,4 @@ reads and the message reaches `final_status = sent`.
 - 2026-09-04 — TO DO → READY: plan complete
 - 2026-09-04 — READY → IN DEVELOPMENT: picked up
 - 2026-09-04 — IN DEVELOPMENT → IN REVIEW: acceptance green
+- 2026-09-04 — IN REVIEW → DONE: review clean: no blocking findings, 4 stale-xref/spec-unclear findings fixed inline, 1 noted (F5)
