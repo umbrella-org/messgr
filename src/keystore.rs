@@ -104,6 +104,24 @@ impl VaultKeyStore {
         &self.client
     }
 
+    /// Reads a provider credential from Vault KV v2 at `<mount>/data/<path>`
+    /// (DESIGN.md §13, T-023) — a generic secret read, not one of `KeyStore`'s
+    /// two narrow Transit operations, so this is an inherent method rather
+    /// than a trait one (see `.client()`'s own precedent).
+    pub async fn read_provider_credential(
+        &self,
+        mount: &str,
+        path: &str,
+    ) -> Result<String, KeyStoreError> {
+        #[derive(serde::Deserialize)]
+        struct ProviderCredential {
+            api_key: String,
+        }
+        let secret: ProviderCredential =
+            vaultrs::kv2::read(&self.client, mount, path).await?;
+        Ok(secret.api_key)
+    }
+
     /// Authenticates as a tenant's own AppRole instead of the admin
     /// `VAULT_TOKEN` — the seam T-004 deliberately left unwired (PLAN.md's
     /// note under build step 0). Reads `VAULT_ROLE_ID`/`VAULT_WRAPPED_SECRET_ID`
@@ -182,6 +200,33 @@ pub(crate) fn connect_settings(
 
 pub(crate) fn connect_client(profile: Profile) -> Result<VaultClient, KeyStoreError> {
     Ok(VaultClient::new(connect_settings(profile)?)?)
+}
+
+/// Splits a `provider_config.credential_path` (raw Vault HTTP-API KV v2 form
+/// `<mount>/data/<path>`, e.g. `secret/data/acme/sms`) into the `(mount,
+/// path)` pair `vaultrs::kv2::read` expects — it computes `<mount>/data/<path>`
+/// itself, so passing the whole string as `path` would double the `data/`
+/// segment (T-023 decision 1). Returns `None` if `/data/` isn't present.
+pub fn split_kv_path(path: &str) -> Option<(&str, &str)> {
+    path.split_once("/data/")
+}
+
+#[cfg(test)]
+mod split_kv_path_tests {
+    use super::split_kv_path;
+
+    #[test]
+    fn splits_mount_and_path_on_first_data_segment() {
+        assert_eq!(
+            split_kv_path("secret/data/acme/sms"),
+            Some(("secret", "acme/sms"))
+        );
+    }
+
+    #[test]
+    fn returns_none_without_a_data_segment() {
+        assert_eq!(split_kv_path("secret/acme/sms"), None);
+    }
 }
 
 #[async_trait]
