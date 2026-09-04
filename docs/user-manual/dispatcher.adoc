@@ -32,16 +32,26 @@ matches. See "Kill switches" for the operator runbook.
 Requires `DISPATCHER_TENANT_SLUG` (which tenant this process serves), `VAULT_ROLE_ID` /
 `VAULT_WRAPPED_SECRET_ID` (this tenant's own AppRole -- printed by `just provision` on a fresh
 provisioning run), and, per channel in `DISPATCHER_CHANNELS` (default `sms`),
-`DISPATCHER_<CHANNEL>_BASE_URL` / `DISPATCHER_<CHANNEL>_API_KEY` -- a dev stand-in `Sender`
-credential, since `provider_config` has no `base_url` column and its `credential_path` has no
-Vault KV reader yet (T-012 decisions 3-4). With a tenant provisioned (its `vault_wrapped_secret_id`
-copied from that output), configured, and a message already sitting in its `outbox` (the
-`messgr-ingest` walkthrough above):
+`DISPATCHER_<CHANNEL>_BASE_URL` -- a dev stand-in `Sender` endpoint, since `provider_config` has
+no `base_url` column. The credential itself comes from `provider_config.credential_path` via
+Vault KV (T-023) -- no `DISPATCHER_<CHANNEL>_API_KEY` env var anymore. Seed it locally the same
+way `scripts/e2e.sh` does:
+
+[source,bash]
+----
+curl -sf --header "X-Vault-Token: messgr-dev-root-token" --request POST \
+    --data '{"data":{"api_key":"dev-key"}}' \
+    "http://localhost:8200/v1/secret/data/acme/sms"
+----
+
+With a tenant provisioned (its `vault_wrapped_secret_id` copied from that output), configured
+(including `provider-config set` pointing at the KV path above), a credential seeded at that
+path, and a message already sitting in its `outbox` (the `messgr-ingest` walkthrough above):
 
 [source,bash]
 ----
 DISPATCHER_TENANT_SLUG=acme DISPATCHER_CHANNELS=sms \
-DISPATCHER_SMS_BASE_URL=http://localhost:9091 DISPATCHER_SMS_API_KEY=dev-key \
+DISPATCHER_SMS_BASE_URL=http://localhost:9091 \
 VAULT_ROLE_ID=<from just provision> VAULT_WRAPPED_SECRET_ID=<from just provision> \
 just dispatcher-run
 ----

@@ -230,8 +230,9 @@ ingest-run:
 
 # Run messgr-dispatcher: a single tenant's claim loop. Requires
 # DISPATCHER_TENANT_SLUG, VAULT_ROLE_ID/VAULT_WRAPPED_SECRET_ID, and
-# DISPATCHER_<CHANNEL>_BASE_URL/_API_KEY per channel to be set (see
-# .env.example); DISPATCHER_CHANNELS defaults to "sms".
+# DISPATCHER_<CHANNEL>_BASE_URL per channel to be set (see .env.example);
+# the provider credential itself comes from provider_config.credential_path
+# via Vault KV (T-023), not an env var. DISPATCHER_CHANNELS defaults to "sms".
 [group('control-plane')]
 dispatcher-run:
     cargo run --bin messgr-dispatcher

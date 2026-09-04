@@ -27,9 +27,10 @@ use messgr::dispatcher::drain::{discard_engaged_scope, run_release_drain};
 use messgr::dispatcher::repo;
 use messgr::dispatcher::worker::{DispatcherContext, run_channel_loop};
 use messgr::key_cache::KeyCache;
-use messgr::keystore::{KeyStore, VaultKeyStore};
+use messgr::keystore::{KeyStore, VaultKeyStore, split_kv_path};
 use messgr::kill_switch::cache::{KillSwitchCache, run_refresh_loop};
 use messgr::kill_switch::model::on_queued;
+use messgr::provider_config::repo as provider_config_repo;
 use messgr::sender::Sender;
 use messgr::sender::http::HttpSender;
 use messgr::tenant::pool::connect_tenant_pool;
@@ -119,15 +120,16 @@ async fn main() {
     // Per-tenant AppRole login (T-013 decision 7) -- this is the
     // single-tenant-per-process case `connect_as_tenant`'s own doc comment
     // names, unlike messgr-ingest's shared admin-token connection (T-011
-    // decision 5).
-    let keystore: Arc<dyn KeyStore> = Arc::new(
-        VaultKeyStore::connect_as_tenant(config.profile)
-            .await
-            .expect(
-                "failed to log in to Vault as this tenant's AppRole \
-                 (VAULT_ROLE_ID/VAULT_WRAPPED_SECRET_ID must be set)",
-            ),
-    );
+    // decision 5). Kept as the concrete type until after the per-channel
+    // credential resolution below (T-023 decision 5) -- `read_provider_credential`
+    // is an inherent method, not on the `KeyStore` trait `keystore` is
+    // narrowed to once wrapped.
+    let vault_keystore = VaultKeyStore::connect_as_tenant(config.profile)
+        .await
+        .expect(
+            "failed to log in to Vault as this tenant's AppRole \
+             (VAULT_ROLE_ID/VAULT_WRAPPED_SECRET_ID must be set)",
+        );
 
     let cache = Arc::new(KeyCache::new(
         NonZeroUsize::new(DEK_CACHE_CAPACITY).expect("DEK_CACHE_CAPACITY is nonzero"),
@@ -143,15 +145,50 @@ async fn main() {
     let kill_switches = Arc::new(KillSwitchCache::new());
     let draining = Arc::new(RwLock::new(HashMap::new()));
 
-    let mut contexts = HashMap::new();
+    // Two passes: resolve every channel's credential from Vault via the
+    // still-concrete `vault_keystore` first, then wrap it into the shared
+    // `Arc<dyn KeyStore>` `DispatcherContext` needs (T-023 decision 5) --
+    // `read_provider_credential` is inherent on `VaultKeyStore`, not on the
+    // `KeyStore` trait, so it must run before the value is moved into `Arc`.
+    let mut channel_senders = Vec::new();
     for channel in &channels {
         let upper = channel.to_uppercase();
         let base_url = env_var(&format!("DISPATCHER_{upper}_BASE_URL"));
-        let api_key = env_var(&format!("DISPATCHER_{upper}_API_KEY"));
+
+        let configs = provider_config_repo::list(&tenant_pool, channel)
+            .await
+            .expect("loading provider_config failed");
+        let top = configs.first().unwrap_or_else(|| {
+            panic!("no provider_config row for channel {channel:?} (tenant {tenant_slug:?})")
+        });
+        let (kv_mount, kv_path) = split_kv_path(&top.credential_path).unwrap_or_else(|| {
+            panic!(
+                "provider_config.credential_path {:?} for channel {channel:?} is not in \
+                 <mount>/data/<path> form",
+                top.credential_path
+            )
+        });
+        let api_key = vault_keystore
+            .read_provider_credential(kv_mount, kv_path)
+            .await
+            .unwrap_or_else(|err| {
+                panic!(
+                    "reading Vault credential at {:?} for channel {channel:?} failed: {err}",
+                    top.credential_path
+                )
+            });
+
+        channel_senders.push((channel.clone(), base_url, api_key));
+    }
+
+    let keystore: Arc<dyn KeyStore> = Arc::new(vault_keystore);
+
+    let mut contexts = HashMap::new();
+    for (channel, base_url, api_key) in channel_senders {
         let sender: Arc<dyn Sender> = Arc::new(HttpSender::new(base_url, api_key));
 
         contexts.insert(
-            channel.clone(),
+            channel,
             Arc::new(DispatcherContext {
                 pool: tenant_pool.clone(),
                 keystore: keystore.clone(),

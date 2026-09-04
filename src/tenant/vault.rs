@@ -51,7 +51,7 @@ pub async fn provision_vault(
     transit_key::create(client, &mount_path, KEY_NAME, None).await?;
 
     let policy_name = format!("tenant-{tenant_slug}-transit");
-    let policy_hcl = policy_hcl_for(&mount_path);
+    let policy_hcl = policy_hcl_for(&mount_path, tenant_slug);
     // `policy::set` is an upsert — no idempotency concern.
     policy::set(client, &policy_name, &policy_hcl).await?;
 
@@ -84,14 +84,18 @@ pub async fn provision_vault(
 
 /// The ACL policy granting exactly the two paths `KeyStore`'s two methods
 /// touch under `mount_path` — tighter than "the whole mount" (which would
-/// also permit key rotate/export/delete). Still satisfies §7.6's "an
-/// AppRole [bound] to exactly one mount": a two-path subset of one mount is
-/// still exactly one mount. Key name is always the fixed constant, so there
-/// is no wildcard here to lock down later.
-fn policy_hcl_for(mount_path: &str) -> String {
+/// also permit key rotate/export/delete) — plus `read` on the tenant's own
+/// provider-credential KV prefix (DESIGN.md §13, T-023 decision 4). Still
+/// satisfies §7.6's "an AppRole [bound] to exactly one mount": a subset of
+/// paths across the tenant's own Transit mount and its own KV prefix is
+/// still exactly-scoped to that one tenant. Key name is always the fixed
+/// constant, so there is no wildcard on Transit; the KV wildcard is narrow
+/// (per-tenant prefix) because provider paths are per-channel and open-ended.
+fn policy_hcl_for(mount_path: &str, tenant_slug: &str) -> String {
     format!(
         "path \"{mount_path}/datakey/plaintext/{KEY_NAME}\" {{\n  capabilities = [\"create\", \"update\"]\n}}\n\
-         path \"{mount_path}/decrypt/{KEY_NAME}\" {{\n  capabilities = [\"create\", \"update\"]\n}}\n"
+         path \"{mount_path}/decrypt/{KEY_NAME}\" {{\n  capabilities = [\"create\", \"update\"]\n}}\n\
+         path \"secret/data/{tenant_slug}/*\" {{\n  capabilities = [\"read\"]\n}}\n"
     )
 }
 
@@ -117,13 +121,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn policy_hcl_names_exactly_the_two_keystore_paths() {
+    fn policy_hcl_names_exactly_the_two_keystore_paths_and_the_kv_read_path() {
         // Pure-function regression guard for decision 4 (least privilege): if
-        // this ever grows a third path or a broader capability, this test
-        // should be the thing that has to change, not a live-Vault surprise.
-        let policy_hcl = policy_hcl_for("transit/acme");
+        // this ever grows a third Transit path, a broader capability, or a
+        // KV path outside the tenant's own prefix, this test should be the
+        // thing that has to change, not a live-Vault surprise.
+        let policy_hcl = policy_hcl_for("transit/acme", "acme");
         assert!(policy_hcl.contains("transit/acme/datakey/plaintext/messgr-dek"));
         assert!(policy_hcl.contains("transit/acme/decrypt/messgr-dek"));
+        assert!(policy_hcl.contains(
+            "path \"secret/data/acme/*\" {\n  capabilities = [\"read\"]\n}\n"
+        ));
         assert!(!policy_hcl.contains("rotate"));
         assert!(!policy_hcl.contains("export"));
         assert!(!policy_hcl.contains("delete"));

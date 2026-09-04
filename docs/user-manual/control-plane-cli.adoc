@@ -166,9 +166,26 @@ channel's rows in failover order (lowest `priority` first).
 No real vendor is wired up yet -- `provider` is a free-text label, and `HttpSender` (the first
 `Sender` implementation) speaks a small JSON-over-HTTP contract of this codebase's own design,
 proven against a local mock server rather than a committed vendor's API (DESIGN.md's own
-"provider selection" question, Still Open #5, stays open). `credential_path` (a Vault path) and
-`rate_limit_per_sec` are stored but not yet read by anything -- Vault KV-secret retrieval and
-rate-limit enforcement are later tickets' work.
+"provider selection" question, Still Open #5, stays open). `rate_limit_per_sec` is stored but not
+yet read by anything -- rate-limit enforcement is a later ticket's work.
+
+`credential_path` is now read by `messgr-dispatcher` at startup (DESIGN.md §13, T-023):
+`messgr-control` never touches the secret value itself, only this pointer to it. It is the raw
+Vault HTTP-API KV v2 form `<mount>/data/<path>` -- e.g. `secret/data/acme/sms`, the tenant's own
+prefix under Vault's default `secret/` KV v2 mount -- and the secret at that path must be a JSON
+object with one field, `{"api_key": "..."}`, written out-of-band by an operator (`vault kv put`
+or the raw HTTP API) after `provider-config set` stores the pointer:
+
+[source,bash]
+----
+curl -sf --header "X-Vault-Token: $VAULT_TOKEN" --request POST \
+    --data '{"data":{"api_key":"..."}}' \
+    "$VAULT_ADDR/v1/secret/data/acme/sms"
+----
+
+Only the highest-priority row per channel is resolved at startup -- failover-on-priority is
+resolved out of scope for now (this ticket's own Description item 4); the ordered-list schema
+exists so a second provider is a config change later, not something this ticket wires up.
 
 == Customer DEK pre-provisioning
 
