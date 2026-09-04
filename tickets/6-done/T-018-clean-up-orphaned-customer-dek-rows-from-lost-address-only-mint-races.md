@@ -247,16 +247,29 @@ describe `POST /comms`'s resolution/error contract to producers, which this tick
 - [x] Docs-readability pass (step 4b): **conscious skip** — no docs-readability reviewer
   (tool/subagent) is configured in this environment.
 - [x] Findings recorded (step 5, table below); disposition summary and cost line present.
+- [x] Ticket moved (step 6): round 1 → `5-rework/` (F1), fixed same session, → `4-in-review/`;
+  scoped re-review (round 2, delegated) confirmed clean → `6-done/`.
+- [x] Other references updated; governing documents reconciled (step 7): grepped
+  `development/design/` for `AddressConflict`/`409`/"decision 9" — none found. DESIGN.md §4.7
+  already stated "never reject a send"; this ticket fixed code contradicting an already-correct
+  design, so no DESIGN.md edit is owed. `tickets/6-done/T-015-*.md`'s own decision-9 record is
+  historical and correctly left as-is (its Description already says so).
+- [x] Remaining-tickets impact sweep (step 8): no ticket in `1-to-do/` or `2-ready/` lists T-018
+  in `depends-on:` or references it in Description. Nothing to patch.
 
 | id | severity | class | disposition | description | evidence | suggestion |
 |---|---|---|---|---|---|---|
 | F1 | blocking | plan-wrong | — | Confirmed design decision 1 (persist `customer_dek` only after `tx.commit()`) opened a worse failure mode than the one it closed: on the *winning* path, a crash or DB error between `tx.commit()` (which durably writes `customer_address` with ciphertext encrypted under `dek.plaintext`) and the follow-up `insert_if_absent` call leaves a permanent, real customer row whose ciphertext is encrypted under a DEK stored nowhere — unrecoverable, not just orphaned. | `src/customer/resolve.rs:371-377` (pre-fix); contrast the persist-before-use pattern at `src/customer_dek/lifecycle.rs:57-89` | Insert the `customer_dek` row inside the same transaction as `customer`/`customer_address`, so all three commit or roll back atomically — closes both the original orphan and this new window at once. |
 | F2 | non-blocking | design | fixed inline | The winning-path `customer_dek_repo::insert_if_absent(...).await?` call discarded its returned bool and unconditionally cached the plaintext, unlike its sibling `get_or_create_dek`, which checks the bool and re-fetches the winner's row on `false`. No behaviour bug (`customer_id` here is always a fresh `Uuid::new_v4()`, so `false` is unreachable), but undocumented. | `src/customer/resolve.rs:374-375` (pre-fix) | Add a comment explaining why ignoring the bool is safe here specifically. |
+| F3 | non-blocking | test-gap | noted | The F1 rework fix (commit `9883c50`) shipped with no new/updated test asserting the atomicity guarantee directly (that `customer_dek` can never commit-without or be-missing-after a committed `customer_address`). The existing `concurrent_address_only_resolution_mints_exactly_one_provisional_customer` still passes and incidentally covers the loser-leaves-no-row half, but nothing exercises the commit-atomicity half beyond code inspection. Accepted as `noted`, not promoted: the crash-mid-transaction scenario this fix closes isn't practically simulable in this integration-test harness (no fault-injection hook between a `COMMIT` and the surrounding function returning), so a new test would assert the SQL shape, not the actual guarantee. | `src/customer/resolve.rs` (`mint_provisional_customer_and_address`, post-fix), `src/customer_dek/repo.rs` (`insert_if_absent_tx`) | None actioned — revisit if/when the harness gains a way to inject a mid-transaction fault. |
 
-**Disposition summary:** 1 blocking (F1 → `5-rework/`, fixed same round, see rework record
-below), 1 non-blocking → fixed inline (F2).
+**Disposition summary:** round 1 — 1 blocking (F1 → `5-rework/`, fixed same round, see rework
+record below), 1 non-blocking → fixed inline (F2). Scoped re-review (round 2, delegated,
+independent) — confirmed F1 closed and F2 addressed with no new defect beyond 1 non-blocking →
+noted (F3).
 
-cost: estimated M, actual M
+cost: estimated M, actual M-L (the F1 rework round pushed this past a plain M — one extra
+design iteration, a new repo function, and two independent-reviewer delegations)
 
 ### Rework fix record — round 1 (commit 9883c50)
 
@@ -272,6 +285,20 @@ cost: estimated M, actual M
 - Re-ran `just build`, `just lint`, and the full `just test` suite after the fix — all green
   (`tests/customer.rs` 9/9, `tests/ingest.rs` 11/11).
 
+### Scoped re-review — round 2 (independent, delegated; reads commit 9883c50)
+
+Verdict: **F1 closed, F2 addressed, approved.** Confirmed by an independent sub-agent (this
+reviewing agent authored the round-1 fix in this same session, so step 0 applies again) that
+`insert_if_absent_tx` runs on `&mut tx` before `tx.commit()`; both the winner path (all three
+rows commit atomically) and the loser path (rollback discards all three, zero orphan) trace
+correctly; `dek_cache.put` runs only after `tx.commit()` succeeds; the new SQL is
+shape-identical to the original `insert_if_absent`, whose pool-level call site
+(`get_or_create_dek`) is untouched and still correct for its own genuine-race case. One
+incidental, unrelated observation: `just test`'s first full-suite run hit a flake in
+`tests/kill_switch.rs` (`engaged_producer_switch_excludes_only_that_producers_rows`), confirmed
+pre-existing (passes in isolation and on a full-suite rerun) and unrelated to this branch's
+diff — not a T-018 finding, noted here only for the record.
+
 ## History
 
 - 2026-09-01 — created (TO DO). source: review: T-015's review (F2) found a lost address-only mint race leaves an orphaned, unreachable `customer_dek` row — narrow but genuine, batched here since it needs design thought (restructure vs. sweep), not a one-line fix.
@@ -282,3 +309,4 @@ cost: estimated M, actual M
 - 2026-09-04 — IN DEVELOPMENT → IN REVIEW: acceptance green
 - 2026-09-04 — IN REVIEW → REWORK: F1 blocking: customer_dek persistence ordering (plan-wrong)
 - 2026-09-04 — REWORK → IN REVIEW: findings fixed
+- 2026-09-04 — IN REVIEW → DONE: review clean; F1 fixed same round, F2 fixed inline, F3 noted
