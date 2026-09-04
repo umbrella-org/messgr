@@ -3,7 +3,7 @@
 //! comes from `tenant_pepper::ensure_tenant_pepper`; this module never
 //! touches Vault or Postgres.
 
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use sha2::Sha256;
 
 pub fn compute(pepper: &[u8], destination: &str) -> Vec<u8> {
