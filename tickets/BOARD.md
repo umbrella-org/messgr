@@ -13,10 +13,11 @@ Last updated: 2026-09-04
 
 ## IN DEVELOPMENT
 
-### messgr (0/1)
+### messgr (1/1)
 
 | id | title | depends-on |
 |---|---|---|
+| T-022 | Apply ledger and queue schema corrections to migrations | [] |
 
 ## IN REVIEW
 
@@ -38,7 +39,6 @@ Last updated: 2026-09-04
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
-| T-022 | Apply ledger and queue schema corrections to migrations | high | medium | M | [] |  |
 | T-023 | Read provider credentials from Vault instead of environment variables | high | medium | M | [] |  |
 | T-024 | CI check that every PII-holding table is covered by erasure or a named exemption | high | medium | M | [] |  |
 

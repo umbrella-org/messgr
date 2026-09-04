@@ -196,3 +196,4 @@ a real, documented CLI surface being removed.
 - 2026-09-02 — created (TO DO). source: audit: applies the DESIGN.md ledger/queue schema corrections from the 2026-09-02 design/implementation audit to the shipped migrations.
 - 2026-09-04 — TO DO → READY: implementation plan complete; also folds in a fix for `development/design/04-gate-chain.md`'s stale Staleness gate row (decision 27 claimed removal that never happened), added to the plan at the user's direction during refinement.
 - 2026-09-04 — TO DO → READY: plan complete
+- 2026-09-04 — READY → IN DEVELOPMENT: picked up
