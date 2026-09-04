@@ -142,11 +142,11 @@ producer-list tenant_slug:
 
 # Set (create or overwrite) a tenant's typed configuration
 [group('control-plane')]
-tenant-config-set tenant retention_years default_timezone default_locale quota_day_boundary_tz staleness_max_age_seconds actor:
+tenant-config-set tenant retention_years default_timezone default_locale quota_day_boundary_tz actor:
     cargo run --bin {{bin}} -- tenant-config set --tenant-slug {{tenant}} \
         --retention-years {{retention_years}} --default-timezone {{default_timezone}} \
         --default-locale {{default_locale}} --quota-day-boundary-tz {{quota_day_boundary_tz}} \
-        --staleness-max-age-seconds {{staleness_max_age_seconds}} --actor {{actor}}
+        --actor {{actor}}
 
 # Show a tenant's typed configuration
 [group('control-plane')]
