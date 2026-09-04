@@ -8,6 +8,20 @@ While the version is below `1.0.0`, breaking changes may land in a minor release
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-04
+
+### Fixed
+
+- Ledger and outbox schema corrections: dropped the dead `comms_request.dek_id` column,
+  added `destination_hmac`/outbox indexes, scoped `idempotency` per-producer, fixed
+  `comms_event` dedup to catch dispatch-internal events, added `orphan_event`, and removed
+  the already-cut `staleness_max_age` from the schema and `tenant-config-set` (T-022).
+- `messgr-dispatcher` now resolves each channel's provider credential from
+  `provider_config.credential_path` against Vault KV instead of a
+  `DISPATCHER_<CHANNEL>_API_KEY` environment variable — the one place the shipped system
+  violated DESIGN.md §13's Vault-only secrets rule. The tenant AppRole policy gained scoped
+  `read` on its own `secret/data/<tenant_slug>/*` KV paths (T-023).
+
 ## [0.1.0] - 2026-09-04
 
 Initial release. Single-tenant control plane, ledger/outbox pipeline, and first
@@ -47,5 +61,6 @@ SMS-channel dispatcher.
 - Two races on `customer_address`'s `(kind, value_hmac)` index that could orphan
   `customer_dek` rows or reject legitimate address-conflict sends (T-018).
 
-[Unreleased]: https://github.com/umbrella-org/messgr/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/umbrella-org/messgr/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/umbrella-org/messgr/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/umbrella-org/messgr/releases/tag/v0.1.0
