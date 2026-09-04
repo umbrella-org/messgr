@@ -310,3 +310,4 @@ diff — not a T-018 finding, noted here only for the record.
 - 2026-09-04 — IN REVIEW → REWORK: F1 blocking: customer_dek persistence ordering (plan-wrong)
 - 2026-09-04 — REWORK → IN REVIEW: findings fixed
 - 2026-09-04 — IN REVIEW → DONE: review clean; F1 fixed same round, F2 fixed inline, F3 noted
+- 2026-09-04 — merge request opened: PR #24 (`feat/T-018-customer-address-races`, commits 77558e8, 9883c50) — pending human merge
