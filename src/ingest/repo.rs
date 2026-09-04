@@ -72,9 +72,11 @@ pub async fn insert_transactional(
 
     if claim.rows_affected() == 0 {
         tx.rollback().await?;
-        let existing = find_idempotent_reply(pool, producer_id, idempotency_key).await?.expect(
-            "a row must exist immediately after losing the idempotency claim race",
-        );
+        let existing = find_idempotent_reply(pool, producer_id, idempotency_key)
+            .await?
+            .expect(
+                "a row must exist immediately after losing the idempotency claim race",
+            );
         return Ok(InsertOutcome::Replayed {
             comms_request_id: existing,
         });
