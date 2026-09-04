@@ -19,6 +19,8 @@ use std::num::NonZeroUsize;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
+use clap::{Parser, Subcommand};
+
 use messgr::config::Config;
 use messgr::db;
 use messgr::dispatcher::drain::{discard_engaged_scope, run_release_drain};
@@ -48,8 +50,26 @@ fn env_var(name: &str) -> String {
     std::env::var(name).unwrap_or_else(|_| panic!("{name} must be set"))
 }
 
+#[derive(Parser)]
+#[command(name = "messgr-dispatcher")]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Command>,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    /// Print the binary name and version, then exit.
+    Version,
+}
+
 #[tokio::main]
 async fn main() {
+    if matches!(Cli::parse().command, Some(Command::Version)) {
+        println!("messgr-dispatcher {}", env!("CARGO_PKG_VERSION"));
+        return;
+    }
+
     tracing_subscriber::fmt().init();
     let config = Config::from_env();
 
@@ -217,5 +237,18 @@ async fn main() {
 
     for handle in handles {
         let _ = handle.await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn version_parses_as_its_own_subcommand() {
+        let cli = Cli::try_parse_from(["messgr-dispatcher", "version"])
+            .expect("parsing the version subcommand must succeed");
+
+        assert!(matches!(cli.command, Some(Command::Version)));
     }
 }
