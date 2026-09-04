@@ -207,8 +207,6 @@ enum TenantConfigCommand {
             ])
         )]
         verification_mode: Option<String>,
-        #[arg(long = "staleness-max-age-seconds")]
-        staleness_max_age_seconds: i64,
         /// Rows/second the kill-switch release-drain ramp admits after a
         /// switch releases (DESIGN.md §5.2). Defaults to 500 (the column's
         /// own SQL default) when omitted.
@@ -568,7 +566,6 @@ async fn main() {
                     schedule_horizon_days,
                     quota_day_boundary_tz,
                     verification_mode: verification_mode_arg,
-                    staleness_max_age_seconds,
                     kill_switch_release_rate,
                     actor,
                 } => {
@@ -580,11 +577,6 @@ async fn main() {
                         quota_day_boundary_tz,
                         verification_mode: verification_mode_arg
                             .unwrap_or_else(|| verification_mode::OBSERVE.to_string()),
-                        staleness_max_age: sqlx::postgres::types::PgInterval {
-                            months: 0,
-                            days: 0,
-                            microseconds: staleness_max_age_seconds * 1_000_000,
-                        },
                         kill_switch_release_rate: kill_switch_release_rate
                             .unwrap_or(500),
                     };
@@ -618,14 +610,13 @@ async fn main() {
                         Some(config_row) => println!(
                             "retention_years={} default_timezone={} default_locale={} \
                          schedule_horizon_days={} quota_day_boundary_tz={} verification_mode={} \
-                         staleness_max_age_seconds={} kill_switch_release_rate={}",
+                         kill_switch_release_rate={}",
                             config_row.retention_years,
                             config_row.default_timezone,
                             config_row.default_locale,
                             config_row.schedule_horizon_days,
                             config_row.quota_day_boundary_tz,
                             config_row.verification_mode,
-                            config_row.staleness_max_age_duration().num_seconds(),
                             config_row.kill_switch_release_rate,
                         ),
                         None => println!("not configured"),
@@ -957,8 +948,6 @@ mod tests {
             "en-GB",
             "--quota-day-boundary-tz",
             "Europe/London",
-            "--staleness-max-age-seconds",
-            "7200",
             "--actor",
             "operator@example.com",
         ])
@@ -996,8 +985,6 @@ mod tests {
             "en-GB",
             "--quota-day-boundary-tz",
             "Europe/London",
-            "--staleness-max-age-seconds",
-            "7200",
             "--verification-mode",
             "sometimes",
             "--actor",

@@ -9,7 +9,7 @@ pub async fn load(pool: &PgPool) -> Result<Option<TenantConfig>, sqlx::Error> {
     sqlx::query_as::<_, TenantConfig>(
         r#"
         SELECT retention_years, default_timezone, default_locale, schedule_horizon_days,
-               quota_day_boundary_tz, verification_mode, staleness_max_age,
+               quota_day_boundary_tz, verification_mode,
                kill_switch_release_rate
         FROM tenant_config
         WHERE singleton
@@ -31,10 +31,10 @@ pub async fn upsert(
         r#"
         INSERT INTO tenant_config (
             singleton, retention_years, default_timezone, default_locale,
-            schedule_horizon_days, quota_day_boundary_tz, verification_mode, staleness_max_age,
+            schedule_horizon_days, quota_day_boundary_tz, verification_mode,
             kill_switch_release_rate
         )
-        VALUES (true, $1, $2, $3, $4, $5, $6, $7, $8)
+        VALUES (true, $1, $2, $3, $4, $5, $6, $7)
         ON CONFLICT (singleton) DO UPDATE SET
             retention_years = EXCLUDED.retention_years,
             default_timezone = EXCLUDED.default_timezone,
@@ -42,7 +42,6 @@ pub async fn upsert(
             schedule_horizon_days = EXCLUDED.schedule_horizon_days,
             quota_day_boundary_tz = EXCLUDED.quota_day_boundary_tz,
             verification_mode = EXCLUDED.verification_mode,
-            staleness_max_age = EXCLUDED.staleness_max_age,
             kill_switch_release_rate = EXCLUDED.kill_switch_release_rate
         "#,
     )
@@ -52,7 +51,6 @@ pub async fn upsert(
     .bind(input.schedule_horizon_days)
     .bind(&input.quota_day_boundary_tz)
     .bind(&input.verification_mode)
-    .bind(input.staleness_max_age)
     .bind(input.kill_switch_release_rate)
     .execute(pool)
     .await
