@@ -199,7 +199,7 @@ a real, documented CLI surface being removed.
 - [x] Ticket moved (step 6) — see History.
 - [x] Other references updated / governing documents reconciled (step 7) — F1 below is the one gap found; it goes to rework rather than being fixed inline, since it contradicts AGENTS.md hard invariant 6.
 - [x] Remaining-tickets impact sweep done (step 8) — T-024 patched directly (F2); no other ticket in `1-to-do/`/`2-ready/` references T-022 or `orphan_event`.
-- [ ] Summary + commit message & MR attributes presented for approval (step 9) — pending: F1 fixed (round 1, commit `a5caad4`), awaiting the scoped re-review this fix now triggers.
+- [x] Summary + commit message & MR attributes presented for approval (step 9) — scoped re-review below confirms F1 resolved; presenting now.
 
 | id | severity | class | disposition | description | evidence | suggestion |
 |---|---|---|---|---|---|---|
@@ -221,6 +221,24 @@ row into an ordinary `comms_event`. Added `orphan_event` to `development/design/
 §14's exemption-tracking list alongside `suppression`. Docs-only change; full acceptance test
 (`just build`/`lint`/`test`/`docs-check`) re-run clean.
 
+### Scoped re-review verdict
+
+Reviewer independence: **delegated** (I authored the rework fix commit this session) — a fresh
+adversarial sub-agent audited commit `a5caad4` in isolation, scoped strictly to F1 and its own
+diff, per this pass's re-review rule. Findings re-verified by hand: `orphan_event`'s schema
+(`migrations/tenant/0004_ledger_outbox_schema.sql:80-91`) confirmed to have no `customer_id`
+column, matching the new paragraph's structural claim; the §4.4/§10 citations check out against
+the actual section headers; T-030 exists on `main` with an Outcome matching what the paragraph
+claims it will do; `just docs-check` re-run clean independently.
+
+**F1: resolved.** No new findings from the fix's own diff — it is exactly the two files the fix
+record claims, docs-only, no scope creep, no new stale cross-references. (One pre-existing gap
+noted but correctly out of scope: `development/design/14-decisions-and-open-questions.md` has no
+row for either `suppression`'s or `orphan_event`'s exemption — predates this diff, not introduced
+by it.)
+
+**Verdict: no blocking findings remain.** Ticket proceeds to `tickets/6-done/`.
+
 ## History
 
 - 2026-09-02 — created (TO DO). source: audit: applies the DESIGN.md ledger/queue schema corrections from the 2026-09-02 design/implementation audit to the shipped migrations.
@@ -230,3 +248,4 @@ row into an ordinary `comms_event`. Added `orphan_event` to `development/design/
 - 2026-09-04 — IN DEVELOPMENT → IN REVIEW: acceptance green
 - 2026-09-04 — IN REVIEW → REWORK: review: F1 blocking (orphan_event missing from DESIGN.md §7.2 erasure statements)
 - 2026-09-04 — REWORK → IN REVIEW: findings fixed
+- 2026-09-04 — IN REVIEW → DONE: scoped re-review clean; F1 resolved, no blocking findings remain
