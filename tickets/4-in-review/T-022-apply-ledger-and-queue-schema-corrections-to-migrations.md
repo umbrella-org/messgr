@@ -199,7 +199,7 @@ a real, documented CLI surface being removed.
 - [x] Ticket moved (step 6) — see History.
 - [x] Other references updated / governing documents reconciled (step 7) — F1 below is the one gap found; it goes to rework rather than being fixed inline, since it contradicts AGENTS.md hard invariant 6.
 - [x] Remaining-tickets impact sweep done (step 8) — T-024 patched directly (F2); no other ticket in `1-to-do/`/`2-ready/` references T-022 or `orphan_event`.
-- [ ] Summary + commit message & MR attributes presented for approval (step 9) — pending: blocking finding F1 routes this ticket to rework first.
+- [ ] Summary + commit message & MR attributes presented for approval (step 9) — pending: F1 fixed (round 1, commit `a5caad4`), awaiting the scoped re-review this fix now triggers.
 
 | id | severity | class | disposition | description | evidence | suggestion |
 |---|---|---|---|---|---|---|
@@ -212,6 +212,15 @@ Disposition summary: 1 blocking (F1, routes to rework), 1 folded (F2 → T-024),
 
 cost: estimated M, actual M
 
+### Rework fix record — round 1 (commit a5caad4)
+
+Fixed F1 only, per scope. Added an `orphan_event` named-exemption paragraph to
+`development/design/06-pii-retention.md` §7.2, matching `suppression`'s style — no `customer_id`
+column, third-party payload kept unencrypted, temporary until T-030's reconciliation resolves a
+row into an ordinary `comms_event`. Added `orphan_event` to `development/design/13-build-order.md`
+§14's exemption-tracking list alongside `suppression`. Docs-only change; full acceptance test
+(`just build`/`lint`/`test`/`docs-check`) re-run clean.
+
 ## History
 
 - 2026-09-02 — created (TO DO). source: audit: applies the DESIGN.md ledger/queue schema corrections from the 2026-09-02 design/implementation audit to the shipped migrations.
@@ -220,3 +229,4 @@ cost: estimated M, actual M
 - 2026-09-04 — READY → IN DEVELOPMENT: picked up
 - 2026-09-04 — IN DEVELOPMENT → IN REVIEW: acceptance green
 - 2026-09-04 — IN REVIEW → REWORK: review: F1 blocking (orphan_event missing from DESIGN.md §7.2 erasure statements)
+- 2026-09-04 — REWORK → IN REVIEW: findings fixed

@@ -20,10 +20,11 @@ Last updated: 2026-09-04
 
 ## IN REVIEW
 
-### messgr (0/1)
+### messgr (1/1)
 
 | id | title | depends-on |
 |---|---|---|
+| T-022 | Apply ledger and queue schema corrections to migrations | [] |
 
 ## REWORK
 
@@ -31,7 +32,6 @@ Last updated: 2026-09-04
 
 | id | title | open findings |
 |---|---|---|
-| T-022 | Apply ledger and queue schema corrections to migrations | review: F1 blocking (orphan_event missing from DESIGN.md §7.2 erasure statements) |
 
 ## READY (impact order, per child)
 
