@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use sqlx::PgPool;
+use sqlx::postgres::PgTransaction;
 use uuid::Uuid;
 
 use super::model::CustomerDek;
@@ -34,6 +35,29 @@ pub async fn insert_if_absent(
     .bind(wrapped_dek)
     .bind(created_at)
     .execute(pool)
+    .await?;
+
+    Ok(result.rows_affected() == 1)
+}
+
+/// Same as `insert_if_absent`, but inside a caller-owned transaction — so
+/// the DEK row commits or rolls back atomically with whatever else that
+/// transaction does (T-018: `customer_dek` must not survive a rolled-back
+/// `customer`/`customer_address` insert, and must not commit any later than
+/// they do either).
+pub async fn insert_if_absent_tx(
+    tx: &mut PgTransaction<'_>,
+    customer_id: Uuid,
+    wrapped_dek: &str,
+    created_at: DateTime<Utc>,
+) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query(
+        "INSERT INTO customer_dek (customer_id, wrapped_dek, created_at) VALUES ($1, $2, $3) ON CONFLICT (customer_id) DO NOTHING",
+    )
+    .bind(customer_id)
+    .bind(wrapped_dek)
+    .bind(created_at)
+    .execute(&mut **tx)
     .await?;
 
     Ok(result.rows_affected() == 1)

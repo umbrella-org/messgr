@@ -337,9 +337,15 @@ async fn mint_provisional_customer_and_address(
     let now = Utc::now();
 
     // Not `get_or_create_dek`: `customer_id` is always fresh here, so its
-    // cache/DB lookups are guaranteed misses. Persisting the wrapped DEK is
-    // deferred past the transaction below (T-018) — a lost race must not
-    // leave a `customer_dek` row with no matching `customer` row.
+    // cache/DB lookups are guaranteed misses. The `customer_dek` row is
+    // inserted inside the same transaction as `customer`/`customer_address`
+    // below (T-018 rework, F1) — committed or rolled back atomically with
+    // them, rather than persisted separately before or after. Persisting it
+    // before the transaction left a lost race's row orphaned (no matching
+    // `customer` row); persisting it only after `tx.commit()` opened a
+    // window where a crash between the two left a *won* race's address
+    // ciphertext permanently unrecoverable (no DEK stored anywhere). Neither
+    // failure mode is possible when all three rows share one commit.
     let dek = keystore.create_dek(vault_mount).await?;
     let ciphertext =
         encryption::encrypt(&dek.plaintext, address_id.as_bytes(), destination.as_bytes())?;
@@ -369,16 +375,21 @@ async fn mint_provisional_customer_and_address(
     .await?;
 
     if inserted {
+        // Ignoring the returned bool is safe here specifically: `customer_id`
+        // is a `Uuid::new_v4()` this function alone generated, so no other
+        // transaction can have raced to insert a `customer_dek` row for it —
+        // unlike `get_or_create_dek`, which calls the pool-level
+        // `insert_if_absent` for a `customer_id` other callers may share.
+        customer_dek_repo::insert_if_absent_tx(&mut tx, customer_id, &dek.wrapped, now).await?;
         tx.commit().await?;
-        // Only now is `customer_id` permanent — safe to persist its DEK.
-        customer_dek_repo::insert_if_absent(pool, customer_id, &dek.wrapped, now).await?;
         dek_cache.put(customer_id, dek.plaintext);
         return Ok((customer_id, address_id));
     }
 
-    // Lost the race: `dek` is simply dropped here, never persisted or
-    // cached. Vault's `generate-data-key` call left no server-side artifact
-    // for this discarded datakey, so there is nothing to clean up.
+    // Lost the race: rolling back undoes the customer_dek insert along with
+    // customer/customer_address, so `dek` leaves no row anywhere. Vault's
+    // `generate-data-key` call left no server-side artifact either, so there
+    // is nothing left to clean up.
     tx.rollback().await?;
     let winner = repo::find_active_address_by_hmac(pool, kind, value_hmac)
         .await?
