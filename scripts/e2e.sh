@@ -197,7 +197,7 @@ step_2_setup_env() {
     state_set VAULT_WRAPPED_SECRET_ID "$vault_wrapped_secret_id"
 
     log "tenant-config set"
-    just tenant-config-set "$TENANT_SLUG" 7 Europe/London "$TEMPLATE_LOCALE" Europe/London 7200 "$ACTOR"
+    just tenant-config-set "$TENANT_SLUG" 7 Europe/London "$TEMPLATE_LOCALE" Europe/London "$ACTOR"
 
     log "registering producer '$PRODUCER_NAME'"
     just producer-register "$TENANT_SLUG" "$PRODUCER_NAME" "$PRODUCER_SUBJECT" fraud fraud-oncall@example.com "$ACTOR"
