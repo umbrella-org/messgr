@@ -83,19 +83,26 @@ cargo build --release --target aarch64-apple-darwin     # or any other target, i
                                                           # has it installed (rustup target add)
 ```
 
-There is no `goreleaser check`/`dist-snapshot` equivalent yet — the workflow has not been
-exercised end-to-end. Treat the first real tag as the first real test of the pipeline, and
-expect to iterate on `release.yml`/the formula-rendering step the way morty's `RELEASING.md`
-records `mode: replace` + `replace_existing_artifacts` being found live during `v0.1.0`.
+There is no `goreleaser check`/`dist-snapshot` equivalent. `v0.1.0` was the first real tag and
+the first real test of the pipeline: the only issue it found was `homebrew-tap` itself being
+an uninitialized repo (no `main`, no `Formula/`) — see the one-time setup note above. The
+cross-compile, checksum, GitHub release, formula-render, and docs-release steps all worked
+first try.
 
-## One-time setup this depends on — NOT YET CONFIRMED
+## One-time setup this depends on
 
 - **`HOMEBREW_TAP_UMBRELLA_ORG_GITHUB_TOKEN`** — a repository secret on `umbrella-org/messgr`:
-  a PAT with `repo` scope on `umbrella-org/homebrew-tap`. Not yet confirmed present on this
-  repo.
+  a PAT with `repo` scope on `umbrella-org/homebrew-tap`. Confirmed present, and exercised
+  live by `v0.1.0`.
 - Publishing `messgr` to its own `umbrella-org/homebrew-tap`, under a
-  `umbrella-org/messgr`-sourced formula, is not yet confirmed wanted at the ownership level —
-  see the metadata-leak note above.
+  `umbrella-org/messgr`-sourced formula, is confirmed wanted at the ownership level — the
+  metadata-leak tradeoff above was accepted for `v0.1.0`.
+- The tap repo itself must exist and have a `main` branch with a `Formula/` directory
+  before the first release — `checkout` and the formula-render step both assume they're
+  there. `homebrew-tap` was created empty for `v0.1.0` and had to be bootstrapped by hand
+  (README + `Formula/.gitkeep`, pushed to `main`) before the `homebrew` job would succeed;
+  git does not track empty directories, so `Formula/` needs a placeholder file even after
+  that. One-time cost, already paid — future tags need nothing here.
 - Consumers need `HOMEBREW_GITHUB_API_TOKEN` (read access to `umbrella-org/messgr`) set
   locally for `brew install umbrella-org/tap/messgr` to actually download the archive, since
   the formula's `url`/`sha256` point at a private repo's release assets.
