@@ -16,6 +16,10 @@ producer registry, tenant/provider configuration, templates, and a dev-only inte
 per-tenant claim loop that actually calls a provider). There is no gate chain (consent, quotas,
 kill switches, suppression) and no query API/UI yet — those are later tickets.
 
+Each binary also accepts a `version` subcommand that prints its name and version, then exits
+without reading any configuration (`messgr-control version`, `messgr-dispatcher version`,
+`messgr-ingest version` → `messgr-control 0.1.0`, etc.).
+
 == Tenancy
 
 {product} is multi-tenant: each tenant gets its own database, and a shared control database
