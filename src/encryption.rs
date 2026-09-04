@@ -4,7 +4,7 @@
 //! binds a ciphertext to the row it belongs to (`comms_request_id`'s raw
 //! bytes) so one row's blob cannot be silently swapped onto another's.
 
-use aes_gcm::aead::{Aead, AeadCore, KeyInit, OsRng};
+use aes_gcm::aead::{Aead, Generate, KeyInit};
 use aes_gcm::{Aes256Gcm, Key, Nonce};
 
 const NONCE_LEN: usize = 12;
@@ -43,9 +43,9 @@ pub fn encrypt(
     if dek.len() != 32 {
         return Err(EncryptionError::InvalidKeyLength);
     }
-    let key: &Key<Aes256Gcm> = Key::<Aes256Gcm>::from_slice(dek);
+    let key: &Key<Aes256Gcm> = dek.try_into().expect("checked above: dek is 32 bytes");
     let cipher = Aes256Gcm::new(key);
-    let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
+    let nonce = Nonce::generate();
 
     let ciphertext = cipher
         .encrypt(
@@ -74,12 +74,14 @@ pub fn decrypt(
     if dek.len() != 32 {
         return Err(EncryptionError::InvalidKeyLength);
     }
-    let key: &Key<Aes256Gcm> = Key::<Aes256Gcm>::from_slice(dek);
+    let key: &Key<Aes256Gcm> = dek.try_into().expect("checked above: dek is 32 bytes");
     if blob.len() < NONCE_LEN {
         return Err(EncryptionError::BlobTooShort);
     }
     let (nonce_bytes, ciphertext) = blob.split_at(NONCE_LEN);
-    let nonce = Nonce::from_slice(nonce_bytes);
+    let nonce: &Nonce<_> = nonce_bytes
+        .try_into()
+        .expect("checked above: NONCE_LEN bytes");
     let cipher = Aes256Gcm::new(key);
 
     cipher
