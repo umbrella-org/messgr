@@ -46,7 +46,7 @@ Every `register`/`disable` attempt, including a rejected one, writes a `platform
 ----
 cargo run --bin messgr-control -- tenant-config set --tenant-slug acme \
     --retention-years 7 --default-timezone Europe/London --default-locale en-GB \
-    --quota-day-boundary-tz Europe/London --staleness-max-age-seconds 7200 \
+    --quota-day-boundary-tz Europe/London \
     --actor operator@example.com
 cargo run --bin messgr-control -- tenant-config show --tenant-slug acme
 ----
@@ -54,7 +54,7 @@ cargo run --bin messgr-control -- tenant-config show --tenant-slug acme
 `tenant_config` (DESIGN.md §4.10) is a **singleton per tenant** -- one row, in the tenant's own
 database, enforced by a `singleton boolean PRIMARY KEY` rather than by convention. A freshly
 provisioned tenant has **no** row until `tenant-config set` is run at least once: several of
-these fields (the staleness bound, the quota day-boundary timezone) have no platform-wide
+these fields (the quota day-boundary timezone) have no platform-wide
 default DESIGN.md has settled on, so there is nothing sensible to seed automatically.
 
 `set` is a plain upsert -- safe to re-run. Its outcome is `created` (no prior row), `updated`
@@ -94,12 +94,10 @@ missing timeline entry, so nothing here ever returns anything but a resolved id 
 `customer_id`/`external_id` whose destination turns out to already be active under a _different_
 customer: resolution resolves to that other customer rather than reject the send (`T-018`).
 
-Two pieces of the design are explicitly not built yet: the **event feed** that keeps the
-projection current from the master system (create/update/merge events; build-order step 10), and
-**staleness gating** (DESIGN.md §4.8 -- deferring a stale transactional/marketing send rather than
-risking delivery to an address the customer no longer holds). Until the feed exists, every
-non-provisional row in these tables was put there by a previous resolution, not by upstream
-master data.
+One piece of the design is explicitly not built yet: the **event feed** that keeps the
+projection current from the master system (create/update/merge events; build-order step 10).
+Until the feed exists, every non-provisional row in these tables was put there by a previous
+resolution, not by upstream master data.
 
 == Partition lifecycle
 

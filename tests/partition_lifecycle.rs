@@ -7,7 +7,6 @@
 
 use chrono::{DateTime, Datelike, Months, NaiveDate, Utc};
 use sqlx::PgPool;
-use sqlx::postgres::types::PgInterval;
 use uuid::Uuid;
 
 use messgr::db;
@@ -42,11 +41,6 @@ fn sample_input(retention_years: i32) -> TenantConfigInput {
         schedule_horizon_days: 90,
         quota_day_boundary_tz: "Europe/London".to_string(),
         verification_mode: verification_mode::OBSERVE.to_string(),
-        staleness_max_age: PgInterval {
-            months: 0,
-            days: 0,
-            microseconds: 7_200 * 1_000_000,
-        },
         kill_switch_release_rate: 500,
     }
 }

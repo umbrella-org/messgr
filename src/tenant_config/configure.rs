@@ -168,7 +168,6 @@ async fn audit(
             "schedule_horizon_days": input.schedule_horizon_days,
             "quota_day_boundary_tz": input.quota_day_boundary_tz,
             "verification_mode": input.verification_mode,
-            "staleness_max_age_seconds": input.staleness_max_age.microseconds / 1_000_000,
             "kill_switch_release_rate": input.kill_switch_release_rate,
             "outcome": outcome,
         }),

@@ -239,7 +239,7 @@ pub async fn write_terminal(
     .bind(customer_id)
     .bind(now)
     .bind(event_type)
-    .bind(provider_ref)
+    .bind(provider_ref.unwrap_or(""))
     .bind(provider_status)
     .execute(&mut *tx)
     .await?;

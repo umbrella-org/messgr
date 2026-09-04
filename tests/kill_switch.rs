@@ -689,11 +689,6 @@ fn sample_tenant_config(locale: &str) -> TenantConfigInput {
         schedule_horizon_days: 90,
         quota_day_boundary_tz: "UTC".to_string(),
         verification_mode: verification_mode::OBSERVE.to_string(),
-        staleness_max_age: sqlx::postgres::types::PgInterval {
-            months: 0,
-            days: 0,
-            microseconds: 7_200 * 1_000_000,
-        },
         kill_switch_release_rate: 500,
     }
 }

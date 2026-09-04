@@ -23,11 +23,13 @@ pub enum InsertOutcome {
 /// safe; this is purely an optimization.
 pub async fn find_idempotent_reply(
     pool: &PgPool,
+    producer_id: Uuid,
     key: &str,
 ) -> Result<Option<Uuid>, sqlx::Error> {
     sqlx::query_scalar::<_, Uuid>(
-        "SELECT comms_request_id FROM idempotency WHERE key = $1",
+        "SELECT comms_request_id FROM idempotency WHERE producer_id = $1 AND key = $2",
     )
+    .bind(producer_id)
     .bind(key)
     .fetch_optional(pool)
     .await
@@ -58,9 +60,10 @@ pub async fn insert_transactional(
     let mut tx = pool.begin().await?;
 
     let claim = sqlx::query(
-        "INSERT INTO idempotency (key, comms_request_id, expires_at) VALUES ($1, $2, $3) \
-         ON CONFLICT (key) DO NOTHING",
+        "INSERT INTO idempotency (producer_id, key, comms_request_id, expires_at) \
+         VALUES ($1, $2, $3, $4) ON CONFLICT (producer_id, key) DO NOTHING",
     )
+    .bind(producer_id)
     .bind(idempotency_key)
     .bind(comms_request_id)
     .bind(idempotency_expires_at)
@@ -69,9 +72,11 @@ pub async fn insert_transactional(
 
     if claim.rows_affected() == 0 {
         tx.rollback().await?;
-        let existing = find_idempotent_reply(pool, idempotency_key).await?.expect(
-            "a row must exist immediately after losing the idempotency claim race",
-        );
+        let existing = find_idempotent_reply(pool, producer_id, idempotency_key)
+            .await?
+            .expect(
+                "a row must exist immediately after losing the idempotency claim race",
+            );
         return Ok(InsertOutcome::Replayed {
             comms_request_id: existing,
         });
@@ -82,10 +87,10 @@ pub async fn insert_transactional(
         INSERT INTO comms_request (
             tenant_id, id, created_at, customer_id, channel, class, template_id,
             template_version, campaign_id, destination_hmac, destination_ciphertext,
-            payload_ciphertext, dek_id, producer_id, scheduled_for, expires_at,
+            payload_ciphertext, producer_id, scheduled_for, expires_at,
             final_status, finalized_at
         ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NULL, $13, NULL, NULL, NULL, NULL
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NULL, NULL, NULL, NULL
         )
         "#,
     )

@@ -12,7 +12,6 @@ CREATE TABLE tenant_config (
     schedule_horizon_days int      NOT NULL DEFAULT 90,
     quota_day_boundary_tz text     NOT NULL,
     verification_mode     text     NOT NULL DEFAULT 'observe',  -- enforce | observe (§5)
-    staleness_max_age     interval NOT NULL,                    -- projection freshness bound (§4.8)
     CONSTRAINT tenant_config_singleton CHECK (singleton),
     PRIMARY KEY (singleton)
 );

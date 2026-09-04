@@ -14,7 +14,6 @@ use axum_server::Handle;
 use axum_server::tls_rustls::{RustlsAcceptor, RustlsConfig};
 use reqwest::{Certificate, Identity};
 use sqlx::PgPool;
-use sqlx::postgres::types::PgInterval;
 use uuid::Uuid;
 
 use messgr::customer_dek::lifecycle::get_or_create_dek;
@@ -66,11 +65,6 @@ fn sample_tenant_config(locale: &str) -> TenantConfigInput {
         schedule_horizon_days: 90,
         quota_day_boundary_tz: "UTC".to_string(),
         verification_mode: verification_mode::OBSERVE.to_string(),
-        staleness_max_age: PgInterval {
-            months: 0,
-            days: 0,
-            microseconds: 7_200 * 1_000_000,
-        },
         kill_switch_release_rate: 500,
     }
 }
