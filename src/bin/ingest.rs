@@ -9,6 +9,7 @@ use std::sync::Arc;
 use axum::Router;
 use axum::routing::post;
 use axum_server::tls_rustls::{RustlsAcceptor, RustlsConfig};
+use clap::{Parser, Subcommand};
 
 use messgr::config::Config;
 use messgr::db;
@@ -18,12 +19,30 @@ use messgr::keystore::{KeyStore, VaultKeyStore};
 use messgr::mtls::{self, ClientCertAcceptor};
 use messgr::tenant::registry::TenantRegistry;
 
+#[derive(Parser)]
+#[command(name = "messgr-ingest")]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Command>,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    /// Print the binary name and version, then exit.
+    Version,
+}
+
 fn env_var(name: &str) -> String {
     std::env::var(name).unwrap_or_else(|_| panic!("{name} must be set"))
 }
 
 #[tokio::main]
 async fn main() {
+    if matches!(Cli::parse().command, Some(Command::Version)) {
+        println!("messgr-ingest {}", env!("CARGO_PKG_VERSION"));
+        return;
+    }
+
     tracing_subscriber::fmt().init();
     let config = Config::from_env();
 
@@ -75,4 +94,17 @@ async fn main() {
         .serve(app.into_make_service())
         .await
         .expect("server error");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn version_parses_as_its_own_subcommand() {
+        let cli = Cli::try_parse_from(["messgr-ingest", "version"])
+            .expect("parsing the version subcommand must succeed");
+
+        assert!(matches!(cli.command, Some(Command::Version)));
+    }
 }

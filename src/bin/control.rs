@@ -113,6 +113,8 @@ enum Command {
         #[arg(long)]
         since: Option<chrono::NaiveDate>,
     },
+    /// Print the binary name and version, then exit.
+    Version,
 }
 
 #[derive(Subcommand)]
@@ -364,10 +366,16 @@ enum PartitionLifecycleCommand {
 
 #[tokio::main]
 async fn main() {
+    let cli = Cli::parse();
+
+    if matches!(cli.command, Command::Version) {
+        println!("messgr-control {}", env!("CARGO_PKG_VERSION"));
+        return;
+    }
+
     tracing_subscriber::fmt::init();
 
     let config = Config::from_env();
-    let cli = Cli::parse();
 
     let control_pool = db::connect(
         &config.control_database_url,
@@ -916,12 +924,21 @@ async fn main() {
                 }
             }
         }
+        Command::Version => unreachable!("handled before Config::from_env() above"),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn version_parses_as_its_own_subcommand() {
+        let cli = Cli::try_parse_from(["messgr-control", "version"])
+            .expect("parsing the version subcommand must succeed");
+
+        assert!(matches!(cli.command, Command::Version));
+    }
 
     #[test]
     fn tenant_config_set_defaults_schedule_horizon_and_verification_mode_when_omitted()
