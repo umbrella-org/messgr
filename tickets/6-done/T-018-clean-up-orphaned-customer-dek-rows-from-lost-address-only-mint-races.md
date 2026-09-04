@@ -311,3 +311,4 @@ diff — not a T-018 finding, noted here only for the record.
 - 2026-09-04 — REWORK → IN REVIEW: findings fixed
 - 2026-09-04 — IN REVIEW → DONE: review clean; F1 fixed same round, F2 fixed inline, F3 noted
 - 2026-09-04 — merge request opened: PR #24 (`feat/T-018-customer-address-races`, commits 77558e8, 9883c50) — pending human merge
+- 2026-09-04 — merged to main (PR #24, 0cf7e3c) — includes a follow-up `style: cargo fmt (T-018)` commit (c07386b) fixing a CI fmt-check failure found after the review concluded
