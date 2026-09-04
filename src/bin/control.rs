@@ -66,7 +66,7 @@ enum Command {
     },
     /// Set or show a tenant's typed configuration (DESIGN.md §4.10, T-007):
     /// retention, timezone/locale defaults, schedule horizon, verification
-    /// mode, staleness bound, and quota day boundary. A fresh tenant has no
+    /// mode, and quota day boundary. A fresh tenant has no
     /// row until `set` is run at least once.
     TenantConfig {
         #[command(subcommand)]
