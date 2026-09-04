@@ -41,9 +41,13 @@ fmt:
 fmt-check:
     cargo fmt --all -- --check
 
-# Run clippy with warnings denied (what CI's clippy job runs)
+# Check formatting and run clippy with warnings denied (what CI's clippy job runs;
+# folds in fmt-check so a ticket's Acceptance Test — which only ever names build/test/
+# lint/docs, pickle.toml's four registered commands — still catches a fmt failure
+# before push, not just CI's separate fmt job after)
 [group('build')]
 lint:
+    cargo fmt --all -- --check
     cargo clippy --all-targets --all-features -- -D warnings
 
 # Type-check without building
