@@ -62,12 +62,13 @@ curl -sk --cert /tmp/producer-cert/cert.pem --key /tmp/producer-cert/key.pem \
 ----
 
 Returns `201` with a `comms_request_id` on the first call; repeating it with the same
-`Idempotency-Key` returns `200` with the same id rather than sending twice. Two other error cases
-are specific to resolution: an invalid combination of `customer_id`/`external_id`/
-`external_id_system` is `422`, and a `destination` already active under a _different_ customer
-than the one resolved is `409` (DESIGN.md §4.6's correction -- see "Customer projection" in the
-control-plane CLI chapter). Once `messgr-dispatcher` is running against this tenant and channel,
-the row is picked up and `final_status` moves to `sent` or `failed`.
+`Idempotency-Key` returns `200` with the same id rather than sending twice. The one error case
+specific to resolution is an invalid combination of `customer_id`/`external_id`/
+`external_id_system`, which is `422` -- resolution itself never rejects a send, even when a
+`destination` is already active under a _different_ customer than the one the request named; it
+resolves to that other customer instead (see "Customer projection" in the control-plane CLI
+chapter). Once `messgr-dispatcher` is running against this tenant and channel, the row is picked
+up and `final_status` moves to `sent` or `failed`.
 
 `docker compose up -d` also starts a dev-mode Vault (`VAULT_ADDR=http://localhost:8200`,
 `VAULT_TOKEN=messgr-dev-root-token`, both in `.env.example`) backing the `KeyStore` trait

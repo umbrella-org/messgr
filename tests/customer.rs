@@ -9,7 +9,7 @@ use chrono::Utc;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use messgr::customer::resolve::{ResolutionInput, ResolveError, resolve};
+use messgr::customer::resolve::{ResolutionInput, resolve};
 use messgr::db;
 use messgr::key_cache::KeyCache;
 use messgr::keystore::VaultKeyStore;
@@ -146,6 +146,13 @@ async fn total_customer_count(pool: &PgPool) -> i64 {
         .fetch_one(pool)
         .await
         .expect("counting customer rows failed")
+}
+
+async fn total_customer_dek_count(pool: &PgPool) -> i64 {
+    sqlx::query_scalar("SELECT count(*) FROM customer_dek")
+        .fetch_one(pool)
+        .await
+        .expect("counting customer_dek rows failed")
 }
 
 #[tokio::test]
@@ -418,6 +425,7 @@ async fn concurrent_address_only_resolution_mints_exactly_one_provisional_custom
     let fixture = setup().await;
     let cache = small_cache();
     let before = total_customer_count(&fixture.tenant_pool).await;
+    let dek_before = total_customer_dek_count(&fixture.tenant_pool).await;
 
     let call_one = resolve(
         &fixture.tenant_pool,
@@ -455,6 +463,13 @@ async fn concurrent_address_only_resolution_mints_exactly_one_provisional_custom
         after,
         before + 1,
         "exactly one provisional customer must be minted"
+    );
+
+    let dek_after = total_customer_dek_count(&fixture.tenant_pool).await;
+    assert_eq!(
+        dek_after,
+        dek_before + 1,
+        "the loser's customer_dek row must never be persisted (T-018)"
     );
 
     fixture.teardown().await;
@@ -560,7 +575,10 @@ async fn concurrent_explicit_customer_id_resolution_does_not_error() {
 }
 
 #[tokio::test]
-async fn conflicting_customer_ids_over_the_same_destination_is_rejected() {
+async fn conflicting_customer_ids_over_the_same_destination_resolves_to_the_winner() {
+    // Regression for T-018: this used to return Err(AddressConflict), which
+    // src/ingest/model.rs mapped to a 409 rejecting the send — contradicting
+    // DESIGN.md §4.7's "never reject a send because resolution failed".
     let fixture = setup().await;
     let cache = small_cache();
     let customer_a = Uuid::new_v4();
@@ -581,7 +599,7 @@ async fn conflicting_customer_ids_over_the_same_destination_is_rejected() {
     .await
     .expect("resolving customer A failed");
 
-    let result_b = resolve(
+    let resolved_b = resolve(
         &fixture.tenant_pool,
         &fixture.vault,
         &cache,
@@ -593,14 +611,11 @@ async fn conflicting_customer_ids_over_the_same_destination_is_rejected() {
         DEFAULT_LOCALE,
         DEFAULT_TIMEZONE,
     )
-    .await;
+    .await
+    .expect("resolving customer B must not reject the send");
 
-    match result_b {
-        Err(ResolveError::AddressConflict {
-            existing_customer_id,
-        }) => assert_eq!(existing_customer_id, resolved_a.customer_id),
-        other => panic!("expected AddressConflict, got {other:?}"),
-    }
+    assert_eq!(resolved_b.customer_id, resolved_a.customer_id);
+    assert_eq!(resolved_b.address_id, resolved_a.address_id);
 
     fixture.teardown().await;
 }
