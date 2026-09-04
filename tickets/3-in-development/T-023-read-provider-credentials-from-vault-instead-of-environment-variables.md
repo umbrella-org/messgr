@@ -236,3 +236,4 @@ reads and the message reaches `final_status = sent`.
 - 2026-09-02 — created (TO DO). source: audit: design/implementation audit found messgr-dispatcher reads DISPATCHER_<CH>_API_KEY from the environment, violating §13's Vault-only secrets rule; provider_config.credential_path has had no reader since T-012.
 - 2026-09-04 — TO DO → READY: implementation plan complete. Expanded at the user's direction during refinement to also fix the tenant AppRole's missing Vault KV read permission (T-004's `policy_hcl_for` had no path for this at all) — found while confirming the dispatcher's scoped login could actually reach `credential_path` end to end.
 - 2026-09-04 — TO DO → READY: plan complete
+- 2026-09-04 — READY → IN DEVELOPMENT: picked up
