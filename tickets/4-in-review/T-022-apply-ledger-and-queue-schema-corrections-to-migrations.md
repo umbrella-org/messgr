@@ -197,3 +197,4 @@ a real, documented CLI surface being removed.
 - 2026-09-04 — TO DO → READY: implementation plan complete; also folds in a fix for `development/design/04-gate-chain.md`'s stale Staleness gate row (decision 27 claimed removal that never happened), added to the plan at the user's direction during refinement.
 - 2026-09-04 — TO DO → READY: plan complete
 - 2026-09-04 — READY → IN DEVELOPMENT: picked up
+- 2026-09-04 — IN DEVELOPMENT → IN REVIEW: acceptance green
