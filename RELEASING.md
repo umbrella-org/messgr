@@ -1,26 +1,30 @@
 # Releasing messgr
 
 `messgr` is distributed as cross-compiled static-ish binaries via a hand-rolled GitHub
-Actions workflow, a GitHub release per tag, and a Homebrew formula published to the same
-shared tap pickle/morty/summer use (`github.com/codcod/homebrew-tap` →
-`brew install codcod/tap/messgr`).
+Actions workflow, a GitHub release per tag, and a Homebrew formula published to messgr's own
+tap (`github.com/umbrella-org/homebrew-tap` → `brew install umbrella-org/tap/messgr`).
 
 > This process mirrors `pickle`'s / morty's / summer's `RELEASING.md` in shape — CHANGELOG
 > discipline, a tag-driven release, a decoupled docs-attach step, a Homebrew tap push — with
-> two deliberate differences:
+> three deliberate differences:
 >
 > 1. **No goreleaser.** messgr is Rust, not Go; `release.yml` cross-compiles with `cargo
 >    build --target ...` directly and hand-renders the Homebrew formula instead of using
 >    goreleaser's `brews:` block. `cargo-dist` (the closest Rust equivalent) is not wired up —
 >    revisit if the build matrix grows past four platforms or the formula-rendering script
 >    gets unwieldy.
-> 2. **The tap is public; the repo it points at is not.** `codcod/homebrew-tap` is the same
->    public tap morty/summer/pickle publish to. Its `messgr.rb` formula will therefore
->    publicly name `umbrella-org/messgr` and its release tags, even though the repo itself
->    and its release assets stay private — `brew install codcod/tap/messgr` still needs a
->    `HOMEBREW_GITHUB_API_TOKEN` with read access to `umbrella-org/messgr` to actually
->    download an archive. Worth a second look before the first tag if that metadata leak
->    (repo name + version history, not content) is unacceptable for this project.
+> 2. **The tap is public; the repo it points at is not.** `umbrella-org/homebrew-tap` is
+>    public. Its `messgr.rb` formula will therefore publicly name `umbrella-org/messgr` and
+>    its release tags, even though the repo itself and its release assets stay private —
+>    `brew install umbrella-org/tap/messgr` still needs a `HOMEBREW_GITHUB_API_TOKEN` with
+>    read access to `umbrella-org/messgr` to actually download an archive. Worth a second
+>    look before the first tag if that metadata leak (repo name + version history, not
+>    content) is unacceptable for this project.
+> 3. **A dedicated tap, not the shared one.** Unlike pickle/morty/summer, which all publish
+>    to the shared `codcod/homebrew-tap`, messgr publishes to its own
+>    `umbrella-org/homebrew-tap` — a separate repo and a separate token
+>    (`HOMEBREW_TAP_UMBRELLA_ORG_GITHUB_TOKEN`), scoped to this org rather than mixed in with
+>    unrelated projects' formulas.
 >
 > Unlike morty/summer, this workflow does **not** re-run the test suite — `ci.yml` already
 > gates every push to `main` (with live Postgres + Vault services); re-running the same suite
@@ -57,7 +61,7 @@ That produces, for `darwin`/`linux` × `amd64`/`arm64`:
 - a **GitHub release** with `.tar.gz` archives (one per platform, containing every binary the
   workspace currently defines — just `messgr-control` today, growing as `messgr-ingest`,
   `messgr-dispatcher`, etc. land) + `checksums.txt`;
-- an updated **Homebrew formula** committed to `codcod/homebrew-tap`;
+- an updated **Homebrew formula** committed to `umbrella-org/homebrew-tap`;
 - once that release run **succeeds**, [`docs-release.yml`](.github/workflows/docs-release.yml)
   runs next, builds the AsciiDoc user manual with `snowball`, and attaches the PDF/EPUB to
   the same release — soft-failing (a broken manual never unpublishes or blocks the release).
@@ -86,14 +90,14 @@ records `mode: replace` + `replace_existing_artifacts` being found live during `
 
 ## One-time setup this depends on — NOT YET CONFIRMED
 
-- **`HOMEBREW_TAP_GITHUB_TOKEN`** — a repository secret on `umbrella-org/messgr`: a PAT with
-  `repo` scope on `codcod/homebrew-tap`, the same tap pickle/morty/summer already publish to.
-  Not yet confirmed present on this repo.
-- Publishing `messgr` to that shared tap alongside `pickle`/`morty`/`summer`, under a
+- **`HOMEBREW_TAP_UMBRELLA_ORG_GITHUB_TOKEN`** — a repository secret on `umbrella-org/messgr`:
+  a PAT with `repo` scope on `umbrella-org/homebrew-tap`. Not yet confirmed present on this
+  repo.
+- Publishing `messgr` to its own `umbrella-org/homebrew-tap`, under a
   `umbrella-org/messgr`-sourced formula, is not yet confirmed wanted at the ownership level —
   see the metadata-leak note above.
 - Consumers need `HOMEBREW_GITHUB_API_TOKEN` (read access to `umbrella-org/messgr`) set
-  locally for `brew install codcod/tap/messgr` to actually download the archive, since the
-  formula's `url`/`sha256` point at a private repo's release assets.
+  locally for `brew install umbrella-org/tap/messgr` to actually download the archive, since
+  the formula's `url`/`sha256` point at a private repo's release assets.
 - **`GITHUB_TOKEN`** — provided automatically by Actions; `release.yml` grants it
   `contents: write` to create the release and upload assets.

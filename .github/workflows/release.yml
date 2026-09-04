@@ -168,8 +168,8 @@ jobs:
 
       - uses: actions/checkout@v7
         with:
-          repository: codcod/homebrew-tap
-          token: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+          repository: umbrella-org/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_UMBRELLA_ORG_GITHUB_TOKEN }}
           path: tap
 
       - uses: actions/download-artifact@v4
