@@ -223,31 +223,53 @@ async fn insert_outside_any_bootstrapped_partition_is_rejected() {
     tenant.teardown().await;
 }
 
+async fn insert_idempotency_row(
+    pool: &PgPool,
+    producer_id: Uuid,
+    key: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO idempotency (producer_id, key, comms_request_id, expires_at) \
+         VALUES ($1, $2, $3, now() + interval '30 days')",
+    )
+    .bind(producer_id)
+    .bind(key)
+    .bind(Uuid::new_v4())
+    .execute(pool)
+    .await
+    .map(|_| ())
+}
+
 #[tokio::test]
-async fn idempotency_key_is_globally_unique() {
+async fn idempotency_key_is_unique_per_producer() {
     let tenant = TestTenant::provision("idempotency").await;
 
+    let producer_id = Uuid::new_v4();
     let key = unique_name("idem-key");
-    sqlx::query(
-        "INSERT INTO idempotency (key, comms_request_id, expires_at) VALUES ($1, $2, now() + interval '30 days')",
-    )
-    .bind(&key)
-    .bind(Uuid::new_v4())
-    .execute(&tenant.tenant_pool)
-    .await
-    .expect("first idempotency insert must succeed");
+    insert_idempotency_row(&tenant.tenant_pool, producer_id, &key)
+        .await
+        .expect("first idempotency insert must succeed");
 
-    let result = sqlx::query(
-        "INSERT INTO idempotency (key, comms_request_id, expires_at) VALUES ($1, $2, now() + interval '30 days')",
-    )
-    .bind(&key)
-    .bind(Uuid::new_v4())
-    .execute(&tenant.tenant_pool)
-    .await;
+    let result = insert_idempotency_row(&tenant.tenant_pool, producer_id, &key).await;
     assert!(
         result.is_err(),
-        "a second insert with the same idempotency key must violate the primary key"
+        "a second insert with the same (producer_id, key) must violate the primary key"
     );
+
+    tenant.teardown().await;
+}
+
+#[tokio::test]
+async fn idempotency_key_may_be_reused_across_producers() {
+    let tenant = TestTenant::provision("idempotency_cross").await;
+
+    let key = unique_name("idem-key");
+    insert_idempotency_row(&tenant.tenant_pool, Uuid::new_v4(), &key)
+        .await
+        .expect("first producer's idempotency insert must succeed");
+    insert_idempotency_row(&tenant.tenant_pool, Uuid::new_v4(), &key)
+        .await
+        .expect("a different producer reusing the same key must succeed");
 
     tenant.teardown().await;
 }
@@ -373,6 +395,80 @@ async fn comms_event_uniqueness_is_enforced_per_provider_ref() {
         .execute(&tenant.tenant_pool)
         .await
         .expect("a different provider_ref must be allowed to coexist");
+
+    tenant.teardown().await;
+}
+
+#[tokio::test]
+async fn comms_event_dedup_catches_dispatch_internal_events_with_no_provider_ref() {
+    let tenant = TestTenant::provision("event_dedup_int").await;
+
+    let comms_request_id = Uuid::new_v4();
+    let customer_id = Uuid::new_v4();
+    let occurred_at = Utc::now();
+
+    let insert = || {
+        sqlx::query(
+            r#"
+            INSERT INTO comms_event (comms_request_id, customer_id, occurred_at, event_type)
+            VALUES ($1, $2, $3, 'sent')
+            "#,
+        )
+        .bind(comms_request_id)
+        .bind(customer_id)
+        .bind(occurred_at)
+    };
+
+    insert()
+        .execute(&tenant.tenant_pool)
+        .await
+        .expect("first dispatch-internal event insert must succeed");
+
+    let duplicate = insert().execute(&tenant.tenant_pool).await;
+    assert!(
+        duplicate.is_err(),
+        "two dispatch-internal events sharing (occurred_at, comms_request_id, event_type) must \
+         conflict via provider_ref's '' default, not silently coexist as distinct NULLs"
+    );
+
+    tenant.teardown().await;
+}
+
+#[tokio::test]
+async fn orphan_event_insert_then_select_round_trips() {
+    let tenant = TestTenant::provision("orphan_event").await;
+
+    let id = Uuid::new_v4();
+    let received_at = Utc::now();
+    let occurred_at = Utc::now();
+
+    sqlx::query(
+        r#"
+        INSERT INTO orphan_event (
+            id, received_at, provider, provider_ref, occurred_at, event_type,
+            provider_status, provider_payload_raw
+        ) VALUES ($1, $2, 'twilio', 'ref-unmatched', $3, 'delivered', 'DELIVERED', $4)
+        "#,
+    )
+    .bind(id)
+    .bind(received_at)
+    .bind(occurred_at)
+    .bind(serde_json::json!({"raw": "payload"}))
+    .execute(&tenant.tenant_pool)
+    .await
+    .expect("orphan_event insert must succeed");
+
+    let (row_id, provider, reconcile_attempts): (Uuid, String, i16) = sqlx::query_as(
+        "SELECT id, provider, reconcile_attempts FROM orphan_event WHERE id = $1",
+    )
+    .bind(id)
+    .fetch_one(&tenant.tenant_pool)
+    .await
+    .expect("orphan_event round-trip select failed");
+
+    assert_eq!(row_id, id);
+    assert_eq!(provider, "twilio");
+    assert_eq!(reconcile_attempts, 0);
 
     tenant.teardown().await;
 }

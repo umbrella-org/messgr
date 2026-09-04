@@ -3,7 +3,6 @@
 //! stack, no mocks.
 
 use sqlx::PgPool;
-use sqlx::postgres::types::PgInterval;
 use uuid::Uuid;
 
 use messgr::db;
@@ -37,11 +36,6 @@ fn sample_input(retention_years: i32) -> TenantConfigInput {
         schedule_horizon_days: 90,
         quota_day_boundary_tz: "Europe/London".to_string(),
         verification_mode: verification_mode::OBSERVE.to_string(),
-        staleness_max_age: PgInterval {
-            months: 0,
-            days: 0,
-            microseconds: 7_200 * 1_000_000,
-        },
         kill_switch_release_rate: 500,
     }
 }
@@ -178,10 +172,6 @@ async fn setting_and_loading_round_trips_every_typed_field() {
     assert_eq!(loaded.schedule_horizon_days, 90);
     assert_eq!(loaded.quota_day_boundary_tz, "Europe/London");
     assert_eq!(loaded.verification_mode, verification_mode::OBSERVE);
-    assert_eq!(
-        loaded.staleness_max_age_duration(),
-        chrono::Duration::seconds(7_200)
-    );
     assert_eq!(loaded.kill_switch_release_rate, 500);
 
     tenant_pool.close().await;

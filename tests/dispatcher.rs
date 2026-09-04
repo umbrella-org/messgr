@@ -381,7 +381,11 @@ async fn terminal_provider_rejection_writes_failed_event_and_final_status_with_n
     .expect("fetching comms_event rows failed");
     assert_eq!(
         events,
-        vec![("failed".to_string(), None, Some("400".to_string()))]
+        vec![(
+            "failed".to_string(),
+            Some(String::new()),
+            Some("400".to_string())
+        )]
     );
 
     let outbox_count: i64 =
@@ -626,7 +630,11 @@ async fn retries_exhausted_after_max_attempts_terminal_fails() {
     .expect("fetching comms_event rows failed");
     assert_eq!(
         events,
-        vec![("failed".to_string(), None, Some("500".to_string()))]
+        vec![(
+            "failed".to_string(),
+            Some(String::new()),
+            Some("500".to_string())
+        )]
     );
 
     let outbox_count: i64 =
