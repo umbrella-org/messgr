@@ -19,7 +19,6 @@ CREATE TABLE comms_request (
     destination_hmac       bytea       NOT NULL,   -- keyed HMAC, pepper in Vault; indexed lookup
     destination_ciphertext bytea       NOT NULL,   -- under customer DEK; the address as actually used
     payload_ciphertext     bytea,                  -- NULL for auth class; see §7
-    dek_id                 uuid,
     producer_id            uuid        NOT NULL,   -- registered caller (§4.9)
     scheduled_for          timestamptz,            -- NULL = send immediately (§6.2)
     expires_at             timestamptz,            -- drop rather than send late (§6.2)
@@ -31,6 +30,7 @@ CREATE TABLE comms_request (
 CREATE INDEX ON comms_request (customer_id, created_at DESC);
 CREATE INDEX ON comms_request (final_status, created_at DESC);
 CREATE INDEX ON comms_request (campaign_id, created_at) WHERE campaign_id IS NOT NULL;
+CREATE INDEX ON comms_request (destination_hmac, created_at DESC);
 
 CREATE TABLE outbox (
     comms_request_id  uuid        PRIMARY KEY,
@@ -51,11 +51,15 @@ CREATE TABLE outbox (
 
 CREATE INDEX outbox_claim ON outbox (channel, priority, next_attempt_at)
     WHERE leased_until IS NULL;
+CREATE INDEX ON outbox (producer_id, next_attempt_at);
+CREATE INDEX ON outbox (campaign_id, next_attempt_at) WHERE campaign_id IS NOT NULL;
 
 CREATE TABLE idempotency (
-    key               text        PRIMARY KEY,
+    producer_id       uuid        NOT NULL,
+    key               text        NOT NULL,
     comms_request_id  uuid        NOT NULL,
-    expires_at        timestamptz NOT NULL
+    expires_at        timestamptz NOT NULL,
+    PRIMARY KEY (producer_id, key)
 );
 
 CREATE TABLE comms_event (
@@ -65,13 +69,26 @@ CREATE TABLE comms_event (
     event_type        text        NOT NULL,
       -- queued | sent | delivered | failed | bounced | read | complaint
       -- | expired | cancelled | suppressed_consent | suppressed_list | unverified_address
-    provider_ref      text,
+    provider_ref      text        NOT NULL DEFAULT '',  -- '' when the provider gave none (dispatch-internal events); dedup needs a non-NULL value
     provider_status   text,                  -- normalized code, safe to keep in clear
     provider_payload_ciphertext bytea,       -- raw provider JSON, under customer DEK -- see §4.4
     UNIQUE (occurred_at, comms_request_id, event_type, provider_ref)
 ) PARTITION BY RANGE (occurred_at);
 
 CREATE INDEX ON comms_event (customer_id, occurred_at);
+
+CREATE TABLE orphan_event (
+    id                          uuid        PRIMARY KEY,
+    received_at                 timestamptz NOT NULL,
+    provider                    text        NOT NULL,
+    provider_ref                text        NOT NULL,
+    occurred_at                 timestamptz NOT NULL,
+    event_type                  text        NOT NULL,
+    provider_status             text,
+    provider_payload_raw        jsonb,
+    reconcile_attempts          smallint    NOT NULL DEFAULT 0
+);
+CREATE INDEX ON orphan_event (provider_ref);
 
 -- Bootstrap partitions (T-009 decision 2): T-014's create-ahead job
 -- doesn't exist yet. Creates the current and next calendar month for

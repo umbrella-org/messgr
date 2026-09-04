@@ -41,7 +41,8 @@ pub async fn create_comms(
     // replay even under an engaged switch — the row already exists; dispatch
     // holding it is dispatch's concern, not a reason to reject the retry.
     if let Some(existing) =
-        super::repo::find_idempotent_reply(&tenant.pool, &idempotency_key).await?
+        super::repo::find_idempotent_reply(&tenant.pool, producer.producer_id, &idempotency_key)
+            .await?
     {
         return Ok((
             StatusCode::OK,
