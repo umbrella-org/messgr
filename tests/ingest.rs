@@ -1097,8 +1097,13 @@ async fn same_destination_under_two_customer_ids_resolves_to_the_first() {
         .send()
         .await
         .expect("second request failed");
-    assert_eq!(response.status(), 201, "resolution must not reject the send");
-    let body: serde_json::Value = response.json().await.expect("parsing response failed");
+    assert_eq!(
+        response.status(),
+        201,
+        "resolution must not reject the send"
+    );
+    let body: serde_json::Value =
+        response.json().await.expect("parsing response failed");
     let comms_request_id: Uuid = body["comms_request_id"]
         .as_str()
         .expect("comms_request_id must be a string")

@@ -347,8 +347,11 @@ async fn mint_provisional_customer_and_address(
     // ciphertext permanently unrecoverable (no DEK stored anywhere). Neither
     // failure mode is possible when all three rows share one commit.
     let dek = keystore.create_dek(vault_mount).await?;
-    let ciphertext =
-        encryption::encrypt(&dek.plaintext, address_id.as_bytes(), destination.as_bytes())?;
+    let ciphertext = encryption::encrypt(
+        &dek.plaintext,
+        address_id.as_bytes(),
+        destination.as_bytes(),
+    )?;
 
     let mut tx = pool.begin().await?;
     repo::insert_customer(
@@ -380,7 +383,8 @@ async fn mint_provisional_customer_and_address(
         // transaction can have raced to insert a `customer_dek` row for it —
         // unlike `get_or_create_dek`, which calls the pool-level
         // `insert_if_absent` for a `customer_id` other callers may share.
-        customer_dek_repo::insert_if_absent_tx(&mut tx, customer_id, &dek.wrapped, now).await?;
+        customer_dek_repo::insert_if_absent_tx(&mut tx, customer_id, &dek.wrapped, now)
+            .await?;
         tx.commit().await?;
         dek_cache.put(customer_id, dek.plaintext);
         return Ok((customer_id, address_id));
