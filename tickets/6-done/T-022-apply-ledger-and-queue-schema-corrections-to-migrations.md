@@ -251,3 +251,4 @@ by it.)
 - 2026-09-04 — IN REVIEW → DONE: scoped re-review clean; F1 resolved, no blocking findings remain
 - 2026-09-04 — pushed `feat/T-022-apply-ledger-and-queue-schema-corrections-to-migrations`; opened https://github.com/umbrella-org/messgr/pull/34 (base `main`). Not yet merged.
 - 2026-09-04 — PR #34's `fmt` CI job failed (not caught locally — `just build`/`just lint` don't run `cargo fmt --check`). Fixed with two commits on the same branch: `8976a37` (ran `cargo fmt` on this ticket's own `src/ingest/{handler,repo}.rs` changes) and `d33d472` (folded `fmt-check` into `just lint` — user-directed, bundled here rather than filed separately — so no ticket's Acceptance Test misses this again; CI's `clippy` job now also installs the `rustfmt` component). Pushed; awaiting a green CI run.
+- 2026-09-04 — MERGED: PR #34 merged to `main` (`2239233`).
