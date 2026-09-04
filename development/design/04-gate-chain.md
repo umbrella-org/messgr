@@ -14,7 +14,6 @@ Every message evaluates these gates **at send time**, not at ingestion time. A c
 | Verification | `customer_address.verified_at` must be set for transactional and marketing. **Per-tenant mode: `enforce` or `observe`** — see below. | Terminal: `unverified_address` |
 | Consent | `consent.opted_in` for (`address_id`, class). Marketing requires explicit opt-in; transactional does not. | Terminal: `suppressed_consent` |
 | Suppression | `destination_hmac` present in suppression list (hard bounce, complaint, regulatory). | Terminal: `suppressed_list` |
-| Staleness | `source_updated_at` within threshold, for projection-resolved destinations only (§4.8). | Defer + alert |
 | Quiet hours | See §6. Auth class exempt. | Reschedule |
 | Rate limit | Per-provider token bucket, in-process. | Defer, retry next tick |
 
