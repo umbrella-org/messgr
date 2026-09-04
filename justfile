@@ -36,10 +36,15 @@ test:
 fmt:
     cargo fmt
 
-# Run clippy with warnings denied
+# Check formatting without writing changes (what CI's fmt job runs)
+[group('build')]
+fmt-check:
+    cargo fmt --all -- --check
+
+# Run clippy with warnings denied (what CI's clippy job runs)
 [group('build')]
 lint:
-    cargo clippy -- -D warnings
+    cargo clippy --all-targets --all-features -- -D warnings
 
 # Type-check without building
 [group('build')]

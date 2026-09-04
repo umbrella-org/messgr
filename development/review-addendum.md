@@ -1,6 +1,6 @@
 # Review addendum — messgr project-specific rules
 
-**Version 1** · written 2026-09-02 against `main` at `be36441` (design/implementation audit,
+**Version 2** · written 2026-09-02 against `main` at `be36441` (design/implementation audit,
 2026-09-02)
 
 Applies **on top of** the brine review protocol
@@ -50,6 +50,14 @@ ticket touched docs or the CLI/HTTP surface.
    by nothing.
 7. *Advisory:* grep the diff against hard invariants 1 (auth/OTP never enters the queue) and 3
    (all gates run at dispatch, never at ingest).
+8. **The ticket's configured local commands must be the literal commands CI runs, not an
+   approximation. Blocking if a diff touches `justfile` or `.github/workflows/*.yml`.** Grep the
+   two against each other; a `justfile` recipe and a workflow step doing the same job (fmt,
+   lint, test) must invoke the same command, ideally by the workflow calling the recipe rather
+   than re-deriving it. Earned by `just lint` running plain `cargo clippy -- -D warnings` while
+   `ci.yml` ran `cargo clippy --all-targets --all-features -- -D warnings`, and `just fmt`
+   mutating instead of checking while CI ran `cargo fmt --all -- --check` — both meant a clean
+   local run proved nothing about CI.
 
 ## Step 3 — Quality audit (additions)
 
@@ -94,3 +102,5 @@ periodic look from outside any single ticket's lens.
 ## Revision history
 
 - **v1** (2026-09-02) — Written, following the 2026-09-02 design/implementation audit.
+- **v2** (2026-09-04) — Added Step 2 item 8 (local/CI command parity), after `just lint`/`just
+  fmt` were found to run different flags than `ci.yml`'s `cargo clippy`/`cargo fmt` steps.
