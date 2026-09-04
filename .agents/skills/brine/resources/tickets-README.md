@@ -272,7 +272,9 @@ All other transitions are forward-only, as diagrammed.
   line of text, and reasonably short**. `pickle ticket new` rejects an empty or multi-line title
   outright rather than rewriting it, and rejects one past ~120 runes, because the title becomes the
   filename, the `# T-NNN — …` heading, and a `BOARD.md` cell at once. Put long context in the
-  Description, where there is no limit.
+  Description, where there is no limit. Retitling later is `pickle ticket set --title "<title>"`: it
+  rewrites the frontmatter `title:` and the heading together, never the filename — the slug going
+  stale is exactly the tidiable case above.
 - **Target child-project.** `project:` frontmatter — a registered child name (§0). Required on
   every ticket; validated by `pickle board audit`.
 - **Priority.** `impact` / `complexity` / `cost` frontmatter:
@@ -288,9 +290,11 @@ All other transitions are forward-only, as diagrammed.
   (§6) renders TO DO/READY by descending impact within each child's group, ties by cost
   ascending, then by id.
   **Assess every new ticket against the existing backlog** before filing it, and re-grade the
-  board. When a grade changes on re-assessment, write the one-line reason into the ticket's own
-  `## Outcome` or Description — not only into a `NOTES.md` triage table, which a later reader
-  of the ticket alone never sees (T-083).
+  board. `pickle ticket set --impact|--complexity|--cost <value>` makes the mechanical part of a
+  re-grade a guarded single-field edit; it does not write the reason for you. When a grade
+  changes on re-assessment, write the one-line reason into the ticket's own `## Outcome` or
+  Description — not only into a `NOTES.md` triage table, which a later reader of the ticket
+  alone never sees (T-083).
 - **Dependencies (may cross child-projects).** Hard dependencies go in `depends-on:` frontmatter
   (a list of `T-NNN` ids, which may target any child). **Transition guard:** a ticket may not
   enter `3-in-development/` while any `depends-on` target is not in `6-done/` **with its feature
@@ -335,7 +339,9 @@ All other transitions are forward-only, as diagrammed.
   by their own impact, so `family:` supplements impact ordering rather than replacing it — it
   earns its keep once a backlog is large enough for impact to tie widely. `pickle ticket new
   --family T-NNN` sets it (shape-checked at creation, existence left to the audit, exactly like
-  `--spawned-by`); it is otherwise set by hand-editing frontmatter, like `depends-on:`.
+  `--spawned-by`); after creation it is set with `pickle ticket set --family T-NNN`, a guarded
+  single-field edit rather than a hand-editing frontmatter — unlike `depends-on:`, which stays a
+  hand edit (it is list-valued and gates pickup).
 - **Splitting at refinement.** A ticket may be split while being refined, and the parts carry
   `spawned-by:` the original. Split **only when the part is independently schedulable** — it
   could be picked up, built and reviewed on its own, and someone would choose to. Otherwise it
