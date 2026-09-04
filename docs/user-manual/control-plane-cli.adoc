@@ -183,8 +183,9 @@ curl -sf --header "X-Vault-Token: $VAULT_TOKEN" --request POST \
     "$VAULT_ADDR/v1/secret/data/acme/sms"
 ----
 
-Only the highest-priority row per channel is resolved at startup -- failover-on-priority is not
-yet built (Still Open, this ticket's own Description item 4).
+Only the highest-priority row per channel is resolved at startup -- failover-on-priority is
+resolved out of scope for now (this ticket's own Description item 4); the ordered-list schema
+exists so a second provider is a config change later, not something this ticket wires up.
 
 == Customer DEK pre-provisioning
 
