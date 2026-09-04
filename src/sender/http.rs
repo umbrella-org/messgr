@@ -16,9 +16,9 @@ pub struct HttpSender {
 }
 
 impl HttpSender {
-    /// `api_key` is supplied directly by the caller — this ticket defers
-    /// resolving `provider_config.credential_path` against Vault to a later
-    /// ticket (T-012 decision 3); no KV-secret-read plumbing exists yet.
+    /// `api_key` is supplied directly by the caller. `messgr-dispatcher` resolves it from
+    /// `provider_config.credential_path` against Vault before calling this (T-023); tests
+    /// construct it with a literal string instead.
     pub fn new(base_url: String, api_key: String) -> Self {
         Self {
             client: reqwest::Client::new(),

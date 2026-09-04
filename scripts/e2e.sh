@@ -202,6 +202,14 @@ step_2_setup_env() {
     log "registering producer '$PRODUCER_NAME'"
     just producer-register "$TENANT_SLUG" "$PRODUCER_NAME" "$PRODUCER_SUBJECT" fraud fraud-oncall@example.com "$ACTOR"
 
+    log "writing provider credentials to Vault KV (secret/data/$TENANT_SLUG/{sms,email})"
+    curl -sf --header "X-Vault-Token: messgr-dev-root-token" --request POST \
+        --data '{"data":{"api_key":"dev-key"}}' \
+        "http://localhost:8200/v1/secret/data/$TENANT_SLUG/sms"
+    curl -sf --header "X-Vault-Token: messgr-dev-root-token" --request POST \
+        --data '{"data":{"api_key":"dev-key"}}' \
+        "http://localhost:8200/v1/secret/data/$TENANT_SLUG/email"
+
     log "provider-config: sms -> localhost:$SMS_PROVIDER_PORT, email -> localhost:$EMAIL_PROVIDER_PORT"
     just provider-config-set "$TENANT_SLUG" sms 1 generic-http "secret/data/$TENANT_SLUG/sms" 10 "$ACTOR"
     just provider-config-set "$TENANT_SLUG" email 1 generic-http "secret/data/$TENANT_SLUG/email" 10 "$ACTOR"
@@ -232,9 +240,7 @@ step_2_setup_env() {
     DISPATCHER_TENANT_SLUG="$TENANT_SLUG" \
     DISPATCHER_CHANNELS="sms,email" \
     DISPATCHER_SMS_BASE_URL="http://localhost:$SMS_PROVIDER_PORT" \
-    DISPATCHER_SMS_API_KEY="dev-key" \
     DISPATCHER_EMAIL_BASE_URL="http://localhost:$EMAIL_PROVIDER_PORT" \
-    DISPATCHER_EMAIL_API_KEY="dev-key" \
     VAULT_ROLE_ID="$vault_role_id" \
     VAULT_WRAPPED_SECRET_ID="$vault_wrapped_secret_id" \
         ./target/debug/messgr-dispatcher > "$WORK_DIR/dispatcher.log" 2>&1 &

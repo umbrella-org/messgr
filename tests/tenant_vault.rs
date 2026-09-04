@@ -183,6 +183,106 @@ async fn tenant_a_vault_credentials_cannot_read_tenant_bs_dek() {
 }
 
 #[tokio::test]
+async fn tenant_a_vault_credentials_can_read_its_own_provider_secret_but_not_tenant_bs()
+{
+    let control_url = control_database_url();
+    let control_pool = db::connect(&control_url, 5)
+        .await
+        .expect("failed to connect to control database");
+    let admin = VaultKeyStore::connect(Profile::Dev)
+        .expect("connecting to dev-mode Vault failed");
+
+    let slug_a = unique_name("test_tenant_kv_a");
+    let db_a = unique_name("test_db_kv_a");
+    let slug_b = unique_name("test_tenant_kv_b");
+    let db_b = unique_name("test_db_kv_b");
+
+    let outcome_a = provision_tenant(
+        &control_pool,
+        &control_url,
+        &slug_a,
+        "eu",
+        &db_a,
+        "test-actor",
+        admin.client(),
+    )
+    .await
+    .expect("provisioning tenant A failed");
+    // Tenant B's own outcome (RoleID/SecretID) isn't needed here — only its
+    // KV prefix needs a secret in it for tenant A's credentials to be tried
+    // against it.
+    provision_tenant(
+        &control_pool,
+        &control_url,
+        &slug_b,
+        "eu",
+        &db_b,
+        "test-actor",
+        admin.client(),
+    )
+    .await
+    .expect("provisioning tenant B failed");
+
+    vaultrs::kv2::set(
+        admin.client(),
+        "secret",
+        &format!("{slug_a}/sms"),
+        &serde_json::json!({"api_key": "tenant-a-key"}),
+    )
+    .await
+    .expect("admin must be able to write tenant A's provider secret");
+    vaultrs::kv2::set(
+        admin.client(),
+        "secret",
+        &format!("{slug_b}/sms"),
+        &serde_json::json!({"api_key": "tenant-b-key"}),
+    )
+    .await
+    .expect("admin must be able to write tenant B's provider secret");
+
+    let wrapped_a = outcome_a
+        .vault_wrapped_secret_id
+        .expect("a fresh provision must mint a SecretID");
+
+    let scoped_a = VaultKeyStore::login_as_tenant(
+        &outcome_a.vault_role_id,
+        &wrapped_a,
+        Profile::Dev,
+    )
+    .await
+    .expect("AppRole login must succeed with a freshly minted RoleID/wrapped SecretID");
+
+    // Tenant A, on its own KV prefix: must succeed.
+    let api_key = scoped_a
+        .read_provider_credential("secret", &format!("{slug_a}/sms"))
+        .await
+        .expect("tenant A must be able to read its own provider secret");
+    assert_eq!(api_key, "tenant-a-key");
+
+    // Tenant A's credentials, on tenant B's KV prefix: must be rejected by
+    // Vault's ACL (permission denied), not merely fail for some other reason.
+    let result = scoped_a
+        .read_provider_credential("secret", &format!("{slug_b}/sms"))
+        .await;
+    assert!(
+        result.is_err(),
+        "tenant A's Vault credentials must not be able to read tenant B's provider secret"
+    );
+
+    // Same mutation standard as tenant_a_vault_credentials_cannot_read_tenant_bs_dek:
+    // prove it's really the tenant-scoped policy doing the rejecting, not an
+    // accident of the fixture, by confirming the *admin* client can still
+    // reach the same path fine.
+    admin
+        .read_provider_credential("secret", &format!("{slug_b}/sms"))
+        .await
+        .expect("the admin client must still be able to read tenant B's provider secret directly");
+
+    drop_test_tenant(&control_pool, admin.client(), &db_a, &slug_a).await;
+    drop_test_tenant(&control_pool, admin.client(), &db_b, &slug_b).await;
+}
+
+#[tokio::test]
 async fn idempotent_reprovision_does_not_mint_a_second_secret_id() {
     let control_url = control_database_url();
     let control_pool = db::connect(&control_url, 5)
