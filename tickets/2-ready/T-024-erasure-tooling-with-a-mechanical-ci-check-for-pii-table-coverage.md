@@ -27,9 +27,13 @@ This audit found `suppression` silently outside §7.2's erasure statements — n
 
 The mechanical check itself does not yet exist and doesn't need the full erasure feature built to be useful: it can run today, against whatever schema exists, and keep working as tables are added. Scope:
 
-1. A CI-runnable check (a `just` recipe wrapping a Rust integration test, following this codebase's existing schema-truth-testing convention rather than a shell/psql script) that inspects the live tenant-database schema for columns holding customer-linkable data (by convention: any column literally named `customer_id`, or matching `*_ciphertext`/`*_hmac`) and confirms each such table appears in a covered list (a stand-in for `src/erasure`'s eventual redaction statements — that module is not created by this ticket) or on an explicit, reasoned exemption list — not a bare table-name allowlist, which is what let `suppression`'s absence go unnoticed as an omission rather than a decision.
-2. Since no `src/erasure` module exists yet, this ticket's concrete target is all eight tables the detection rule currently matches against the live schema: `customer_address`, `customer_external_id`, `comms_request`, and `comms_event` (covered — §7.2 already names these four) plus `suppression`, `customer_dek`, `customer_alias`, and `outbox` (exempt, each with its own stated reason — `suppression`'s already in DESIGN.md; the other three are added by this ticket, see above). The check must fail today if run against the current schema with an empty implementation, and pass once all eight are correctly classified.
+1. A CI-runnable check (a `just` recipe wrapping a Rust integration test, following this codebase's existing schema-truth-testing convention rather than a shell/psql script) that inspects the live tenant-database schema for columns holding customer-linkable data (by convention: any column literally named `customer_id`, or matching `*_ciphertext`/`*_hmac`/`*_raw`) and confirms each such table appears in a covered list (a stand-in for `src/erasure`'s eventual redaction statements — that module is not created by this ticket) or on an explicit, reasoned exemption list — not a bare table-name allowlist, which is what let `suppression`'s absence go unnoticed as an omission rather than a decision.
+2. Since no `src/erasure` module exists yet, this ticket's concrete target is all nine tables the detection rule currently matches against the live schema: `customer_address`, `customer_external_id`, `comms_request`, and `comms_event` (covered — §7.2 already names these four) plus `suppression`, `customer_dek`, `customer_alias`, `outbox`, and `orphan_event` (exempt, each with its own stated reason — `suppression`'s already in DESIGN.md; the other four are added by this ticket, see above). The check must fail today if run against the current schema with an empty implementation, and pass once all nine are correctly classified.
 3. Building the actual crypto-shred and physical-redaction commands (`erasure_request` table, the throttled background job, `VACUUM` afterward) remains step 15 in the build order and is explicitly out of scope for this ticket — it depends on consent/suppression (step 5) and the customer projection being live in production data, neither of which changes here.
+
+**Correction, T-022 review (2026-09-04): `orphan_event` (T-022, DESIGN.md §4.4) is a fifth exempt table, and the detection rule needed widening to see it.** `orphan_event.provider_payload_raw` is unencrypted third-party webhook payload with no `customer_id` column — the same structural shape as `suppression`, but the original detection rule (`customer_id`/`*_ciphertext`/`*_hmac`) does not match its column name at all, so the table would silently never appear in the query's result set. Adding it to `EXEMPT` alone would have made Task 2's second assertion (every `EXEMPT`/`COVERED` name must actually appear in the schema-check's result) fail, since an unmatched exemption is indistinguishable from a stale one under that assertion. The rule now also matches `*_raw`, which today only newly catches this one column (verified: no other tenant-schema column matches `%_raw` or `%_payload%`).
+
+- `orphan_event` — holds unmatched provider delivery-receipt payloads with no `customer_id` column yet (reconciliation, which would resolve one, is out of scope per T-022 decision 5); like `suppression`, it is structurally exempt rather than covered.
 
 ## Implementation Plan
 
@@ -54,14 +58,16 @@ None. `depends-on: []`.
    stand-in for §7.2's real redaction statements, living inside the test file itself — not a
    new production module. Building the real erasure feature is build-order step 15, a separate,
    future ticket (Description item 3).
-2. **The concrete target is 8 tables**, not 5 (Description items 1–2, user-confirmed at
-   refinement): covered — `comms_request`, `comms_event`, `customer_address`,
+2. **The concrete target is 9 tables**, not 5 (Description items 1–2, user-confirmed at
+   refinement; widened from 8 to 9 at the T-022 review, see Description's correction note):
+   covered — `comms_request`, `comms_event`, `customer_address`,
    `customer_external_id`; exempt — `suppression`, `customer_dek`, `customer_alias`, `outbox`,
-   each with its own stated reason.
+   `orphan_event`, each with its own stated reason.
 3. **Detection rule:** any tenant-database table with a column named exactly `customer_id`, or
-   matching `%_ciphertext` / `%_hmac`, via `information_schema.columns` against a real
+   matching `%_ciphertext` / `%_hmac` / `%_raw`, via `information_schema.columns` against a real
    provisioned tenant database — not static SQL-file parsing, matching this codebase's existing
-   schema-truth-testing convention (`tests/ledger_outbox_schema.rs` et al.).
+   schema-truth-testing convention (`tests/ledger_outbox_schema.rs` et al.). The `%_raw` pattern
+   was added at the T-022 review specifically to catch `orphan_event.provider_payload_raw`.
 4. **Implemented as a Rust integration test** (`tests/erasure_coverage.rs`), reusing the
    `TestTenant` provisioning pattern each test file in this repo already defines locally (no
    shared test-helpers module exists to reuse instead — matches the established convention of
@@ -79,12 +85,13 @@ None. `depends-on: []`.
 
 #### Task 1 — DESIGN.md §7.2 correction (`development/design/06-pii-retention.md`)
 
-Immediately after the existing `suppression` exemption paragraph (currently line 45), add three
+Immediately after the existing `suppression` exemption paragraph (currently line 45), add four
 new paragraphs in the same style (bold lead sentence naming the table and the decision, then the
-reasoning), for `customer_dek`, `customer_alias`, and `outbox` — using the three bullet points
-already drafted in this ticket's Description as the basis for the prose. Update the paragraph's
-closing sentence (or add one) so it reads as "these four tables" rather than singling out
-`suppression` alone, since all four are now named exemptions the CI check must carry.
+reasoning), for `customer_dek`, `customer_alias`, `outbox`, and `orphan_event` — using the
+bullet points already drafted in this ticket's Description as the basis for the prose. Update
+the paragraph's closing sentence (or add one) so it reads as "these five tables" rather than
+singling out `suppression` alone, since all five are now named exemptions the CI check must
+carry.
 
 #### Task 2 — `tests/erasure_coverage.rs` (new file)
 
@@ -98,11 +105,12 @@ closing sentence (or add one) so it reads as "these four tables" rather than sin
       ("customer_dek", "destroying wrapped_dek is Mode 1's own crypto-shredding mechanism; Mode 2 doesn't also need to touch it (§7.1, §7.2)"),
       ("customer_alias", "holds only opaque customer-id UUIDs and a merge timestamp, no PII-bearing value to redact (§7.2)"),
       ("outbox", "customer_id here is routing/claim metadata; message content lives in comms_request, not here (§4.2, §7.2)"),
+      ("orphan_event", "unmatched provider payload with no customer_id column yet; reconciliation, which would resolve one, is a separate ticket (§4.4, §7.2)"),
   ];
   ```
 - Write `#[tokio::test] async fn every_customer_linkable_table_is_covered_or_exempt()`: provision
   a `TestTenant`, query
-  `SELECT DISTINCT table_name FROM information_schema.columns WHERE table_schema = 'public' AND (column_name = 'customer_id' OR column_name LIKE '%\_ciphertext' ESCAPE '\' OR column_name LIKE '%\_hmac' ESCAPE '\')`
+  `SELECT DISTINCT table_name FROM information_schema.columns WHERE table_schema = 'public' AND (column_name = 'customer_id' OR column_name LIKE '%\_ciphertext' ESCAPE '\' OR column_name LIKE '%\_hmac' ESCAPE '\' OR column_name LIKE '%\_raw' ESCAPE '\')`
   against `tenant.tenant_pool`, and assert every returned table name is in `COVERED` or the
   `EXEMPT` names — failing with the list of unclassified table names and a pointer to add them
   to one list or the other, if not. Tear down the tenant afterward.
@@ -148,7 +156,7 @@ change — this check has no CLI or operator-facing surface.
 1. Acceptance test green; `just build`/`just lint`/`just test`/`just docs-check` clean.
 2. Docs updated per Task 1.
 3. Write a summary: files touched, decisions honoured (especially decision 2 — the target list
-   grew from 5 to 8 tables during refinement), anything deferred.
+   grew from 5 to 8 tables during refinement, then to 9 at the T-022 review), anything deferred.
 4. Suggest a Conventional Commit message, e.g.:
    ```
    test(erasure): add CI check for PII-table erasure coverage (T-024)
@@ -171,3 +179,4 @@ change — this check has no CLI or operator-facing surface.
 - 2026-09-02 — created (TO DO). source: audit: design/implementation audit found suppression undocumented as an erasure exemption; re-specs PLAN.md's former T-045 (CI check against the live schema) narrowly, without pulling the full erasure feature forward from build step 15.
 - 2026-09-04 — TO DO → READY: implementation plan complete. Target list expanded from 5 to 8 tables during refinement, at the user's direction, after applying the check's own detection rule to the live schema found customer_dek/customer_alias/outbox also unclassified — each now gets its own named exemption in DESIGN.md §7.2, matching suppression's style.
 - 2026-09-04 — TO DO → READY: plan complete
+- 2026-09-04 — plan corrected (still READY): T-022's review (impact sweep, step 8) found T-022's own `orphan_event` table would go undetected by this ticket's detection rule (no `customer_id`/`*_ciphertext`/`*_hmac` column) and would fail Task 2's second assertion if merely added to `EXEMPT`. Widened the detection rule to also match `*_raw`, added `orphan_event` as a fifth named exemption (target now 9 tables, not 8), and updated Task 1/2 and decisions 2–3 accordingly. Folded per T-022's review finding F2 — no severity of its own on this ticket, since T-024 hasn't been picked up yet.

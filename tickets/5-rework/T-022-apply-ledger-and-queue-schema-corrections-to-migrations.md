@@ -189,7 +189,28 @@ a real, documented CLI surface being removed.
 
 ## Review
 
-<!-- empty until IN REVIEW -->
+- [x] Reviewer independence settled (step 0): **delegated** — the reviewing agent authored this branch in the same session, so audits (steps 2–4a) were run by a fresh, adversarially-briefed sub-agent with no memory of writing the code. Every delegated finding was re-verified by hand before being recorded here.
+- [x] Implementation audit — acceptance test re-run (`just build`, `just lint`, `cargo test --test {ledger_outbox_schema,tenant_config,ingest,kill_switch,partition_lifecycle}`, `just test`, `just docs-check`): all pass clean, independently confirmed both by the delegated reviewer and by this session's own earlier run. All four Tasks and all 6 confirmed design decisions verified done, in the files named.
+- [x] Quality audit (step 3) — new tests (`idempotency_key_is_unique_per_producer`/`_may_be_reused_across_producers`, `comms_event_dedup_catches_dispatch_internal_events_with_no_provider_ref`, `orphan_event_insert_then_select_round_trips`) are mutation-testable, not `is_err()`-alone shells — confirmed the dedup test would go red if the `NOT NULL DEFAULT ''` fix were reverted.
+- [x] Consistency audit (step 4) — repo-wide grep for "staleness" clean except F3 below.
+- [x] Documentation audit (step 4a) — `just docs-check` clean; CLI flag removal fully reflected in `docs/user-manual/`.
+- [x] Docs-readability pass (step 4b) — skipped: no docs-readability reviewer available in this host session.
+- [x] Findings recorded below with severity, class, and disposition (step 5).
+- [x] Ticket moved (step 6) — see History.
+- [x] Other references updated / governing documents reconciled (step 7) — F1 below is the one gap found; it goes to rework rather than being fixed inline, since it contradicts AGENTS.md hard invariant 6.
+- [x] Remaining-tickets impact sweep done (step 8) — T-024 patched directly (F2); no other ticket in `1-to-do/`/`2-ready/` references T-022 or `orphan_event`.
+- [ ] Summary + commit message & MR attributes presented for approval (step 9) — pending: blocking finding F1 routes this ticket to rework first.
+
+| id | severity | class | disposition | description | evidence | suggestion |
+|---|---|---|---|---|---|---|
+| F1 | blocking | docs-gap | — | `orphan_event` (new table, holds unencrypted third-party `provider_payload_raw`) is missing from DESIGN.md §7.2's erasure statements and its named-exemption list — AGENTS.md hard invariant 6, violated by omission exactly as invariant 6 predicts ("third-party payloads are the classic miss") | `development/design/06-pii-retention.md:45` (exemption paragraph ends after `suppression`, no `orphan_event` mention); `development/design/13-build-order.md:34` (exemption-tracking list: "currently: `suppression`, §7.2") | Add an `orphan_event` exemption paragraph to §7.2 alongside `suppression` (no `customer_id` column; reconciliation, which would resolve one, is out of scope per this ticket's own decision 5 — cite T-030), and add it to build-order.md's exemption-tracking list |
+| F2 | non-blocking | plan-wrong | folded (T-024) | T-024's detection rule (`customer_id`/`*_ciphertext`/`*_hmac` only) can't see `orphan_event.provider_payload_raw`, and its own second assertion would fail if `orphan_event` were added to `EXEMPT` without widening the rule | `tickets/2-ready/T-024-*.md` decisions 2–3, Task 2's manifest/query (pre-patch) | Patched directly: widened detection rule to also match `%_raw`, added `orphan_event` as a 5th exemption (target 8→9 tables), updated Task 1/2 and decisions 2–3, recorded in T-024's own History |
+| F3 | non-blocking | stale-xref | fixed inline | `src/bin/control.rs`'s `TenantConfig` subcommand doc comment still listed "staleness bound" after Task 2 removed the flag | `src/bin/control.rs:69` (pre-fix) | Fixed inline: dropped the phrase, committed on the ticket branch (commit `f2dd6b3`) |
+| F4 | non-blocking | design | new ticket | `orphan_event` reconciliation is named in design (`development/design/09-delivery-receipts.md:11`) but no ticket owns building it — the same class of drift this ticket itself caught for the idempotency sweep (filed as T-029) | grep for "orphan_event"/"reconcil" across `tickets/`: only this ticket references it before now | Filed as T-030 (`spawned-by: [T-022]`), graded to match T-029's shape (impact low, complexity low, cost S) |
+
+Disposition summary: 1 blocking (F1, routes to rework), 1 folded (F2 → T-024), 1 fixed inline (F3), 1 new ticket (F4 → T-030).
+
+cost: estimated M, actual M
 
 ## History
 
@@ -198,3 +219,4 @@ a real, documented CLI surface being removed.
 - 2026-09-04 — TO DO → READY: plan complete
 - 2026-09-04 — READY → IN DEVELOPMENT: picked up
 - 2026-09-04 — IN DEVELOPMENT → IN REVIEW: acceptance green
+- 2026-09-04 — IN REVIEW → REWORK: review: F1 blocking (orphan_event missing from DESIGN.md §7.2 erasure statements)

@@ -20,11 +20,10 @@ Last updated: 2026-09-04
 
 ## IN REVIEW
 
-### messgr (1/1)
+### messgr (0/1)
 
 | id | title | depends-on |
 |---|---|---|
-| T-022 | Apply ledger and queue schema corrections to migrations | [] |
 
 ## REWORK
 
@@ -32,6 +31,7 @@ Last updated: 2026-09-04
 
 | id | title | open findings |
 |---|---|---|
+| T-022 | Apply ledger and queue schema corrections to migrations | review: F1 blocking (orphan_event missing from DESIGN.md §7.2 erasure statements) |
 
 ## READY (impact order, per child)
 
@@ -51,6 +51,7 @@ Last updated: 2026-09-04
 | T-025 | Operability and error-handling cleanup across CLI and services | medium | low | M | [] |  |
 | T-026 | Fix check-then-act races in CLI write paths | medium | medium | M | [] |  |
 | T-029 | Nightly idempotency-sweep job | low | low | S | [] |  |
+| T-030 | Reconcile orphan_event rows into comms_event | low | low | S | [] |  |
 
 ## DONE
 
