@@ -249,3 +249,4 @@ by it.)
 - 2026-09-04 — IN REVIEW → REWORK: review: F1 blocking (orphan_event missing from DESIGN.md §7.2 erasure statements)
 - 2026-09-04 — REWORK → IN REVIEW: findings fixed
 - 2026-09-04 — IN REVIEW → DONE: scoped re-review clean; F1 resolved, no blocking findings remain
+- 2026-09-04 — pushed `feat/T-022-apply-ledger-and-queue-schema-corrections-to-migrations`; opened https://github.com/umbrella-org/messgr/pull/34 (base `main`). Not yet merged.
