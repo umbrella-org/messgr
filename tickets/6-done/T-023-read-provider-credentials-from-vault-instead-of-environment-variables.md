@@ -295,3 +295,4 @@ cost: estimated M, actual M
 - 2026-09-04 — READY → IN DEVELOPMENT: picked up
 - 2026-09-04 — IN DEVELOPMENT → IN REVIEW: acceptance green
 - 2026-09-04 — IN REVIEW → DONE: review clean: no blocking findings, 4 stale-xref/spec-unclear findings fixed inline, 1 noted (F5)
+- 2026-09-04 — pushed, PR #35 opened (https://github.com/umbrella-org/messgr/pull/35). Not yet merged.
