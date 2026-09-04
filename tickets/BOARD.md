@@ -79,7 +79,7 @@ Last updated: 2026-09-04
 | T-019 | Size one tenant's ledger and derive cluster limits | yes — merged to main (PR #23, c9d6fd3) |
 | T-020 | Make tenant pool identity unrepresentable to mis-wire | yes — MERGED: PR #21 merged to main (da48e9c) |
 | T-021 | Outbox lease lifecycle and dispatcher retry with backoff | yes — merged to main (PR #22, d042eb9) |
-| T-022 | Apply ledger and queue schema corrections to migrations | no — publish-gated |
+| T-022 | Apply ledger and queue schema corrections to migrations | yes — MERGED: PR #34 merged to `main` (`2239233`). |
 | T-028 | messgr-control: stats subcommand for per-tenant message volume | yes — merged to main (PR #20, ed46117) |
 
 ## DROPPED
