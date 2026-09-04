@@ -87,8 +87,9 @@ enum Command {
         command: TemplateCommand,
     },
     /// Set or list a tenant's ordered per-channel provider list (DESIGN.md
-    /// §4.10, §12.1, T-012). `credential_path` and `rate_limit_per_sec` are
-    /// stored but not yet read by anything (T-012 decisions 3, 4).
+    /// §4.10, §12.1, T-012). `credential_path` is read by `messgr-dispatcher`
+    /// at startup via Vault KV (T-023); `rate_limit_per_sec` is stored but not
+    /// yet read by anything.
     ProviderConfig {
         #[command(subcommand)]
         command: ProviderConfigCommand,
@@ -331,7 +332,9 @@ enum ProviderConfigCommand {
         /// Free-text label — no real vendor is wired up yet (T-012 decision 1).
         #[arg(long)]
         provider: String,
-        /// Vault path; stored but not yet read (T-012 decision 3).
+        /// Vault KV v2 path (`<mount>/data/<path>`, e.g. `secret/data/acme/sms`);
+        /// read by `messgr-dispatcher` at startup (T-023). This command never
+        /// touches the secret value itself, only this pointer to it.
         #[arg(long = "credential-path")]
         credential_path: String,
         #[arg(long = "rate-limit-per-sec")]
