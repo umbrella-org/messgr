@@ -244,6 +244,12 @@ dispatcher-run:
 partition-lifecycle-run tenant_slug:
     cargo run --bin {{bin}} -- partition-lifecycle run --tenant-slug {{tenant_slug}}
 
+# Fail if a customer-linkable table exists that is neither covered by an
+# erasure redaction statement nor a named, reasoned exemption (DESIGN.md §7.2)
+[group('docs')]
+erasure-coverage-check:
+    cargo test --test erasure_coverage
+
 # Validate the AsciiDoc manual via snowball (broken includes/xrefs fail the check)
 [group('docs')]
 docs-check:
