@@ -38,6 +38,7 @@ Last updated: 2026-09-05
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
+| T-025 | Operability and error-handling cleanup across CLI and services | medium | medium | M | [] |  |
 
 ## TO DO (impact order, per child)
 
@@ -45,8 +46,9 @@ Last updated: 2026-09-05
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
-| T-025 | Operability and error-handling cleanup across CLI and services | medium | low | M | [] |  |
 | T-026 | Fix check-then-act races in CLI write paths | medium | medium | M | [] |  |
+| T-031 | TenantRegistry eviction: idle-TTL sweep with poll-loop cancellation | medium | medium | M | [] |  |
+| T-032 | Health endpoints for messgr-ingest and messgr-dispatcher | medium | medium | M | [] |  |
 | T-029 | Nightly idempotency-sweep job | low | low | S | [] |  |
 | T-030 | Reconcile orphan_event rows into comms_event | low | low | S | [] |  |
 
