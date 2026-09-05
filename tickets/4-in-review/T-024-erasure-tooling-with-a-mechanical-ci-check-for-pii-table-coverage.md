@@ -174,7 +174,64 @@ change — this check has no CLI or operator-facing surface.
 
 ## Review
 
-<!-- empty until IN REVIEW -->
+- [x] Reviewer independence settled (step 0): the implementing session authored the branch, so
+  audits (steps 2–4a) were delegated to an independent sub-agent, briefed adversarially; every
+  delegated finding below was re-verified by hand before recording.
+- [x] Implementation audit — acceptance test re-run, tasks & criteria verified (steps 1, 2).
+  `just build`/`lint`/`erasure-coverage-check`/`test`/`docs-check` all green on `main` at the
+  merge commit. All 9 originally-targeted tables correctly classified; the negative-case
+  mutation test (un-exempt `outbox`, confirm the exact failure, restore, confirm clean pass) was
+  independently re-run and passed. The independent reviewer additionally mutation-tested the
+  second (stale-manifest) assertion, not just the first — renaming `orphan_event`→`template` in
+  `EXEMPT` correctly failed naming `["template"]` — confirming neither assertion is tautological.
+  Two deviations from the plan's literal Task 2 text, both caught by the acceptance test itself
+  before this review and already recorded inline in `## History` below (partition resolution via
+  `pg_inherits`; the stale-manifest check distinguishing "not built yet" from "renamed/dropped").
+- [x] Quality audit (step 3) — idiomatic, no dead code; both assertions proven capable of failing
+  (above). CI/justfile command parity independently checked (review-addendum step 2.8): `ci.yml`'s
+  `test`/`clippy`/`fmt` jobs invoke the same commands as `just test`/`just lint`/`just fmt-check`
+  verbatim.
+- [x] Consistency audit (step 4) — no caller/callee drift; `tenant_id`/`customer_id` naming
+  consistent with §2.1; all `§N` citations this diff added (§5, §7.1, §4.2, §4.4) checked against
+  the cited sections and correct.
+- [x] Documentation audit (step 4a) — `just docs-check` clean; `docs/` grepped, confirmed no
+  user-manual coverage is needed (no CLI/operator surface, as the ticket claims).
+- [x] Docs-readability pass (step 4b) — no docs-readability reviewer available in this host
+  environment; conscious skip.
+- [x] Findings recorded below with severity, class, and disposition (step 5).
+- [x] Ticket moved `4-in-review/` → `5-rework/` → `4-in-review/` after the scoped fix;
+  `## History` appended at each move (step 6).
+- [x] Other references reconciled: `development/design/13-build-order.md`'s §14 exemption count
+  (F2, fixed inline, twice — once for this ticket's original three additions, again for F1's
+  sixth). Governing docs otherwise consistent (step 7).
+- [x] Remaining-tickets impact sweep (step 8): no ticket in `1-to-do/`/`2-ready/` references
+  T-024 or depends on it; `T-030` (orphan_event reconciliation) doesn't assume anything this
+  ticket changed.
+- [x] Summary + commit message & MR attributes presented for approval; remote-base check applies
+  under `layout = "in-tree"` (step 9).
+
+| id | severity | class | disposition | description | evidence | suggestion |
+|---|---|---|---|---|---|---|
+| F1 | blocking | plan-wrong | — | `customer` (the root customer entity: `locale`, `timezone`, `source_system`, `source_updated_at`) is invisible to decision 3's column-name detection rule — its own PK is `id`, not `customer_id`, and it has no `*_ciphertext`/`*_hmac`/`*_raw` column — so it shipped classified in neither `COVERED` nor `EXEMPT`, silently defeating the check's own purpose (AGENTS.md invariant 6). | `migrations/tenant/0008_customer_projection.sql:9-17`; `development/design/03-data-model.md:238-246`; pre-fix `tests/erasure_coverage.rs:181-196` matched no column on `customer` | Resolve the table via the `customer_id` foreign keys other tables declare against it, not by its own columns |
+| F2 | non-blocking | stale-xref | fixed inline | `development/design/13-build-order.md`'s §14 checklist mirrored the exemption list and went stale twice: first when this ticket's original diff added 3 exemptions without updating it, again when F1's fix added a 6th. | `development/design/13-build-order.md:34` vs `development/design/06-pii-retention.md` §7.2 | Keep the mirrored count current at every future exemption addition |
+| F3 | non-blocking | noted | noted | `TestTenant::teardown` only runs on the success path — a panicking `assert!` (the exact shape this ticket's own required mutation test produces) leaks a Vault mount, a tenant DB, and control-DB rows. Byte-identical to `tests/ledger_outbox_schema.rs`'s helper (decision 4's confirmed convention) — pre-existing and systemic across every integration test file using this pattern, not introduced by this ticket. | `tests/erasure_coverage.rs:32-72`, identical to `tests/ledger_outbox_schema.rs`'s helper | A future ticket scoped to the shared `TestTenant` pattern itself (not this one) could add panic-safe cleanup (e.g. a drop guard) |
+
+Disposition summary: 1 blocking (F1, fixed — see rework record below), 1 fixed inline (F2), 1 noted (F3).
+
+cost: estimated M, actual M
+
+### Rework fix record — round 1 (commit d2583aa)
+
+Fixed F1 by widening `customer_linkable_tables`'s query with a `UNION` resolving any table
+referenced by a `customer_id`-named foreign key (surfaces `customer` via
+`customer_address`/`customer_external_id`/`customer_alias`'s own declared constraints). Added
+`customer` to `EXEMPT` — user-confirmed classification: locale/timezone are operational
+preferences, source_system/source_updated_at are sync metadata, none of it personal information
+— and a sixth named-exemption paragraph in `development/design/06-pii-retention.md` §7.2. Also
+folds in F2's fix (`development/design/13-build-order.md`'s exemption count, bumped a second
+time to six). Verified: mutation test (removing `customer` from `EXEMPT`) fails naming exactly
+`["customer"]`; restored and confirmed clean pass. Full acceptance test
+(`build`/`lint`/`erasure-coverage-check`/`test`/`docs-check`) green.
 
 ## History
 
@@ -185,3 +242,5 @@ change — this check has no CLI or operator-facing surface.
 - 2026-09-05 — plan amended inline: pickup applicability audit found T-022's rework had already landed the `orphan_event` exemption paragraph directly in `development/design/06-pii-retention.md` (commit a5caad4), which Task 1's text hadn't caught up to. Task 1 now adds three new paragraphs (`customer_dek`, `customer_alias`, `outbox`), positioned after the existing `orphan_event` paragraph, not four. Non-blocking — schema, detection rule, 9-table target, and supporting test infra all confirmed still accurate.
 - 2026-09-05 — READY → IN DEVELOPMENT: picked up
 - 2026-09-05 — IN DEVELOPMENT → IN REVIEW: acceptance green
+- 2026-09-05 — IN REVIEW → REWORK: F1 blocking: customer table invisible to detection rule
+- 2026-09-05 — REWORK → IN REVIEW: F1 fixed (commit d2583aa): customer table now caught via customer_id FK resolution
