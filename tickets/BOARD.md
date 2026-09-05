@@ -20,11 +20,10 @@ Last updated: 2026-09-05
 
 ## IN REVIEW
 
-### messgr (1/1)
+### messgr (0/1)
 
 | id | title | depends-on |
 |---|---|---|
-| T-024 | CI check that every PII-holding table is covered by erasure or a named exemption | [] |
 
 ## REWORK
 
@@ -80,6 +79,7 @@ Last updated: 2026-09-05
 | T-021 | Outbox lease lifecycle and dispatcher retry with backoff | yes — merged to main (PR #22, d042eb9) |
 | T-022 | Apply ledger and queue schema corrections to migrations | yes — MERGED: PR #34 merged to `main` (`2239233`). |
 | T-023 | Read provider credentials from Vault instead of environment variables | yes — MERGED: PR #35 merged to main (28e0b3a). |
+| T-024 | CI check that every PII-holding table is covered by erasure or a named exemption | no — publish-gated |
 | T-028 | messgr-control: stats subcommand for per-tenant message volume | yes — merged to main (PR #20, ed46117) |
 
 ## DROPPED

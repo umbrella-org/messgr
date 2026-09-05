@@ -233,6 +233,15 @@ time to six). Verified: mutation test (removing `customer` from `EXEMPT`) fails 
 `["customer"]`; restored and confirmed clean pass. Full acceptance test
 (`build`/`lint`/`erasure-coverage-check`/`test`/`docs-check`) green.
 
+**Scoped re-review (independent):** F1's fix re-verified against `git show d2583aa` — the
+mutation test redone independently (same result), the FK-branch checked against every
+`customer_id`-named FK in `migrations/tenant/*.sql` (only three exist, all `REFERENCES
+customer(id)`, so the new UNION branch cannot resolve to any table other than `customer` — no
+false-positive risk), and DESIGN.md §7.2's new paragraph checked against the actual `customer`
+columns and against how locale/timezone are treated elsewhere in the design (always
+operational/scheduling, never PII) — no contradiction. Full acceptance sequence re-run green. No
+new findings. Verdict: proceed to done.
+
 ## History
 
 - 2026-09-02 — created (TO DO). source: audit: design/implementation audit found suppression undocumented as an erasure exemption; re-specs PLAN.md's former T-045 (CI check against the live schema) narrowly, without pulling the full erasure feature forward from build step 15.
@@ -244,3 +253,4 @@ time to six). Verified: mutation test (removing `customer` from `EXEMPT`) fails 
 - 2026-09-05 — IN DEVELOPMENT → IN REVIEW: acceptance green
 - 2026-09-05 — IN REVIEW → REWORK: F1 blocking: customer table invisible to detection rule
 - 2026-09-05 — REWORK → IN REVIEW: F1 fixed (commit d2583aa): customer table now caught via customer_id FK resolution
+- 2026-09-05 — IN REVIEW → DONE: scoped re-review clean; F2 fixed inline, F3 noted
