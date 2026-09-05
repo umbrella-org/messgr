@@ -52,7 +52,9 @@ The `comms_event` statement was absent from an earlier version of this design, w
 
 **Named exemption: `outbox`'s `customer_id` column is routing/claim metadata, not message content.** The recipient address and rendered body live in `comms_request`, already covered above; `outbox` only tracks which dispatcher claimed a row and when, so redacting `comms_request` already removes the customer-linkable content this table's `customer_id` merely points at.
 
-These five tables — `suppression`, `orphan_event`, `customer_dek`, `customer_alias`, and `outbox` — are the complete named-exemption list the mechanical CI check in §14 must carry alongside the covered-table statements above.
+**Named exemption: `customer` itself holds no personal information, only operational preference and sync metadata.** `locale` and `timezone` select a template locale and resolve quiet-hours/scheduling (§4.4, §6) — operational preferences, not personal data. `source_system` and `source_updated_at` are sync bookkeeping for the event-feed consumer (§4.6), not customer-supplied content. Unlike the other five exemptions, `customer` has no `customer_id`/`*_ciphertext`/`*_hmac`/`*_raw` column of its own to be caught by — it is the table those columns *reference* — so the mechanical CI check in §14 must resolve it via the `customer_id` foreign keys other tables declare against it, not by inspecting its own columns.
+
+These six tables — `suppression`, `orphan_event`, `customer_dek`, `customer_alias`, `outbox`, and `customer` — are the complete named-exemption list the mechanical CI check in §14 must carry alongside the covered-table statements above.
 
 `customer_id` itself is retained as an opaque UUID — it carries no personal information once the projection is redacted, and keeping it preserves the timeline's structural integrity and the ledger's foreign keys.
 
