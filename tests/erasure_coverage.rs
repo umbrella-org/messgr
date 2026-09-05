@@ -170,6 +170,12 @@ const EXEMPT: &[(&str, &str)] = &[
         "unmatched provider payload with no customer_id column yet; reconciliation, which \
          would resolve one, is a separate ticket (§4.4, §7.2)",
     ),
+    (
+        "customer",
+        "locale/timezone are operational preferences and source_system/source_updated_at are \
+         sync metadata, none of it personal information; caught only via the customer_id FK \
+         other tables declare against it, not by its own columns (§7.2)",
+    ),
 ];
 
 async fn customer_linkable_tables(pool: &PgPool) -> Vec<String> {
@@ -178,6 +184,14 @@ async fn customer_linkable_tables(pool: &PgPool) -> Vec<String> {
     // (e.g. comms_request_2026_09) as its own table, so resolve a partition
     // to its parent's name via pg_inherits before classifying — COVERED/
     // EXEMPT name the logical table, not a bootstrap-dependent partition.
+    //
+    // A column-name match alone misses `customer` itself: it is the root
+    // entity, so its own primary key is `id`, not `customer_id`, and it has
+    // no `*_ciphertext`/`*_hmac`/`*_raw` column (T-024 review finding F1).
+    // The second half of this UNION catches any table referenced by a
+    // foreign key from a `customer_id` column — which surfaces `customer`
+    // via customer_address/customer_external_id/customer_alias's own
+    // declared constraints, without hand-naming it.
     let rows: Vec<(String,)> = sqlx::query_as(
         r#"
         SELECT DISTINCT COALESCE(parent.relname, child.relname) AS table_name
@@ -193,6 +207,14 @@ async fn customer_linkable_tables(pool: &PgPool) -> Vec<String> {
              OR col.column_name LIKE '%\_hmac' ESCAPE '\'
              OR col.column_name LIKE '%\_raw' ESCAPE '\'
           )
+
+        UNION
+
+        SELECT DISTINCT co.confrelid::regclass::text AS table_name
+        FROM pg_constraint co
+        JOIN pg_attribute att
+          ON att.attrelid = co.conrelid AND att.attnum = ANY(co.conkey)
+        WHERE co.contype = 'f' AND att.attname = 'customer_id'
         "#,
     )
     .fetch_all(pool)
