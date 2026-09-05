@@ -85,11 +85,13 @@ None. `depends-on: []`.
 
 #### Task 1 — DESIGN.md §7.2 correction (`development/design/06-pii-retention.md`)
 
-Immediately after the existing `suppression` exemption paragraph (currently line 45), add four
-new paragraphs in the same style (bold lead sentence naming the table and the decision, then the
-reasoning), for `customer_dek`, `customer_alias`, `outbox`, and `orphan_event` — using the
-bullet points already drafted in this ticket's Description as the basis for the prose. Update
-the paragraph's closing sentence (or add one) so it reads as "these five tables" rather than
+`orphan_event`'s exemption paragraph already exists (added by T-022's rework, currently line 47,
+immediately after `suppression`'s at line 45) — only three new paragraphs are needed now.
+Immediately after the existing `orphan_event` paragraph (currently line 47), add three new
+paragraphs in the same style (bold lead sentence naming the table and the decision, then the
+reasoning), for `customer_dek`, `customer_alias`, and `outbox` — using the bullet points already
+drafted in this ticket's Description as the basis for the prose. Update the closing sentence
+following the exemption paragraphs (or add one) so it reads as "these five tables" rather than
 singling out `suppression` alone, since all five are now named exemptions the CI check must
 carry.
 
@@ -180,3 +182,5 @@ change — this check has no CLI or operator-facing surface.
 - 2026-09-04 — TO DO → READY: implementation plan complete. Target list expanded from 5 to 8 tables during refinement, at the user's direction, after applying the check's own detection rule to the live schema found customer_dek/customer_alias/outbox also unclassified — each now gets its own named exemption in DESIGN.md §7.2, matching suppression's style.
 - 2026-09-04 — TO DO → READY: plan complete
 - 2026-09-04 — plan corrected (still READY): T-022's review (impact sweep, step 8) found T-022's own `orphan_event` table would go undetected by this ticket's detection rule (no `customer_id`/`*_ciphertext`/`*_hmac` column) and would fail Task 2's second assertion if merely added to `EXEMPT`. Widened the detection rule to also match `*_raw`, added `orphan_event` as a fifth named exemption (target now 9 tables, not 8), and updated Task 1/2 and decisions 2–3 accordingly. Folded per T-022's review finding F2 — no severity of its own on this ticket, since T-024 hasn't been picked up yet.
+- 2026-09-05 — plan amended inline: pickup applicability audit found T-022's rework had already landed the `orphan_event` exemption paragraph directly in `development/design/06-pii-retention.md` (commit a5caad4), which Task 1's text hadn't caught up to. Task 1 now adds three new paragraphs (`customer_dek`, `customer_alias`, `outbox`), positioned after the existing `orphan_event` paragraph, not four. Non-blocking — schema, detection rule, 9-table target, and supporting test infra all confirmed still accurate.
+- 2026-09-05 — READY → IN DEVELOPMENT: picked up
