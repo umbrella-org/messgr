@@ -286,3 +286,4 @@ confirm nothing broke.
 - 2026-09-02 — created (TO DO). source: audit: batches nine noted operability findings from prior ticket reviews (T-001/F7,F9,F12; T-003/F2; T-007/F2; T-012/F1) with two found directly by the 2026-09-02 design/implementation audit (TenantRegistry has no eviction; no health endpoint on any binary), plus CI inlining cargo/docker rather than calling just recipes.
 - 2026-09-05 — TO DO → READY: plan complete. Item 1 dropped (already fixed); items 7/8 split to T-031/T-032; re-graded complexity low → medium.
 - 2026-09-05 — TO DO → READY: plan complete
+- 2026-09-05 — READY → IN DEVELOPMENT: picked up
