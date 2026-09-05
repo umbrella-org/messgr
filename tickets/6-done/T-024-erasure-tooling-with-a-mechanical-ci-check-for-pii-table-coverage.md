@@ -254,3 +254,4 @@ new findings. Verdict: proceed to done.
 - 2026-09-05 — IN REVIEW → REWORK: F1 blocking: customer table invisible to detection rule
 - 2026-09-05 — REWORK → IN REVIEW: F1 fixed (commit d2583aa): customer table now caught via customer_id FK resolution
 - 2026-09-05 — IN REVIEW → DONE: scoped re-review clean; F2 fixed inline, F3 noted
+- 2026-09-05 — MERGED: PR #36 (`a67f8ac`, original implementation, merge commit `fc2cfee`) and PR #37 (`d2583aa`, F1 rework fix, merge commit `68b62c7`), both to `main`.
