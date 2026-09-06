@@ -287,3 +287,5 @@ confirm nothing broke.
 - 2026-09-05 — TO DO → READY: plan complete. Item 1 dropped (already fixed); items 7/8 split to T-031/T-032; re-graded complexity low → medium.
 - 2026-09-05 — TO DO → READY: plan complete
 - 2026-09-05 — READY → IN DEVELOPMENT: picked up
+- 2026-09-06 — IN DEVELOPMENT → IN REVIEW: acceptance green, all 7 tasks done as planned.
+- 2026-09-06 — IN DEVELOPMENT → IN REVIEW: acceptance green

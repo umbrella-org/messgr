@@ -9,22 +9,22 @@ hand — edit the tickets. Hand-written planning notes live in [`NOTES.md`](NOTE
 **WIP limits (per child-project):**
 - `messgr`: `3-in-development/` ≤ 1 · `4-in-review/` ≤ 1
 
-Last updated: 2026-09-05
+Last updated: 2026-09-06
 
 ## IN DEVELOPMENT
+
+### messgr (0/1)
+
+| id | title | depends-on |
+|---|---|---|
+
+## IN REVIEW
 
 ### messgr (1/1)
 
 | id | title | depends-on |
 |---|---|---|
 | T-025 | Operability and error-handling cleanup across CLI and services | [] |
-
-## IN REVIEW
-
-### messgr (0/1)
-
-| id | title | depends-on |
-|---|---|---|
 
 ## REWORK
 
