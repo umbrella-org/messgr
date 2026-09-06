@@ -187,14 +187,14 @@ enum TenantConfigCommand {
     Set {
         #[arg(long = "tenant-slug")]
         tenant_slug: String,
-        #[arg(long = "retention-years")]
+        #[arg(long = "retention-years", value_parser = clap::value_parser!(i32).range(0..))]
         retention_years: i32,
         #[arg(long = "default-timezone")]
         default_timezone: String,
         #[arg(long = "default-locale")]
         default_locale: String,
         /// Defaults to 90 (DESIGN.md §4.10's own SQL default) when omitted.
-        #[arg(long = "schedule-horizon-days")]
+        #[arg(long = "schedule-horizon-days", value_parser = clap::value_parser!(i32).range(0..))]
         schedule_horizon_days: Option<i32>,
         #[arg(long = "quota-day-boundary-tz")]
         quota_day_boundary_tz: String,
@@ -211,7 +211,7 @@ enum TenantConfigCommand {
         /// Rows/second the kill-switch release-drain ramp admits after a
         /// switch releases (DESIGN.md §5.2). Defaults to 500 (the column's
         /// own SQL default) when omitted.
-        #[arg(long = "kill-switch-release-rate")]
+        #[arg(long = "kill-switch-release-rate", value_parser = clap::value_parser!(i32).range(0..))]
         kill_switch_release_rate: Option<i32>,
         /// Operator identity recorded on the platform_audit row.
         #[arg(long)]
@@ -321,10 +321,16 @@ enum ProviderConfigCommand {
     Set {
         #[arg(long = "tenant-slug")]
         tenant_slug: String,
-        /// `sms`, `email`, or `whatsapp` (DESIGN.md §4.4) — free text, not
-        /// validated against `template::model::channel` (no shared
-        /// enforcement exists between the two tables yet).
-        #[arg(long)]
+        /// `sms`, `email`, or `whatsapp` (DESIGN.md §4.4) — validated against
+        /// the same closed set `template approve --channel` uses (T-025 item 4).
+        #[arg(
+            long,
+            value_parser = clap::builder::PossibleValuesParser::new([
+                channel::SMS,
+                channel::EMAIL,
+                channel::WHATSAPP,
+            ])
+        )]
         channel: String,
         /// Failover order within the channel; 1 is tried first.
         #[arg(long)]
@@ -347,7 +353,14 @@ enum ProviderConfigCommand {
     List {
         #[arg(long = "tenant-slug")]
         tenant_slug: String,
-        #[arg(long)]
+        #[arg(
+            long,
+            value_parser = clap::builder::PossibleValuesParser::new([
+                channel::SMS,
+                channel::EMAIL,
+                channel::WHATSAPP,
+            ])
+        )]
         channel: String,
     },
 }
@@ -366,18 +379,22 @@ enum PartitionLifecycleCommand {
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> std::process::ExitCode {
     let cli = Cli::parse();
 
     if matches!(cli.command, Command::Version) {
         println!("messgr-control {}", env!("CARGO_PKG_VERSION"));
-        return;
+        return std::process::ExitCode::SUCCESS;
     }
 
     tracing_subscriber::fmt::init();
 
     let config = Config::from_env();
 
+    // Connecting to the control database is process startup, not a
+    // subcommand's own operation (T-025 decision 2) — a process that can't
+    // reach its own required infrastructure has nothing useful to do, so
+    // panicking loudly here matches `Config::from_env`'s own precedent.
     let control_pool = db::connect(
         &config.control_database_url,
         config.database_max_connections,
@@ -385,13 +402,33 @@ async fn main() {
     .await
     .expect("failed to connect to control database");
 
+    match run(cli, config, control_pool).await {
+        Ok(()) => std::process::ExitCode::SUCCESS,
+        Err(err) => {
+            eprintln!("error: {err}");
+            std::process::ExitCode::FAILURE
+        }
+    }
+}
+
+/// Everything a subcommand actually does, once past process startup (T-025
+/// decision 2) — every failure here is `?`-propagated instead of panicking,
+/// so a bad tenant slug or a transient DB/Vault failure is a reported error
+/// with a non-zero exit, not a crash.
+async fn run(
+    cli: Cli,
+    config: Config,
+    control_pool: sqlx::PgPool,
+) -> Result<(), String> {
     match cli.command {
         Command::Migrate => {
             sqlx::migrate!("./migrations/control")
                 .run(&control_pool)
                 .await
-                .expect("failed to run control database migrations");
-            tracing::info!("control database migrations applied");
+                .map_err(|err| {
+                    format!("failed to run control database migrations: {err}")
+                })?;
+            println!("control database migrations applied");
         }
         Command::Provision {
             slug,
@@ -401,7 +438,9 @@ async fn main() {
         } => {
             // Connected only here, not unconditionally in `main` — `Migrate`
             // has no Vault dependency and must not gain one (§13: never
-            // couple a subcommand to a service it doesn't use).
+            // couple a subcommand to a service it doesn't use). Connecting
+            // to Vault is startup-class regardless of call site (decision
+            // 2) — left as `.expect()`.
             let vault_keystore = VaultKeyStore::connect(config.profile).expect(
                 "failed to connect to Vault (has VAULT_ADDR/VAULT_TOKEN been set?)",
             );
@@ -415,12 +454,12 @@ async fn main() {
                 vault_keystore.client(),
             )
             .await
-            .unwrap_or_else(|err| {
-                panic!(
+            .map_err(|err| {
+                format!(
                     "failed to provision tenant {slug:?} (has `messgr-control migrate` been \
                      run against the control database, and is Vault reachable and unsealed?): {err}"
                 )
-            });
+            })?;
 
             println!("{}", outcome.tenant_id);
             println!("vault_role_id={}", outcome.vault_role_id);
@@ -453,9 +492,9 @@ async fn main() {
                     &actor,
                 )
                 .await
-                .unwrap_or_else(|err| {
-                    panic!("failed to register producer {name:?} for tenant {tenant_slug:?}: {err}")
-                });
+                .map_err(|err| {
+                    format!("failed to register producer {name:?} for tenant {tenant_slug:?}: {err}")
+                })?;
 
                 println!("{}", outcome.producer_id);
                 println!("outcome={}", outcome.outcome);
@@ -473,9 +512,9 @@ async fn main() {
                     &actor,
                 )
                 .await
-                .unwrap_or_else(|err| {
-                    panic!("failed to disable producer {name:?} for tenant {tenant_slug:?}: {err}")
-                });
+                .map_err(|err| {
+                    format!("failed to disable producer {name:?} for tenant {tenant_slug:?}: {err}")
+                })?;
 
                 println!("outcome={}", outcome.outcome);
             }
@@ -486,9 +525,11 @@ async fn main() {
                     &tenant_slug,
                 )
                 .await
-                .unwrap_or_else(|err| {
-                    panic!("failed to list producers for tenant {tenant_slug:?}: {err}")
-                });
+                .map_err(|err| {
+                    format!(
+                        "failed to list producers for tenant {tenant_slug:?}: {err}"
+                    )
+                })?;
 
                 for producer in producers {
                     println!(
@@ -504,6 +545,8 @@ async fn main() {
             }
         },
         Command::DevPki { command } => {
+            // Connecting to Vault is startup-class regardless of call site
+            // (decision 2) — left as `.expect()`.
             let vault_keystore = VaultKeyStore::connect(config.profile).expect(
                 "failed to connect to Vault (has VAULT_ADDR/VAULT_TOKEN been set?)",
             );
@@ -512,7 +555,7 @@ async fn main() {
                 DevPkiCommand::Bootstrap => {
                     dev_pki::bootstrap(vault_keystore.client(), config.profile)
                         .await
-                        .expect("failed to bootstrap dev PKI");
+                        .map_err(|err| format!("failed to bootstrap dev PKI: {err}"))?;
                     println!("dev PKI bootstrapped: mount=pki role=producer-dev");
                 }
                 DevPkiCommand::IssueCert {
@@ -531,24 +574,22 @@ async fn main() {
                         dev_pki::issue_cert(vault_keystore.client(), config.profile, &common_name)
                             .await
                     }
-                    .unwrap_or_else(|err| {
-                        panic!(
+                    .map_err(|err| {
+                        format!(
                             "failed to issue a dev certificate for {common_name:?} (has \
                              `messgr-control dev-pki bootstrap` been run?): {err}"
                         )
-                    });
+                    })?;
 
-                    std::fs::create_dir_all(&out_dir).unwrap_or_else(|err| {
-                        panic!("failed to create {out_dir:?}: {err}")
-                    });
+                    std::fs::create_dir_all(&out_dir).map_err(|err| {
+                        format!("failed to create {out_dir:?}: {err}")
+                    })?;
                     std::fs::write(out_dir.join("cert.pem"), &cert.certificate)
-                        .unwrap_or_else(|err| {
-                            panic!("failed to write cert.pem: {err}")
-                        });
+                        .map_err(|err| format!("failed to write cert.pem: {err}"))?;
                     std::fs::write(out_dir.join("key.pem"), &cert.private_key)
-                        .unwrap_or_else(|err| panic!("failed to write key.pem: {err}"));
+                        .map_err(|err| format!("failed to write key.pem: {err}"))?;
                     std::fs::write(out_dir.join("ca.pem"), &cert.issuing_ca)
-                        .unwrap_or_else(|err| panic!("failed to write ca.pem: {err}"));
+                        .map_err(|err| format!("failed to write ca.pem: {err}"))?;
 
                     println!(
                         "wrote cert.pem, key.pem, ca.pem to {}",
@@ -592,9 +633,9 @@ async fn main() {
                     &actor,
                 )
                 .await
-                .unwrap_or_else(|err| {
-                    panic!("failed to set tenant_config for tenant {tenant_slug:?}: {err}")
-                });
+                .map_err(|err| {
+                    format!("failed to set tenant_config for tenant {tenant_slug:?}: {err}")
+                })?;
 
                     println!("outcome={}", outcome.outcome);
                 }
@@ -605,9 +646,9 @@ async fn main() {
                     &tenant_slug,
                 )
                 .await
-                .unwrap_or_else(|err| {
-                    panic!("failed to show tenant_config for tenant {tenant_slug:?}: {err}")
-                });
+                .map_err(|err| {
+                    format!("failed to show tenant_config for tenant {tenant_slug:?}: {err}")
+                })?;
 
                     match config_row {
                         Some(config_row) => println!(
@@ -628,6 +669,8 @@ async fn main() {
             }
         }
         Command::CustomerDek { command } => {
+            // Connecting to Vault is startup-class regardless of call site
+            // (decision 2) — left as `.expect()`.
             let vault_keystore = VaultKeyStore::connect(config.profile).expect(
                 "failed to connect to Vault (has VAULT_ADDR/VAULT_TOKEN been set?)",
             );
@@ -646,9 +689,9 @@ async fn main() {
                         &actor,
                     )
                     .await
-                    .unwrap_or_else(|err| {
-                        panic!("failed to pre-provision DEKs for tenant {tenant_slug:?}: {err}")
-                    });
+                    .map_err(|err| {
+                        format!("failed to pre-provision DEKs for tenant {tenant_slug:?}: {err}")
+                    })?;
 
                     println!(
                         "created={} already_existed={}",
@@ -669,9 +712,8 @@ async fn main() {
                 body_file,
                 actor,
             } => {
-                let body = std::fs::read_to_string(&body_file).unwrap_or_else(|err| {
-                    panic!("failed to read {body_file:?}: {err}")
-                });
+                let body = std::fs::read_to_string(&body_file)
+                    .map_err(|err| format!("failed to read {body_file:?}: {err}"))?;
 
                 let outcome = approve_template(
                     &control_pool,
@@ -685,12 +727,12 @@ async fn main() {
                     &actor,
                 )
                 .await
-                .unwrap_or_else(|err| {
-                    panic!(
+                .map_err(|err| {
+                    format!(
                         "failed to approve template {template_id:?} version {version} \
                          locale {locale:?} for tenant {tenant_slug:?}: {err}"
                     )
-                });
+                })?;
 
                 println!("outcome={}", outcome.outcome);
             }
@@ -709,12 +751,12 @@ async fn main() {
                     &locale,
                 )
                 .await
-                .unwrap_or_else(|err| {
-                    panic!(
+                .map_err(|err| {
+                    format!(
                         "failed to show template {template_id:?} version {version} \
                          locale {locale:?} for tenant {tenant_slug:?}: {err}"
                     )
-                });
+                })?;
 
                 match template {
                     Some(template) => println!(
@@ -742,12 +784,12 @@ async fn main() {
                     &template_id,
                 )
                 .await
-                .unwrap_or_else(|err| {
-                    panic!(
+                .map_err(|err| {
+                    format!(
                         "failed to list template versions for {template_id:?} tenant \
                          {tenant_slug:?}: {err}"
                     )
-                });
+                })?;
 
                 for template in templates {
                     println!(
@@ -767,15 +809,14 @@ async fn main() {
                 locale,
                 var,
             } => {
-                let variables: std::collections::HashMap<String, String> = var
-                    .iter()
-                    .map(|pair| {
-                        pair.split_once('=').unwrap_or_else(|| {
-                            panic!("--var {pair:?} must be in key=value form")
-                        })
-                    })
-                    .map(|(key, value)| (key.to_string(), value.to_string()))
-                    .collect();
+                let mut variables: std::collections::HashMap<String, String> =
+                    std::collections::HashMap::new();
+                for pair in &var {
+                    let (key, value) = pair.split_once('=').ok_or_else(|| {
+                        format!("--var {pair:?} must be in key=value form")
+                    })?;
+                    variables.insert(key.to_string(), value.to_string());
+                }
 
                 let rendered = render_preview(
                     &control_pool,
@@ -787,12 +828,12 @@ async fn main() {
                     &variables,
                 )
                 .await
-                .unwrap_or_else(|err| {
-                    panic!(
+                .map_err(|err| {
+                    format!(
                         "failed to render template {template_id:?} version {version} \
                          locale {locale:?} for tenant {tenant_slug:?}: {err}"
                     )
-                });
+                })?;
 
                 println!("{rendered}");
             }
@@ -824,9 +865,9 @@ async fn main() {
                     &actor,
                 )
                 .await
-                .unwrap_or_else(|err| {
-                    panic!("failed to set provider_config for tenant {tenant_slug:?}: {err}")
-                });
+                .map_err(|err| {
+                    format!("failed to set provider_config for tenant {tenant_slug:?}: {err}")
+                })?;
 
                 println!("outcome={}", outcome.outcome);
             }
@@ -841,12 +882,12 @@ async fn main() {
                     &channel,
                 )
                 .await
-                .unwrap_or_else(|err| {
-                    panic!(
+                .map_err(|err| {
+                    format!(
                         "failed to list provider_config for tenant {tenant_slug:?} \
                          channel {channel:?}: {err}"
                     )
-                });
+                })?;
 
                 if rows.is_empty() {
                     println!("no provider configured for channel {channel}");
@@ -874,9 +915,9 @@ async fn main() {
                     chrono::Utc::now(),
                 )
                 .await
-                .unwrap_or_else(|err| {
-                    panic!("partition lifecycle run failed for tenant {tenant_slug:?}: {err}")
-                });
+                .map_err(|err| {
+                    format!("partition lifecycle run failed for tenant {tenant_slug:?}: {err}")
+                })?;
 
                 println!(
                     "created={} moved={} dropped={}",
@@ -897,9 +938,9 @@ async fn main() {
                 since,
             )
             .await
-            .unwrap_or_else(|err| {
-                panic!("failed to compute stats for tenant {tenant_slug:?}: {err}")
-            });
+            .map_err(|err| {
+                format!("failed to compute stats for tenant {tenant_slug:?}: {err}")
+            })?;
 
             let mut channels: Vec<&str> =
                 rows.iter().map(|r| r.channel.as_str()).collect();
@@ -920,6 +961,8 @@ async fn main() {
         }
         Command::Version => unreachable!("handled before Config::from_env() above"),
     }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1074,5 +1117,133 @@ mod tests {
         assert_eq!(credential_path, "secret/data/acme/sms");
         assert_eq!(rate_limit_per_sec, 10);
         assert_eq!(actor, "operator@example.com");
+    }
+
+    #[test]
+    fn provider_config_set_rejects_an_invalid_channel() {
+        let result = Cli::try_parse_from([
+            "messgr-control",
+            "provider-config",
+            "set",
+            "--tenant-slug",
+            "acme",
+            "--channel",
+            "carrier-pigeon",
+            "--priority",
+            "1",
+            "--provider",
+            "generic-http",
+            "--credential-path",
+            "secret/data/acme/sms",
+            "--rate-limit-per-sec",
+            "10",
+            "--actor",
+            "operator@example.com",
+        ]);
+
+        assert!(
+            result.is_err(),
+            "an invalid --channel value must fail to parse"
+        );
+    }
+
+    #[test]
+    fn provider_config_list_rejects_an_invalid_channel() {
+        let result = Cli::try_parse_from([
+            "messgr-control",
+            "provider-config",
+            "list",
+            "--tenant-slug",
+            "acme",
+            "--channel",
+            "carrier-pigeon",
+        ]);
+
+        assert!(
+            result.is_err(),
+            "an invalid --channel value must fail to parse"
+        );
+    }
+
+    #[test]
+    fn tenant_config_set_rejects_a_negative_retention_years() {
+        let result = Cli::try_parse_from([
+            "messgr-control",
+            "tenant-config",
+            "set",
+            "--tenant-slug",
+            "acme",
+            "--retention-years",
+            "-1",
+            "--default-timezone",
+            "Europe/London",
+            "--default-locale",
+            "en-GB",
+            "--quota-day-boundary-tz",
+            "Europe/London",
+            "--actor",
+            "operator@example.com",
+        ]);
+
+        assert!(
+            result.is_err(),
+            "a negative --retention-years must fail to parse"
+        );
+    }
+
+    #[test]
+    fn tenant_config_set_rejects_a_negative_schedule_horizon_days() {
+        let result = Cli::try_parse_from([
+            "messgr-control",
+            "tenant-config",
+            "set",
+            "--tenant-slug",
+            "acme",
+            "--retention-years",
+            "7",
+            "--default-timezone",
+            "Europe/London",
+            "--default-locale",
+            "en-GB",
+            "--schedule-horizon-days",
+            "-1",
+            "--quota-day-boundary-tz",
+            "Europe/London",
+            "--actor",
+            "operator@example.com",
+        ]);
+
+        assert!(
+            result.is_err(),
+            "a negative --schedule-horizon-days must fail to parse"
+        );
+    }
+
+    #[test]
+    fn tenant_config_set_rejects_a_negative_kill_switch_release_rate() {
+        let result = Cli::try_parse_from([
+            "messgr-control",
+            "tenant-config",
+            "set",
+            "--tenant-slug",
+            "acme",
+            "--retention-years",
+            "7",
+            "--default-timezone",
+            "Europe/London",
+            "--default-locale",
+            "en-GB",
+            "--quota-day-boundary-tz",
+            "Europe/London",
+            "--kill-switch-release-rate",
+            "-1",
+            "--actor",
+            "operator@example.com",
+        ]);
+
+        assert!(
+            result.is_err(),
+            "a negative --kill-switch-release-rate must fail to parse"
+        );
     }
 }

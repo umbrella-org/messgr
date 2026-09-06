@@ -17,6 +17,39 @@ pub struct ChannelStatusCount {
     pub count: i64,
 }
 
+/// A stats run can fail on the control-database side, the tenant-database
+/// side, or a domain-level rejection (an unknown `tenant_slug`) — the last
+/// of these is carried as `sqlx::Error::Configuration`, matching
+/// `provider_config`/`tenant_config`'s `ConfigureError` shape (T-025 item 7:
+/// this used to be a bare `sqlx::Error`, unlike every sibling
+/// resolve/connect/act function).
+#[derive(Debug)]
+pub enum StatsError {
+    Database(sqlx::Error),
+}
+
+impl std::fmt::Display for StatsError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Database(err) => write!(f, "stats operation failed: {err}"),
+        }
+    }
+}
+
+impl std::error::Error for StatsError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Database(err) => Some(err),
+        }
+    }
+}
+
+impl From<sqlx::Error> for StatsError {
+    fn from(err: sqlx::Error) -> Self {
+        Self::Database(err)
+    }
+}
+
 /// Resolves `tenant_slug`, opens its pool, runs the count query, closes the
 /// pool. Mirrors `partition_lifecycle::lifecycle::run_for_tenant`'s
 /// resolve/connect/close shape so `src/bin/control.rs` stays as thin as
@@ -26,7 +59,7 @@ pub async fn tenant_message_stats(
     base_db_url: &str,
     tenant_slug: &str,
     since: Option<NaiveDate>,
-) -> Result<Vec<ChannelStatusCount>, sqlx::Error> {
+) -> Result<Vec<ChannelStatusCount>, StatsError> {
     let tenant = tenant_repo::find_by_slug(control_pool, tenant_slug)
         .await?
         .ok_or_else(|| {
@@ -66,5 +99,5 @@ pub async fn tenant_message_stats(
     .await;
 
     tenant_pool.pool.close().await;
-    result
+    result.map_err(StatsError::from)
 }

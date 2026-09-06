@@ -106,12 +106,14 @@ vault-dev-init:
 
 # Create the messgr_cold tablespace used by partition-lifecycle moves
 # (T-014). Tablespaces are cluster-level, not per-tenant -- run this once
-# per Postgres instance, and again after `just db-reset`.
+# per Postgres instance, and again after `just db-reset`. `container`
+# defaults to the local compose service name; CI (T-025) passes its own
+# dynamically-named service container instead.
 [group('db')]
-tablespace-init:
-    docker exec messgr-postgres mkdir -p /var/lib/postgresql/tablespaces/messgr_cold
-    docker exec messgr-postgres chown postgres:postgres /var/lib/postgresql/tablespaces/messgr_cold
-    docker exec messgr-postgres psql -U messgr -d control -c \
+tablespace-init container="messgr-postgres":
+    docker exec {{container}} mkdir -p /var/lib/postgresql/tablespaces/messgr_cold
+    docker exec {{container}} chown postgres:postgres /var/lib/postgresql/tablespaces/messgr_cold
+    docker exec {{container}} psql -U messgr -d control -c \
         "CREATE TABLESPACE messgr_cold LOCATION '/var/lib/postgresql/tablespaces/messgr_cold'" || true
 
 # Apply pending control-database migrations

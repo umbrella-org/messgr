@@ -33,24 +33,38 @@ pub struct Dek {
     pub wrapped: String,
 }
 
+/// `Client` wraps a real Vault-transport error; `Protocol` covers a
+/// response that came back but didn't have the shape this module expects
+/// (malformed base64, a missing field, an unbuildable client settings) —
+/// T-025 item 3: these used to panic despite every caller here returning a
+/// `Result`.
 #[derive(Debug)]
-pub struct KeyStoreError(vaultrs::error::ClientError);
+pub enum KeyStoreError {
+    Client(vaultrs::error::ClientError),
+    Protocol(String),
+}
 
 impl std::fmt::Display for KeyStoreError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "vault key store error: {}", self.0)
+        match self {
+            Self::Client(err) => write!(f, "vault key store error: {err}"),
+            Self::Protocol(msg) => write!(f, "vault key store error: {msg}"),
+        }
     }
 }
 
 impl std::error::Error for KeyStoreError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        Some(&self.0)
+        match self {
+            Self::Client(err) => Some(err),
+            Self::Protocol(_) => None,
+        }
     }
 }
 
 impl From<vaultrs::error::ClientError> for KeyStoreError {
     fn from(err: vaultrs::error::ClientError) -> Self {
-        Self(err)
+        Self::Client(err)
     }
 }
 
@@ -191,7 +205,9 @@ pub(crate) fn connect_settings(
 
     let settings: VaultClientSettings = VaultClientSettingsBuilder::default()
         .build()
-        .unwrap_or_else(|err| panic!("failed to build Vault client settings: {err}"));
+        .map_err(|err| {
+        KeyStoreError::Protocol(format!("failed to build Vault client settings: {err}"))
+    })?;
 
     assert_tls_outside_dev(&settings.address, profile);
 
@@ -240,12 +256,18 @@ impl KeyStore for VaultKeyStore {
             None,
         )
         .await?;
-        let plaintext_b64 = response
-            .plaintext
-            .expect("DataKeyType::Plaintext must return plaintext");
+        let plaintext_b64 = response.plaintext.ok_or_else(|| {
+            KeyStoreError::Protocol(
+                "vault returned no plaintext for DataKeyType::Plaintext".to_string(),
+            )
+        })?;
         let plaintext = base64::engine::general_purpose::STANDARD
             .decode(plaintext_b64)
-            .expect("vault returned invalid base64 plaintext");
+            .map_err(|err| {
+                KeyStoreError::Protocol(format!(
+                    "vault returned invalid base64 plaintext: {err}"
+                ))
+            })?;
         Ok(Dek {
             plaintext: Zeroizing::new(plaintext),
             wrapped: response.ciphertext,
@@ -261,7 +283,11 @@ impl KeyStore for VaultKeyStore {
             data::decrypt(&self.client, mount, KEY_NAME, wrapped, None).await?;
         let plaintext = base64::engine::general_purpose::STANDARD
             .decode(response.plaintext)
-            .expect("vault returned invalid base64 plaintext");
+            .map_err(|err| {
+                KeyStoreError::Protocol(format!(
+                    "vault returned invalid base64 plaintext: {err}"
+                ))
+            })?;
         Ok(Zeroizing::new(plaintext))
     }
 }
