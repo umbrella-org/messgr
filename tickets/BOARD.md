@@ -81,7 +81,7 @@ Last updated: 2026-09-07
 | T-023 | Read provider credentials from Vault instead of environment variables | yes — MERGED: PR #35 merged to main (28e0b3a). |
 | T-024 | CI check that every PII-holding table is covered by erasure or a named exemption | yes — MERGED: PR #36 (`a67f8ac`, original implementation, merge commit `fc2cfee`) and PR #37 (`d2583aa`, F1 rework fix,… |
 | T-025 | Operability and error-handling cleanup across CLI and services | yes — MERGED: PR #38 (`5beb467`) into `main` |
-| T-026 | Fix check-then-act races in CLI write paths | no — publish-gated |
+| T-026 | Fix check-then-act races in CLI write paths | yes — merged to main (PR #39, bcbf080) |
 | T-028 | messgr-control: stats subcommand for per-tenant message volume | yes — merged to main (PR #20, ed46117) |
 
 ## DROPPED

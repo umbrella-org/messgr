@@ -316,3 +316,4 @@ every other rejection site in this function exactly; audit fires before the `Err
 - 2026-09-07 — IN REVIEW → REWORK: F5 blocking: F2's own fix skipped the platform_audit call on its new rejected path
 - 2026-09-07 — REWORK → IN REVIEW: F5 fixed (commit 6faad13)
 - 2026-09-07 — IN REVIEW → DONE: review clean after 2 rework rounds (F2, F5); 3 non-blocking findings fixed inline (F1, F3, F4)
+- 2026-09-07 — merged to main (PR #39, bcbf080)
