@@ -133,10 +133,19 @@ async fn approve_template_inner(
     body: &str,
     actor: &str,
 ) -> Result<ApproveOutcome, ApproveError> {
-    if repo::find(tenant_pool, template_id, version, locale)
-        .await?
-        .is_some()
-    {
+    let inserted = repo::insert_if_absent(
+        tenant_pool,
+        template_id,
+        version,
+        channel,
+        locale,
+        body,
+        actor,
+        Utc::now(),
+    )
+    .await?;
+
+    if !inserted {
         audit(
             control_pool,
             actor,
@@ -154,18 +163,6 @@ async fn approve_template_inner(
              approved; approve a new version instead"
         )));
     }
-
-    repo::insert(
-        tenant_pool,
-        template_id,
-        version,
-        channel,
-        locale,
-        body,
-        actor,
-        Utc::now(),
-    )
-    .await?;
 
     audit(
         control_pool,

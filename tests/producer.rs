@@ -289,6 +289,99 @@ async fn idempotent_reregistration_writes_a_second_audit_row_and_no_duplicate() 
 }
 
 #[tokio::test]
+async fn concurrent_registration_with_identical_inputs_never_errors_and_writes_no_duplicate()
+ {
+    // T-026: register_producer_inner's classification checks (find_by_name,
+    // find_by_cert_subject, find_producer_cert) ran, then insert — a
+    // classic check-then-act race. Two concurrent registrations with
+    // identical inputs used to risk a raw UNIQUE-violation error on the
+    // loser instead of the "idempotent" outcome this test asserts.
+    let control_url = control_database_url();
+    let control_pool = db::connect(&control_url, 5)
+        .await
+        .expect("failed to connect to control database");
+    let vault = vault_keystore();
+
+    let slug = unique_name("test_tenant_producer_concurrent");
+    let db_name = unique_name("test_db_producer_concurrent");
+    let cert_subject = format!("CN={}", unique_name("concurrent"));
+
+    let tenant_id =
+        provision_test_tenant(&control_pool, &control_url, &vault, &slug, &db_name)
+            .await;
+
+    let call_one = register_producer(
+        &control_pool,
+        &control_url,
+        &slug,
+        "concurrent-producer",
+        &cert_subject,
+        "team",
+        "team@example.com",
+        "test-actor",
+    );
+    let call_two = register_producer(
+        &control_pool,
+        &control_url,
+        &slug,
+        "concurrent-producer",
+        &cert_subject,
+        "team",
+        "team@example.com",
+        "test-actor",
+    );
+    let (result_one, result_two) = tokio::join!(call_one, call_two);
+    let result_one = result_one.expect("first concurrent registration failed");
+    let result_two = result_two.expect("second concurrent registration failed");
+
+    assert_eq!(result_one.producer_id, result_two.producer_id);
+
+    let outcomes = [result_one.outcome, result_two.outcome];
+    assert_eq!(
+        outcomes.iter().filter(|o| **o == "created").count(),
+        1,
+        "exactly one concurrent registration must report created: {outcomes:?}"
+    );
+    assert_eq!(
+        outcomes.iter().filter(|o| **o == "idempotent").count(),
+        1,
+        "exactly one concurrent registration must report idempotent: {outcomes:?}"
+    );
+
+    let producers = list_producers(&control_pool, &control_url, &slug)
+        .await
+        .expect("listing producers failed");
+    assert_eq!(
+        producers.len(),
+        1,
+        "no duplicate producer row must be created"
+    );
+
+    let rows: Vec<(String, Option<String>)> = sqlx::query_as(
+        "SELECT action, detail->>'outcome' FROM platform_audit \
+         WHERE tenant_id = $1 AND action = 'producer.register' ORDER BY at",
+    )
+    .bind(tenant_id)
+    .fetch_all(&control_pool)
+    .await
+    .expect("querying platform_audit failed");
+
+    let mut audited_outcomes: Vec<&str> = rows
+        .iter()
+        .filter_map(|(_, outcome)| outcome.as_deref())
+        .collect();
+    audited_outcomes.sort_unstable();
+    assert_eq!(
+        audited_outcomes,
+        vec!["created", "idempotent"],
+        "both racers must audit exactly once each, never both created"
+    );
+
+    cleanup_cert(&control_pool, &cert_subject).await;
+    drop_test_tenant(&control_pool, &db_name, &slug).await;
+}
+
+#[tokio::test]
 async fn conflicting_reregistration_is_rejected_and_audited() {
     let control_url = control_database_url();
     let control_pool = db::connect(&control_url, 5)

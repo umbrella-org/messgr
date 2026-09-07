@@ -38,13 +38,23 @@ const DEV_ROLE: &str = "producer-dev";
 /// CA's own long TTL (set at generation, below) actually take effect.
 const PKI_MAX_LEASE_TTL: &str = "87600h";
 
-/// Serializes the has-issuer-check + generate-root section of `bootstrap`.
-/// Unlike `ensure_pki_mount`'s race (caught via Vault's "already in use"
-/// error), Vault has no such rejection for a second root CA — it mints one
-/// on every `generate` call, no questions asked. Concurrent `bootstrap`
-/// callers (e.g. this crate's own test binary, where every `#[tokio::test]`
-/// shares one dev Vault) would otherwise each pass the check before either
-/// finishes generating, minting two roots.
+/// Serializes the has-issuer-check + generate-root section of `bootstrap`
+/// for callers **sharing one process** — this crate's own test binary,
+/// where every `#[tokio::test]` shares one dev Vault, is the case this was
+/// written for. Unlike `ensure_pki_mount`'s race (caught via Vault's
+/// "already in use" error), Vault has no such rejection for a second root
+/// CA — it mints one on every `generate` call, no questions asked.
+///
+/// **Does not cover two separate `messgr-control dev-pki bootstrap`
+/// process invocations** — a `static` `tokio::sync::Mutex` has no reach
+/// across processes, so that race is still open (T-026 audited this and
+/// decided to accept it: `dev-pki` is dev-only tooling
+/// (`assert_dev_profile`) with no `platform_audit` guarantee attached, has
+/// no existing database dependency worth adding solely to close it, and a
+/// lost race only leaves a harmless orphaned extra root CA — Vault always
+/// issues leaf certs off the mount's current default issuer, so a stray
+/// second root doesn't break `issue_cert`/`issue_server_cert`, it's just
+/// inert clutter in a dev Vault).
 static ROOT_CA_BOOTSTRAP_LOCK: tokio::sync::Mutex<()> =
     tokio::sync::Mutex::const_new(());
 
@@ -63,7 +73,11 @@ fn assert_dev_profile(profile: Profile) {
 
 /// Idempotently ensures the dev `pki` mount, a root CA, and a permissive
 /// `producer-dev` role all exist. Safe to call repeatedly (T-006 decision 7):
-/// re-running never mints a second root CA or duplicates the mount.
+/// re-running never mints a second root CA or duplicates the mount, for
+/// callers within one process. Two separate `bootstrap` **process**
+/// invocations racing each other can still each mint a root — see
+/// `ROOT_CA_BOOTSTRAP_LOCK`'s doc comment and T-026, which accepted this
+/// rather than fixing it.
 pub async fn bootstrap(
     client: &VaultClient,
     profile: Profile,

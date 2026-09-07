@@ -105,7 +105,10 @@ async fn set_tenant_config_inner(
     actor: &str,
     input: TenantConfigInput,
 ) -> Result<ConfigureOutcome, ConfigureError> {
-    let existing = repo::load(tenant_pool).await?;
+    let mut tx = tenant_pool.begin().await?;
+    repo::lock_tx(&mut tx).await?;
+
+    let existing = repo::load_tx(&mut tx).await?;
 
     let outcome = match &existing {
         None => "created",
@@ -114,8 +117,10 @@ async fn set_tenant_config_inner(
     };
 
     if outcome != "idempotent" {
-        repo::upsert(tenant_pool, &input).await?;
+        repo::upsert_tx(&mut tx, &input).await?;
     }
+
+    tx.commit().await?;
 
     audit(control_pool, actor, Some(tenant_id), &input, outcome).await?;
 

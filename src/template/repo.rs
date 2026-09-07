@@ -40,13 +40,15 @@ pub async fn list_versions(
     .await
 }
 
-/// Inserts a new template row. Callers must have already checked `find` for
-/// this `(template_id, version, locale)` — this is not itself idempotent,
-/// since a second insert for the same primary key would violate it;
-/// `approve_template` (src/template/approve.rs) is what makes the overall
-/// operation reject cleanly, matching `producer::repo::insert`'s convention.
+/// Inserts a new template row unless `(template_id, version, locale)` is
+/// already approved — `ON CONFLICT DO NOTHING` against the table's own
+/// primary key, matching `customer_dek::repo::insert_if_absent`'s
+/// race-handling shape (T-026). Returns whether the row was actually
+/// inserted; `approve_template` (`src/template/approve.rs`) is what turns a
+/// `false` into a clean rejection rather than a raw constraint-violation
+/// error.
 #[allow(clippy::too_many_arguments)]
-pub async fn insert(
+pub async fn insert_if_absent(
     pool: &PgPool,
     template_id: &str,
     version: i32,
@@ -55,11 +57,12 @@ pub async fn insert(
     body: &str,
     approved_by: &str,
     approved_at: DateTime<Utc>,
-) -> Result<(), sqlx::Error> {
-    sqlx::query(
+) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query(
         r#"
         INSERT INTO template (template_id, version, channel, locale, body, approved_by, approved_at)
         VALUES ($1, $2, $3, $4, $5, $6, $7)
+        ON CONFLICT (template_id, version, locale) DO NOTHING
         "#,
     )
     .bind(template_id)
@@ -70,6 +73,7 @@ pub async fn insert(
     .bind(approved_by)
     .bind(approved_at)
     .execute(pool)
-    .await
-    .map(|_| ())
+    .await?;
+
+    Ok(result.rows_affected() == 1)
 }
