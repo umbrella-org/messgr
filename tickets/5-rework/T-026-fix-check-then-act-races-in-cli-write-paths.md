@@ -218,7 +218,56 @@ needs no change.
 
 ## Review
 
-<!-- empty until IN REVIEW -->
+- [x] Reviewer independence settled (step 0): the reviewing agent authored this branch in this
+  session, so audits (steps 2-4a) were delegated to an independent, adversarially-briefed
+  sub-agent with no memory of writing the code. Every delegated finding was re-verified by hand
+  before recording (below) — one delegated claim (tenant-config's shipped test being merely
+  "weak" rather than tautological) was independently confirmed by re-running the mutation test
+  myself.
+- [x] Implementation audit (steps 1, 2): re-ran the acceptance test verbatim —
+  `just build`/`just lint`/`just docs-check` clean; `just test` full suite green (all suites,
+  including the three new concurrent tests); each of the three new concurrent tests additionally
+  run 15x in a loop by the independent reviewer, 45/45 green. All 4 Tasks and all 4 Confirmed
+  design decisions verified against the actual diff, in the files named — no gaps.
+- [x] Quality audit (step 3): review-addendum's mutation-testing rule applied to every
+  concurrency-load-bearing mechanism in the diff — see findings F1-F2 below for what it caught.
+- [x] Consistency audit (step 4): `migrations/tenant/0001_producer.sql` confirmed `name` and
+  `cert_subject` are both `NOT NULL`, so `insert_if_absent`'s untargeted `ON CONFLICT DO NOTHING`
+  is safe against review-addendum step 2 item 2's NULL-dedup hole. `disable_producer_inner`
+  (unchanged) still compiles and behaves correctly against the now-dual-variant `find_by_name`.
+  Two functions this branch's own refactor orphaned found dead (F3, F4) — `pub` visibility hid
+  them from `dead_code` lint.
+- [x] Documentation audit (step 4a): `just docs-check` clean. Grepped
+  `docs/user-manual/control-plane-cli.adoc` for every behaviour this diff touches — all unchanged
+  (error message text byte-for-byte preserved, no enum/error-shape changes), confirming the
+  ticket's "no user-facing surface" claim. Task 4's `dev_pki.rs` doc update confirmed present,
+  narrowed to same-process callers, cross-referencing T-026.
+- [x] Docs-readability pass (step 4b): no docs-readability reviewer available in this
+  environment — conscious skip. No `.adoc`/`.md` prose changed by this branch regardless.
+- [x] Findings recorded with severity, class, and disposition; disposition summary and cost line
+  below (step 5).
+- [ ] Ticket moved to `tickets/6-done/` or `tickets/5-rework/`; `## History` appended (step 6) —
+  in progress, see History below.
+- [x] Other references updated if needed; governing documents reconciled (step 7): grepped all
+  14 `development/design/*.md` files, `DESIGN.md`, and AGENTS.md's ten invariants for any claim
+  about the internal check-then-act vs. write-then-classify shape of `register_producer`/
+  `approve_template`/`set_tenant_config` — none exists to reconcile. Confirmed explicitly, not by
+  omission.
+- [x] Remaining-tickets impact sweep (step 8): no ticket in `1-to-do/` or `2-ready/` references
+  T-026 or depends on it — nothing to patch.
+- [ ] Summary + commit message & MR attributes presented for approval (step 9) — pending F2's
+  rework round concluding.
+
+| id | severity | class | disposition | description | evidence | suggestion |
+|---|---|---|---|---|---|---|
+| F1 | non-blocking | test-gap | fixed inline | `concurrent_first_time_set_calls_with_identical_input_audit_one_created_and_one_idempotent` raced only 2 callers. Removing `lock_tx` (the fix under test) still passed this test in 120 consecutive local runs — the interleaving window is too narrow to hit reliably at 2-way concurrency, giving very weak regression protection despite not being tautological (it does fail reliably at higher concurrency). | `tests/tenant_config.rs:234` (pre-fix); mutation test: 0/120 failures at 2-way without `lock_tx`, vs. 8/10 failures at 6-way | Widened to 6 concurrent callers via `tokio::task::JoinSet` |
+| F2 | blocking | correctness | — | `register_producer_inner` re-introduces a panic path (`.expect(...)` on a lost-race reclassification returning `None`) one ticket after T-025 converted every `messgr-control` subcommand-body panic to a reported `Err` specifically so a CLI operator never sees a crash (T-025 decision 2: "everything after startup is in scope for panic→Err conversion... `messgr-control`'s subcommand bodies"). Reachable from `Command::Producer(ProducerCommand::Register)` (`src/bin/control.rs:484-497`), which T-025 made `Result`-returning precisely to eliminate this class of crash. Practically near-impossible to trigger (would need a `producer_id` UUID collision, since name/cert_subject collisions are otherwise always caught by reclassification) but contradicts a locked decision regardless. | `src/producer/register.rs:306-309` (pre-fix) | Return `Err(rejected(...))` instead of `.expect(...)`, matching this file's own error-construction convention |
+| F3 | non-blocking | design | fixed inline | `producer::repo::find_by_cert_subject` (non-tx) orphaned by this branch's own switch to `find_by_cert_subject_tx` — zero remaining callers repo-wide, `pub` visibility hid it from `dead_code` lint. | `src/producer/repo.rs:43-57` (pre-fix) | Removed; `find_by_cert_subject_tx`'s doc comment updated to note it has no non-tx sibling |
+| F4 | non-blocking | design | fixed inline | `tenant_config::repo::upsert` (non-tx) orphaned the same way by the switch to `upsert_tx` — zero remaining callers repo-wide. | `src/tenant_config/repo.rs:64-96` (pre-fix) | Removed; `upsert_tx`'s doc comment absorbed the explanation of the created/updated/idempotent contract |
+
+Disposition summary: 1 blocking (F2, routes to rework), 3 fixed inline (F1, F3, F4).
+
+cost: estimated M, actual M
 
 ## History
 
@@ -228,3 +277,4 @@ needs no change.
 - 2026-09-07 — READY → IN DEVELOPMENT: picked up
 - 2026-09-07 — plan amended inline: Task 2's `classify_registration` needed its two existence checks wrapped in one `REPEATABLE READ` transaction — the concurrent-registration acceptance test caught a second, narrower check-then-act race internal to the classification itself (a task-switch between `find_by_name` and `find_by_cert_subject` could straddle a concurrent registration's commit)
 - 2026-09-07 — IN DEVELOPMENT → IN REVIEW: acceptance green
+- 2026-09-07 — IN REVIEW → REWORK: F2 blocking: register_producer_inner reintroduces a panic path T-025 eliminated
