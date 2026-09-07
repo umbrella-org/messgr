@@ -316,12 +316,27 @@ async fn register_producer_inner(
             // Uuid::new_v4() collision. Either way, reported as an error
             // rather than a panic (T-025 converted every CLI subcommand
             // panic to a reported error; this would undo that for this
-            // path if it ever fired).
-            None => Err(rejected(format!(
-                "registering producer {name:?} lost a race and the winning row could not be \
-                 found on re-check (cert_subject={cert_subject:?}) — this should not happen \
-                 outside a producer_id UUID collision"
-            ))),
+            // path if it ever fired) — and audited like every other
+            // rejection in this function (decision 4: exactly one
+            // `platform_audit` row per outcome).
+            None => {
+                audit(
+                    control_pool,
+                    actor,
+                    "producer.register",
+                    Some(tenant_id),
+                    name,
+                    Some(cert_subject),
+                    "rejected",
+                )
+                .await?;
+
+                Err(rejected(format!(
+                    "registering producer {name:?} lost a race and the winning row could not \
+                     be found on re-check (cert_subject={cert_subject:?}) — this should not \
+                     happen outside a producer_id UUID collision"
+                )))
+            }
         };
     }
 
