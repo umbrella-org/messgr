@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use sqlx::PgPool;
-use tokio::sync::RwLock;
+use tokio::sync::{Notify, RwLock};
 use uuid::Uuid;
 
 use super::model::{KillSwitch, scope};
@@ -155,12 +155,18 @@ pub fn exclusion_for_channel<'a>(
 /// per this module's own doc comment). `on_delta` receives every refresh's
 /// `RefreshDelta`, including empty ones, so the dispatcher's caller can
 /// react to engages/releases; `messgr-ingest` passes a no-op closure.
+/// `cancel`, if given, stops the loop as soon as it's notified — this is
+/// what lets `TenantRegistry` (T-031) actually tear down a per-tenant poll
+/// task on eviction rather than merely dropping its handle; `messgr-dispatcher`
+/// passes `None`, since a dispatcher is one-tenant-per-process for its own
+/// lifetime and never evicts.
 pub async fn run_refresh_loop(
     cache: Arc<KillSwitchCache>,
     pool: PgPool,
     mut listener: Option<sqlx::postgres::PgListener>,
     poll_interval: Duration,
     mut on_delta: impl FnMut(RefreshDelta),
+    cancel: Option<Arc<Notify>>,
 ) {
     loop {
         match cache.refresh(&pool).await {
@@ -168,14 +174,24 @@ pub async fn run_refresh_loop(
             Err(err) => tracing::error!(%err, "kill_switch cache refresh failed"),
         }
 
-        match &mut listener {
-            Some(listener) => {
-                tokio::select! {
-                    _ = listener.recv() => {}
-                    _ = tokio::time::sleep(poll_interval) => {}
-                }
+        let sleep = tokio::time::sleep(poll_interval);
+        let cancelled = async {
+            match &cancel {
+                Some(notify) => notify.notified().await,
+                None => std::future::pending().await,
             }
-            None => tokio::time::sleep(poll_interval).await,
+        };
+
+        match &mut listener {
+            Some(listener) => tokio::select! {
+                _ = listener.recv() => {}
+                _ = sleep => {}
+                _ = cancelled => break,
+            },
+            None => tokio::select! {
+                _ = sleep => {}
+                _ = cancelled => break,
+            },
         }
     }
 }
