@@ -239,7 +239,12 @@ async fn concurrent_first_time_set_calls_with_identical_input_audit_one_created_
     // "created" even though only one of them actually created the row.
     // repo::upsert's ON CONFLICT DO UPDATE always made the write itself
     // safe; lock_tx's advisory lock is what makes the classification
-    // accurate under a race.
+    // accurate under a race. Races 6 callers, not 2 — a scoped re-review
+    // found that removing lock_tx still passed this test at 2-way
+    // concurrency in well over a hundred local runs (the interleaving
+    // window is too narrow to hit reliably at that width) but failed
+    // reliably at 6-way, so 2 callers gave this test very weak regression
+    // protection despite not being tautological.
     let control_url = control_database_url();
     let control_pool = db::connect(&control_url, 5)
         .await
@@ -252,34 +257,39 @@ async fn concurrent_first_time_set_calls_with_identical_input_audit_one_created_
         provision_test_tenant(&control_pool, &control_url, &vault, &slug, &db_name)
             .await;
 
-    let call_one = set_tenant_config(
-        &control_pool,
-        &control_url,
-        &slug,
-        sample_input(7),
-        "test-actor",
-    );
-    let call_two = set_tenant_config(
-        &control_pool,
-        &control_url,
-        &slug,
-        sample_input(7),
-        "test-actor",
-    );
-    let (result_one, result_two) = tokio::join!(call_one, call_two);
-    let result_one = result_one.expect("first concurrent set failed");
-    let result_two = result_two.expect("second concurrent set failed");
+    const CALLERS: usize = 6;
+    let mut tasks = tokio::task::JoinSet::new();
+    for _ in 0..CALLERS {
+        let control_pool = control_pool.clone();
+        let control_url = control_url.clone();
+        let slug = slug.clone();
+        tasks.spawn(async move {
+            set_tenant_config(
+                &control_pool,
+                &control_url,
+                &slug,
+                sample_input(7),
+                "test-actor",
+            )
+            .await
+        });
+    }
+    let outcomes: Vec<&'static str> = tasks
+        .join_all()
+        .await
+        .into_iter()
+        .map(|result| result.expect("concurrent set failed").outcome)
+        .collect();
 
-    let outcomes = [result_one.outcome, result_two.outcome];
     assert_eq!(
         outcomes.iter().filter(|o| **o == "created").count(),
         1,
-        "exactly one concurrent set must report created: {outcomes:?}"
+        "exactly one of {CALLERS} concurrent sets must report created: {outcomes:?}"
     );
     assert_eq!(
         outcomes.iter().filter(|o| **o == "idempotent").count(),
-        1,
-        "exactly one concurrent set must report idempotent, never both created: {outcomes:?}"
+        CALLERS - 1,
+        "every other concurrent set must report idempotent, never a second created: {outcomes:?}"
     );
 
     let tenant_pool =

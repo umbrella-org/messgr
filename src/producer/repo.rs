@@ -40,24 +40,10 @@ pub async fn find_by_name_tx(
     .await
 }
 
-pub async fn find_by_cert_subject(
-    pool: &PgPool,
-    cert_subject: &str,
-) -> Result<Option<Producer>, sqlx::Error> {
-    sqlx::query_as::<_, Producer>(
-        r#"
-        SELECT id, name, cert_subject, owner_team, contact, enabled, created_at
-        FROM producer
-        WHERE cert_subject = $1
-        "#,
-    )
-    .bind(cert_subject)
-    .fetch_optional(pool)
-    .await
-}
-
-/// Same as `find_by_cert_subject`, but inside a caller-owned transaction
-/// (T-026) — see `register::classify_registration`.
+/// Looks up a producer by `cert_subject` inside a caller-owned transaction
+/// (T-026) — see `register::classify_registration` for why this needs to
+/// share one snapshot with `find_by_name_tx`. No non-transactional sibling:
+/// every caller needs that shared snapshot.
 pub async fn find_by_cert_subject_tx(
     tx: &mut PgTransaction<'_>,
     cert_subject: &str,
