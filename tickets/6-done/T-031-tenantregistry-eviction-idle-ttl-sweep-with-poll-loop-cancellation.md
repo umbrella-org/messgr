@@ -290,7 +290,22 @@ No user-facing surface — `TenantRegistry` and `run_refresh_loop` are internal 
 
 ## Review
 
-<!-- empty until IN REVIEW -->
+- [x] Reviewer independence settled (step 0): **delegated** — the orchestrating reviewer authored this branch in this same session, so steps 2-4a (implementation, quality, consistency, docs audits) were run by a fresh sub-agent with no memory of writing the code, briefed adversarially. Every delegated finding was re-verified by hand before recording, per step 0.
+- [x] Implementation audit — acceptance test re-run (`cargo test --test tenant_registry`, `just build`, `just test`, `just lint`, `just docs-check`, all against the live local Postgres+Vault dev stack): all green. Every task in the Implementation Plan verified done in the files it names; all 6 confirmed design decisions verified honoured (steps 1, 2).
+- [x] Quality audit (step 3) — mutation-tested the cancellation wiring twice, independently (once by the delegated reviewer, once by the orchestrating reviewer): temporarily broke `Some(poll_cancel)` → `None` at the `run_refresh_loop` call site in `registry.rs`, confirmed the acceptance test goes red with a clean 5s timeout (not a hang, not a silent pass), then reverted. Locking/concurrency reviewed: `evict_idle`'s remove-then-await pattern does not hold the write lock across an await.
+- [x] Consistency audit (step 4) — one finding (F1, below).
+- [x] Documentation audit (step 4a) — confirmed no user-facing surface added (no new CLI flag/HTTP route/config key in the diff); `just docs-check` clean.
+- [x] Docs-readability pass (step 4b) — skipped, conscious: no `.adoc`/`.md` files changed by this branch.
+
+| id | severity | class | disposition | description | evidence | suggestion |
+|---|---|---|---|---|---|---|
+| F1 | non-blocking | correctness | fixed inline | `tests/tenant_registry.rs`'s `drop_test_tenant` omitted the `platform_audit` cleanup delete its sibling helpers (`tests/kill_switch.rs`, `tests/ingest.rs`) both include, leaking 2 orphaned `platform_audit` rows per test run (`tenant.provision` + `tenant_config.set`, no FK on `platform_audit.tenant_id` so nothing broke functionally, but unbounded growth on every run) | verified live against the control DB: ran the acceptance test verbatim, confirmed 2 orphaned rows appeared each time before the fix, 0 after | add the missing `DELETE FROM platform_audit WHERE tenant_id = (SELECT id FROM tenant WHERE slug = $1)` between the `tenant_schema_version` delete and the `tenant` delete, matching the sibling helpers exactly |
+
+Disposition summary: 1 non-blocking finding, fixed inline (F1). Zero blocking findings.
+
+cost: estimated M, actual M
+
+Verdict: **clean, no blocking findings** — proceeds to `6-done/`.
 
 ## History
 
@@ -298,3 +313,5 @@ No user-facing surface — `TenantRegistry` and `run_refresh_loop` are internal 
 - 2026-09-07 — TO DO → READY: plan complete
 - 2026-09-07 — READY → IN DEVELOPMENT: picked up
 - 2026-09-07 — IN DEVELOPMENT → IN REVIEW: acceptance green
+- 2026-09-07 — IN REVIEW → DONE: review clean, 1 non-blocking finding fixed inline (F1)
+- 2026-09-07 — IN REVIEW → DONE: review clean, 1 non-blocking finding fixed inline
