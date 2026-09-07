@@ -63,28 +63,16 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo build
-      - run: cargo run --bin messgr-control -- migrate
+      - uses: extractions/setup-just@v4
+      - run: just build
+      - run: just control-migrate
       - name: Create messgr_cold tablespace (T-014's partition_lifecycle tests need it)
-        run: |
-          docker exec ${{ job.services.postgres.id }} mkdir -p /var/lib/postgresql/tablespaces/messgr_cold
-          docker exec ${{ job.services.postgres.id }} chown postgres:postgres /var/lib/postgresql/tablespaces/messgr_cold
-          docker exec ${{ job.services.postgres.id }} psql -U messgr -d control -c \
-            "CREATE TABLESPACE messgr_cold LOCATION '/var/lib/postgresql/tablespaces/messgr_cold'"
-      - name: Bootstrap Vault Transit fixture mounts + approle auth (matches `just vault-dev-init`)
+        run: just tablespace-init ${{ job.services.postgres.id }}
+      - name: Wait for Vault, then bootstrap fixture mounts + approle auth (just vault-dev-init)
         run: |
           for i in $(seq 1 30); do curl -sf "$VAULT_ADDR/v1/sys/health" && break; sleep 1; done
-          curl -sf --header "X-Vault-Token: $VAULT_TOKEN" --request POST \
-            --data '{"type":"transit"}' "$VAULT_ADDR/v1/sys/mounts/transit-fixture"
-          curl -sf --header "X-Vault-Token: $VAULT_TOKEN" --request POST \
-            "$VAULT_ADDR/v1/transit-fixture/keys/messgr-dek"
-          curl -sf --header "X-Vault-Token: $VAULT_TOKEN" --request POST \
-            --data '{"type":"transit"}' "$VAULT_ADDR/v1/sys/mounts/transit-fixture-other"
-          curl -sf --header "X-Vault-Token: $VAULT_TOKEN" --request POST \
-            "$VAULT_ADDR/v1/transit-fixture-other/keys/messgr-dek"
-          curl -sf --header "X-Vault-Token: $VAULT_TOKEN" --request POST \
-            --data '{"type":"approle"}' "$VAULT_ADDR/v1/sys/auth/approle"
+          just vault-dev-init
       # The two-tenant isolation suite this build step is required to have
       # (DESIGN.md §14: "From step 0b onward, CI runs a two-tenant
       # integration suite").
-      - run: cargo test
+      - run: just test
