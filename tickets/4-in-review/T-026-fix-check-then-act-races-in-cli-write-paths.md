@@ -264,8 +264,9 @@ needs no change.
 | F2 | blocking | correctness | — | `register_producer_inner` re-introduces a panic path (`.expect(...)` on a lost-race reclassification returning `None`) one ticket after T-025 converted every `messgr-control` subcommand-body panic to a reported `Err` specifically so a CLI operator never sees a crash (T-025 decision 2: "everything after startup is in scope for panic→Err conversion... `messgr-control`'s subcommand bodies"). Reachable from `Command::Producer(ProducerCommand::Register)` (`src/bin/control.rs:484-497`), which T-025 made `Result`-returning precisely to eliminate this class of crash. Practically near-impossible to trigger (would need a `producer_id` UUID collision, since name/cert_subject collisions are otherwise always caught by reclassification) but contradicts a locked decision regardless. | `src/producer/register.rs:306-309` (pre-fix) | Return `Err(rejected(...))` instead of `.expect(...)`, matching this file's own error-construction convention |
 | F3 | non-blocking | design | fixed inline | `producer::repo::find_by_cert_subject` (non-tx) orphaned by this branch's own switch to `find_by_cert_subject_tx` — zero remaining callers repo-wide, `pub` visibility hid it from `dead_code` lint. | `src/producer/repo.rs:43-57` (pre-fix) | Removed; `find_by_cert_subject_tx`'s doc comment updated to note it has no non-tx sibling |
 | F4 | non-blocking | design | fixed inline | `tenant_config::repo::upsert` (non-tx) orphaned the same way by the switch to `upsert_tx` — zero remaining callers repo-wide. | `src/tenant_config/repo.rs:64-96` (pre-fix) | Removed; `upsert_tx`'s doc comment absorbed the explanation of the created/updated/idempotent contract |
+| F5 | blocking | correctness | — | Round 1's scoped re-review of F2's fix found the new `Err(rejected(...))` branch it added returns with no preceding `audit(...)` call, contradicting this same function's own documented invariant, cited in its doc comment: "writes exactly one `platform_audit` row on every outcome (decision 4) — created, idempotent, or rejected." Every other `rejected(...)` return in this file audits first; this one, introduced by F2's own fix, didn't. | `src/producer/register.rs:320-324` (commit `6744ba6`, pre-F5-fix) | Add the same `audit(..., "rejected")` call every other rejection branch in this function makes, before returning `Err` |
 
-Disposition summary: 1 blocking (F2, routes to rework), 3 fixed inline (F1, F3, F4).
+Disposition summary: 2 blocking (F2, F5 — both routed to rework), 3 fixed inline (F1, F3, F4).
 
 cost: estimated M, actual M
 
@@ -278,6 +279,23 @@ function. `just build`/`just lint`/`just test`/`just docs-check` re-run clean on
 `feat/T-026-check-then-act-races` at this commit (full suite green across every test binary,
 including the 3 concurrent tests and the widened 6-way tenant-config one from F1's fix).
 
+**Scoped re-review of round 1** (delegated, independent — reviewing agent authored the round-1
+fix in this same session): confirmed F2 resolved, no panic path remains for this condition;
+`rejected()`'s construction matches file convention; re-ran `just build`/`just lint`/`just test`/
+`just docs-check`, all clean, no regression. Reading the fix's own replacement text (per
+`review-protocol.md` §1) surfaced F5 above — a defect in round 1's fix itself, not the original
+F2 finding.
+
+### Rework fix record — round 2 (commit 6faad13)
+
+F5 fixed: the `None` branch now calls `audit(control_pool, actor, "producer.register",
+Some(tenant_id), name, Some(cert_subject), "rejected")` before returning `Err`, matching every
+other rejection branch in this function. No test added — the branch requires a `producer_id`
+UUID v4 collision to reach, which this integration harness cannot simulate (same precedent as
+T-018/F3: "accepted as noted... isn't practically simulable in this integration-test harness").
+`just build`/`just lint`/`just test`/`just docs-check` re-run clean on
+`feat/T-026-check-then-act-races` at this commit.
+
 ## History
 
 - 2026-09-02 — created (TO DO). source: audit: batches four check-then-act races noted across prior reviews (T-010/F1 and its two named sibling instances in producer registration and tenant-config set; T-006/F3's dev-PKI root race), each individually accepted under a single-operator-CLI tolerance this audit records as expiring once the admin panel/platform console land.
@@ -288,3 +306,5 @@ including the 3 concurrent tests and the widened 6-way tenant-config one from F1
 - 2026-09-07 — IN DEVELOPMENT → IN REVIEW: acceptance green
 - 2026-09-07 — IN REVIEW → REWORK: F2 blocking: register_producer_inner reintroduces a panic path T-025 eliminated
 - 2026-09-07 — REWORK → IN REVIEW: F2 fixed (commit 6744ba6)
+- 2026-09-07 — IN REVIEW → REWORK: F5 blocking: F2's own fix skipped the platform_audit call on its new rejected path
+- 2026-09-07 — REWORK → IN REVIEW: F5 fixed (commit 6faad13)
