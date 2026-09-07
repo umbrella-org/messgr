@@ -297,3 +297,4 @@ No user-facing surface — `TenantRegistry` and `run_refresh_loop` are internal 
 - 2026-09-05 — created (TO DO). source: review: split out of T-025's item 7 at refinement — eviction requires cancelling the per-tenant kill-switch poll loop too, not just a HashMap TTL, a scope big enough to warrant its own ticket.
 - 2026-09-07 — TO DO → READY: plan complete
 - 2026-09-07 — READY → IN DEVELOPMENT: picked up
+- 2026-09-07 — IN DEVELOPMENT → IN REVIEW: acceptance green
