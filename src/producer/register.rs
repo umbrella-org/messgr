@@ -132,9 +132,12 @@ pub async fn register_producer(
 /// auditing and returning a terminal result for whichever applies. Returns
 /// `Ok(None)` when none of them apply, meaning the caller is clear to
 /// attempt the insert. Called once before the insert and, on a lost race,
-/// once more after it (T-026) — the second call is guaranteed to find one
-/// of these cases, since a losing `insert_if_absent` only fails via the
-/// same `name`/`cert_subject` `UNIQUE` constraints this function checks.
+/// once more after it (T-026) — the second call should always find one of
+/// these cases, since a losing `insert_if_absent` almost always fails via
+/// the same `name`/`cert_subject` `UNIQUE` constraints this function
+/// checks (the caller handles the one other, vanishingly unlikely case —
+/// a `producer_id` `PRIMARY KEY` collision — as a reported error rather
+/// than relying on that guarantee absolutely).
 ///
 /// `find_by_name`/`find_by_cert_subject` run inside one `REPEATABLE READ`
 /// transaction so they see one consistent snapshot: under the default
@@ -292,7 +295,7 @@ async fn register_producer_inner(
     .await?;
 
     if !inserted {
-        let outcome = classify_registration(
+        return match classify_registration(
             control_pool,
             tenant_pool,
             tenant_id,
@@ -303,12 +306,23 @@ async fn register_producer_inner(
             actor,
         )
         .await?
-        .expect(
-            "insert_if_absent lost a race but re-classification found no conflicting row — \
-             producer's name/cert_subject UNIQUE constraints guarantee one exists",
-        );
-
-        return Ok(outcome);
+        {
+            Some(outcome) => Ok(outcome),
+            // producer's name/cert_subject UNIQUE constraints (the only
+            // realistic way insert_if_absent's untargeted ON CONFLICT DO
+            // NOTHING loses) mean classify_registration should always find
+            // the winner here; the only other collision that untargeted
+            // ON CONFLICT catches is producer_id's PRIMARY KEY, a
+            // Uuid::new_v4() collision. Either way, reported as an error
+            // rather than a panic (T-025 converted every CLI subcommand
+            // panic to a reported error; this would undo that for this
+            // path if it ever fired).
+            None => Err(rejected(format!(
+                "registering producer {name:?} lost a race and the winning row could not be \
+                 found on re-check (cert_subject={cert_subject:?}) — this should not happen \
+                 outside a producer_id UUID collision"
+            ))),
+        };
     }
 
     cert_repo::upsert_producer_cert(control_pool, cert_subject, tenant_id, producer_id)
