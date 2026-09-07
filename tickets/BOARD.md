@@ -20,10 +20,11 @@ Last updated: 2026-09-07
 
 ## IN REVIEW
 
-### messgr (0/1)
+### messgr (1/1)
 
 | id | title | depends-on |
 |---|---|---|
+| T-026 | Fix check-then-act races in CLI write paths | [] |
 
 ## REWORK
 
@@ -31,7 +32,6 @@ Last updated: 2026-09-07
 
 | id | title | open findings |
 |---|---|---|
-| T-026 | Fix check-then-act races in CLI write paths | F2 blocking: register_producer_inner reintroduces a panic path T-025 eliminated |
 
 ## READY (impact order, per child)
 

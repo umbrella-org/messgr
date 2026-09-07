@@ -269,6 +269,15 @@ Disposition summary: 1 blocking (F2, routes to rework), 3 fixed inline (F1, F3, 
 
 cost: estimated M, actual M
 
+### Rework fix record — round 1 (commit 6744ba6)
+
+F2 fixed: `register_producer_inner`'s lost-race reclassification now returns
+`Err(rejected(...))` on a `None` instead of `.expect(...)`-ing, matching the file's own
+`rejected()` error-construction convention used by every other domain rejection in this
+function. `just build`/`just lint`/`just test`/`just docs-check` re-run clean on
+`feat/T-026-check-then-act-races` at this commit (full suite green across every test binary,
+including the 3 concurrent tests and the widened 6-way tenant-config one from F1's fix).
+
 ## History
 
 - 2026-09-02 — created (TO DO). source: audit: batches four check-then-act races noted across prior reviews (T-010/F1 and its two named sibling instances in producer registration and tenant-config set; T-006/F3's dev-PKI root race), each individually accepted under a single-operator-CLI tolerance this audit records as expiring once the admin panel/platform console land.
@@ -278,3 +287,4 @@ cost: estimated M, actual M
 - 2026-09-07 — plan amended inline: Task 2's `classify_registration` needed its two existence checks wrapped in one `REPEATABLE READ` transaction — the concurrent-registration acceptance test caught a second, narrower check-then-act race internal to the classification itself (a task-switch between `find_by_name` and `find_by_cert_subject` could straddle a concurrent registration's commit)
 - 2026-09-07 — IN DEVELOPMENT → IN REVIEW: acceptance green
 - 2026-09-07 — IN REVIEW → REWORK: F2 blocking: register_producer_inner reintroduces a panic path T-025 eliminated
+- 2026-09-07 — REWORK → IN REVIEW: F2 fixed (commit 6744ba6)
