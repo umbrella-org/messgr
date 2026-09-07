@@ -143,6 +143,16 @@ second time — it is now guaranteed to return one of the existing early-return 
 return whatever it yields, verbatim, including that branch's own audit call. Never call
 `repo::insert_if_absent` more than once.
 
+**Amended during implementation (2026-09-07):** `classify_registration`'s own two checks
+(`find_by_name`, `find_by_cert_subject`) must run inside one `REPEATABLE READ` transaction, not
+as two independent pool queries. The acceptance test below caught this: under the default `READ
+COMMITTED`, each check is a separate statement with its own snapshot, so a concurrent
+registration's commit landing between the two awaits let `find_by_name` miss a just-inserted row
+that `find_by_cert_subject` then found — producing a false "cert_subject already bound to a
+different producer" rejection for what was actually the same producer under identical inputs.
+Added `repo::find_by_name_tx`/`repo::find_by_cert_subject_tx` (same `_tx` convention as Task 3)
+so both checks share one snapshot.
+
 #### Task 3 — `src/tenant_config/configure.rs`, `src/tenant_config/repo.rs`
 
 Add `repo::load_tx`/`repo::upsert_tx` (`&mut PgTransaction<'_>`-taking variants of `load`/
@@ -216,3 +226,5 @@ needs no change.
 - 2026-09-07 — refined: re-verified #4 against current `main` and found its premise partly stale (in-process race already mutex-guarded by commit `0c331de`, landed off-ticket 2026-08-31); decided with the user to accept the remaining cross-process dev-PKI race as documented-not-fixed rather than add a new database dependency to dev-only tooling for it. Scope for #1-#3 unchanged. Wrote the Implementation Plan.
 - 2026-09-07 — TO DO → READY: plan complete
 - 2026-09-07 — READY → IN DEVELOPMENT: picked up
+- 2026-09-07 — plan amended inline: Task 2's `classify_registration` needed its two existence checks wrapped in one `REPEATABLE READ` transaction — the concurrent-registration acceptance test caught a second, narrower check-then-act race internal to the classification itself (a task-switch between `find_by_name` and `find_by_cert_subject` could straddle a concurrent registration's commit)
+- 2026-09-07 — IN DEVELOPMENT → IN REVIEW: acceptance green
