@@ -13,10 +13,11 @@ Last updated: 2026-09-07
 
 ## IN DEVELOPMENT
 
-### messgr (0/1)
+### messgr (1/1)
 
 | id | title | depends-on |
 |---|---|---|
+| T-031 | TenantRegistry eviction: idle-TTL sweep with poll-loop cancellation | [] |
 
 ## IN REVIEW
 
@@ -38,7 +39,6 @@ Last updated: 2026-09-07
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
-| T-031 | TenantRegistry eviction: idle-TTL sweep with poll-loop cancellation | medium | medium | M | [] |  |
 
 ## TO DO (impact order, per child)
 
