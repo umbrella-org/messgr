@@ -321,3 +321,4 @@ cost: estimated M, actual M
 - 2026-09-06 — IN DEVELOPMENT → IN REVIEW: acceptance green, all 7 tasks done as planned.
 - 2026-09-06 — IN DEVELOPMENT → IN REVIEW: acceptance green
 - 2026-09-07 — IN REVIEW → DONE: review clean: 2 non-blocking findings, both note-and-close; acceptance green
+- 2026-09-07 — MERGED: PR #38 (`5beb467`) into `main`
