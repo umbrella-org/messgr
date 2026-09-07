@@ -9,7 +9,7 @@ hand — edit the tickets. Hand-written planning notes live in [`NOTES.md`](NOTE
 **WIP limits (per child-project):**
 - `messgr`: `3-in-development/` ≤ 1 · `4-in-review/` ≤ 1
 
-Last updated: 2026-09-06
+Last updated: 2026-09-07
 
 ## IN DEVELOPMENT
 
@@ -20,11 +20,10 @@ Last updated: 2026-09-06
 
 ## IN REVIEW
 
-### messgr (1/1)
+### messgr (0/1)
 
 | id | title | depends-on |
 |---|---|---|
-| T-025 | Operability and error-handling cleanup across CLI and services | [] |
 
 ## REWORK
 
@@ -82,6 +81,7 @@ Last updated: 2026-09-06
 | T-022 | Apply ledger and queue schema corrections to migrations | yes — MERGED: PR #34 merged to `main` (`2239233`). |
 | T-023 | Read provider credentials from Vault instead of environment variables | yes — MERGED: PR #35 merged to main (28e0b3a). |
 | T-024 | CI check that every PII-holding table is covered by erasure or a named exemption | yes — MERGED: PR #36 (`a67f8ac`, original implementation, merge commit `fc2cfee`) and PR #37 (`d2583aa`, F1 rework fix,… |
+| T-025 | Operability and error-handling cleanup across CLI and services | no — publish-gated |
 | T-028 | messgr-control: stats subcommand for per-tenant message volume | yes — merged to main (PR #20, ed46117) |
 
 ## DROPPED

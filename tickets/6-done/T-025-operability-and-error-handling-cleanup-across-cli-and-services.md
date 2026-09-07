@@ -279,7 +279,38 @@ confirm nothing broke.
 
 ## Review
 
-<!-- empty until IN REVIEW -->
+- [x] Reviewer independence settled (step 0): **independent** — fresh session, no memory of authoring `feat/T-025-operability-and-error-handling-cleanup-across-cli-and-services`; audits run directly, not delegated.
+- [x] Implementation audit — acceptance test re-run, tasks & criteria verified (steps 1, 2)
+- [x] Quality audit (step 3)
+- [x] Consistency audit (step 4)
+- [x] Documentation audit (step 4a) — no docs ship for this ticket's changes (tightening, not adding, a documented contract); `just docs-check` clean
+- [x] Docs-readability pass (step 4b) — **conscious skip**: no `.adoc`/`.md` files changed by this ticket
+- [x] Findings recorded with severity, class, disposition (step 5)
+- [x] Ticket moved (step 6)
+- [x] Other references / governing documents reconciled — nothing in `DESIGN.md` or `AGENTS.md` asserts anything this branch changed; no reconciliation needed (step 7)
+- [x] Remaining-tickets impact sweep done (step 8) — `T-031`/`T-032` (`spawned-by: [T-025]`) checked; neither depends on any behavior this ticket touched
+- [x] Summary + commit message & MR attributes presented for approval (step 9)
+
+**Implementation audit.** `just build`, `just lint` (matches CI's `cargo clippy --all-targets --all-features -- -D warnings` and `cargo fmt --all -- --check` exactly), `just test` (all 155 tests across every suite, 0 failed), `just docs-check` all green on `feat/T-025-operability-and-error-handling-cleanup-across-cli-and-services`. Every one of the ticket's manual acceptance steps re-run directly against live Postgres/Vault containers and confirmed:
+- Task 1: `RUST_LOG` unset, `messgr-control migrate` prints `control database migrations applied`.
+- Task 2: `DATABASE_MAX_CONNECTIONS=not-a-number messgr-control migrate` panics with `DATABASE_MAX_CONNECTIONS must be a valid u32, got "not-a-number"`, not a silent default.
+- Task 4: `tenant-config set --retention-years -1` and `provider-config set --channel bogus` both rejected by clap before the subcommand body runs (`invalid value 'bogus' ... [possible values: sms, email, whatsapp]`).
+- Task 5: `producer register` against an unregistered tenant slug prints `error: failed to register producer ...: no tenant registered with slug "does-not-exist"` to stderr, exit code 1, no panic/backtrace.
+- Task 6: `just vault-dev-init`/`just tablespace-init` run clean against the local containers, byte-for-byte the same calls CI's `test` job now makes.
+- Task 7: `messgr-control stats --tenant-slug does-not-exist` reports `stats operation failed: error with configuration: ...`, matching `ConfigureError`'s exact shape/message convention.
+
+All 7 tasks done in the files the plan names. All 5 confirmed decisions honoured — verified directly against the diff: `KeyStoreError` widened to the enum exactly as specified with no caller pattern-matching its internals; the `refresh_draining.write().expect(...)` exception in `src/bin/dispatcher.rs` untouched; no new dependency added (`Cargo.toml`/`Cargo.lock` unchanged); `main()`/`run()` split matches decision 5's shape verbatim, including the three `VaultKeyStore::connect(...).expect(...)` call sites inside `Provision`/`DevPki`/`CustomerDek` staying panics per decision 2's "connecting to Vault is startup-class regardless of call site."
+
+**Quality/consistency audit.** Every converted panic→`Err` preserves its original message text (spot-checked against `main`'s pre-ticket text for every site). Task 4's new clap-rejection tests are real negative tests — they assert `result.is_err()` on a parse that must fail, which can and would go red if the `value_parser`/`PossibleValuesParser` were removed (addendum step 3's mutation-test bar). `src/bin/dispatcher.rs`/`src/bin/ingest.rs` correctly untouched outside `keystore.rs`/`stats.rs` (both binaries' own panics are all in their startup sequences per decision 2, out of scope). No new table, column, or secret-handling surface — addendum step 2 items 2, 4, 5, 6 don't apply to this diff. `justfile`'s `vault-dev-init` hardcoded `localhost:8200`/`messgr-dev-root-token` confirmed to exactly match `ci.yml`'s `test` job env (`VAULT_ADDR`/`VAULT_TOKEN`).
+
+| id | severity | class | disposition | description | evidence | suggestion |
+|---|---|---|---|---|---|---|
+| F1 | non-blocking | other | note and close | Task 5's plan prose says "the four `#[cfg(test)]`-module `.expect()`/`panic!()` clap-invariant sites are left untouched," but there are five (`src/bin/control.rs` pre-ticket lines 932, 957, 968, 1052, 1067 on `main`, unchanged by this ticket). Zero behavior impact — the implementation correctly left all five alone, matching the stated intent; only the plan's own count is off by one. | `src/bin/control.rs` test module, `git show main:src/bin/control.rs \| grep -n "panic!\|\.expect("` | Nothing to fix in code. If anyone revisits this ticket's plan text, correct "four" to "five." |
+| F2 | non-blocking | test-gap | note and close | The new `KeyStoreError::Protocol` paths added in Task 3 (malformed Vault response: missing plaintext in `create_dek`, invalid base64 in `create_dek`/`unwrap_dek`, an unbuildable `VaultClientSettings` in `connect_settings`) have no test exercising them — a mutation deleting the `.map_err`/`.ok_or_else` conversion would not be caught by any red test. | `src/keystore.rs:207-211,258-263,266-271,288-293`; `tests/keystore.rs` only exercises the `Client` variant (real Vault-rejection paths) | Addendum step 3 frames this class of gap as advisory, not blocking. Real dev-mode Vault always returns well-formed base64/a present plaintext, so triggering these paths needs fault-injection infra this codebase doesn't have yet — building it is disproportionate to this ticket's mechanical scope. Leave as noted; revisit if a real malformed-response incident ever occurs. |
+
+Disposition summary: 2 non-blocking findings, both **note and close** (F1, F2). 0 blocking.
+
+cost: estimated M, actual M
 
 ## History
 
@@ -289,3 +320,4 @@ confirm nothing broke.
 - 2026-09-05 — READY → IN DEVELOPMENT: picked up
 - 2026-09-06 — IN DEVELOPMENT → IN REVIEW: acceptance green, all 7 tasks done as planned.
 - 2026-09-06 — IN DEVELOPMENT → IN REVIEW: acceptance green
+- 2026-09-07 — IN REVIEW → DONE: review clean: 2 non-blocking findings, both note-and-close; acceptance green
