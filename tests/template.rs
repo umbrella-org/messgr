@@ -226,6 +226,108 @@ async fn re_approving_the_same_version_locale_is_rejected_and_audited() {
 }
 
 #[tokio::test]
+async fn concurrent_approve_calls_for_the_same_version_locale_write_exactly_one_success_and_one_rejected_audit_row()
+ {
+    // T-026: approve_template_inner used to check-then-insert (repo::find,
+    // then repo::insert only if None). Two concurrent approvals for the
+    // same (template_id, version, locale) could both pass the check, and
+    // the loser's INSERT then failed on the primary-key constraint as a
+    // raw ApproveError::Database — never reaching the rejected-audit
+    // branch. insert_if_absent (ON CONFLICT DO NOTHING) makes the insert
+    // itself authoritative, closing the race.
+    let control_url = control_database_url();
+    let control_pool = db::connect(&control_url, 5)
+        .await
+        .expect("failed to connect to control database");
+    let vault = vault_keystore();
+
+    let slug = unique_name("test_tpl_concurrent");
+    let db_name = unique_name("test_db_tpl_concurrent");
+    provision_test_tenant(&control_pool, &control_url, &vault, &slug, &db_name).await;
+    let unique_actor = unique_name("test-actor-concurrent-approve");
+
+    let call_one = approve_template(
+        &control_pool,
+        &control_url,
+        &slug,
+        "balance-alert",
+        1,
+        channel::SMS,
+        "en-GB",
+        "Hi {{name}}, call one.",
+        &unique_actor,
+    );
+    let call_two = approve_template(
+        &control_pool,
+        &control_url,
+        &slug,
+        "balance-alert",
+        1,
+        channel::SMS,
+        "en-GB",
+        "Hi {{name}}, call two.",
+        &unique_actor,
+    );
+    let (result_one, result_two) = tokio::join!(call_one, call_two);
+
+    let outcomes: Vec<_> = [result_one, result_two]
+        .into_iter()
+        .map(|result| match result {
+            Ok(outcome) => {
+                assert_eq!(outcome.outcome, "created");
+                "created"
+            }
+            Err(ApproveError::Rejected(_)) => "rejected",
+            Err(other) => panic!(
+                "expected ApproveError::Rejected on the losing side, got {other:?} — the \
+                 check-then-act race is not closed"
+            ),
+        })
+        .collect();
+    assert_eq!(
+        outcomes.iter().filter(|o| **o == "created").count(),
+        1,
+        "exactly one concurrent approval must succeed: {outcomes:?}"
+    );
+    assert_eq!(
+        outcomes.iter().filter(|o| **o == "rejected").count(),
+        1,
+        "exactly one concurrent approval must be rejected: {outcomes:?}"
+    );
+
+    let rows: Vec<(String, Option<String>)> = sqlx::query_as(
+        "SELECT action, detail->>'outcome' FROM platform_audit \
+         WHERE actor = $1 ORDER BY at",
+    )
+    .bind(&unique_actor)
+    .fetch_all(&control_pool)
+    .await
+    .expect("querying platform_audit failed");
+
+    let mut audited_outcomes: Vec<&str> = rows
+        .iter()
+        .filter_map(|(_, outcome)| outcome.as_deref())
+        .collect();
+    audited_outcomes.sort_unstable();
+    assert_eq!(
+        audited_outcomes,
+        vec!["created", "rejected"],
+        "both the winning and losing approval must write exactly one platform_audit row each"
+    );
+
+    if let Err(err) = sqlx::query("DELETE FROM platform_audit WHERE actor = $1")
+        .bind(&unique_actor)
+        .execute(&control_pool)
+        .await
+    {
+        eprintln!(
+            "cleanup: failed to delete platform_audit rows for actor {unique_actor}: {err}"
+        );
+    }
+    drop_test_tenant(&control_pool, &db_name, &slug).await;
+}
+
+#[tokio::test]
 async fn list_versions_returns_every_version_and_locale_ordered() {
     let control_url = control_database_url();
     let control_pool = db::connect(&control_url, 5)

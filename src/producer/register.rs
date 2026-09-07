@@ -125,8 +125,28 @@ pub async fn register_producer(
     result
 }
 
+/// Checks every existing-registration case `register_producer_inner` must
+/// classify — idempotent re-registration, conflicting re-registration under
+/// the same `name`, `cert_subject` already bound to a different producer in
+/// this tenant, or `cert_subject` already bound to a different tenant —
+/// auditing and returning a terminal result for whichever applies. Returns
+/// `Ok(None)` when none of them apply, meaning the caller is clear to
+/// attempt the insert. Called once before the insert and, on a lost race,
+/// once more after it (T-026) — the second call is guaranteed to find one
+/// of these cases, since a losing `insert_if_absent` only fails via the
+/// same `name`/`cert_subject` `UNIQUE` constraints this function checks.
+///
+/// `find_by_name`/`find_by_cert_subject` run inside one `REPEATABLE READ`
+/// transaction so they see one consistent snapshot: under the default
+/// `READ COMMITTED`, each is a separate statement with its own snapshot, so
+/// a concurrent registration's commit landing between the two awaits could
+/// make `find_by_name` miss a just-inserted row that `find_by_cert_subject`
+/// then finds — producing a false "cert_subject already bound to a
+/// different producer" rejection for what is, in the same identical-inputs
+/// re-registration, actually this exact producer (T-026, caught by
+/// `tests/producer.rs`'s own concurrent registration test).
 #[allow(clippy::too_many_arguments)]
-async fn register_producer_inner(
+async fn classify_registration(
     control_pool: &PgPool,
     tenant_pool: &PgPool,
     tenant_id: Uuid,
@@ -135,8 +155,16 @@ async fn register_producer_inner(
     owner_team: &str,
     contact: &str,
     actor: &str,
-) -> Result<RegisterOutcome, ProducerError> {
-    if let Some(existing) = repo::find_by_name(tenant_pool, name).await? {
+) -> Result<Option<RegisterOutcome>, ProducerError> {
+    let mut tx = tenant_pool.begin().await?;
+    sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
+        .execute(&mut *tx)
+        .await?;
+    let by_name = repo::find_by_name_tx(&mut tx, name).await?;
+    let by_cert_subject = repo::find_by_cert_subject_tx(&mut tx, cert_subject).await?;
+    tx.commit().await?;
+
+    if let Some(existing) = by_name {
         if existing.cert_subject == cert_subject
             && existing.owner_team == owner_team
             && existing.contact == contact
@@ -160,10 +188,10 @@ async fn register_producer_inner(
             )
             .await?;
 
-            return Ok(RegisterOutcome {
+            return Ok(Some(RegisterOutcome {
                 producer_id: existing.id,
                 outcome: "idempotent",
-            });
+            }));
         }
 
         audit(
@@ -185,7 +213,7 @@ async fn register_producer_inner(
         )));
     }
 
-    if let Some(other) = repo::find_by_cert_subject(tenant_pool, cert_subject).await? {
+    if let Some(other) = by_cert_subject {
         audit(
             control_pool,
             actor,
@@ -223,8 +251,37 @@ async fn register_producer_inner(
         )));
     }
 
+    Ok(None)
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn register_producer_inner(
+    control_pool: &PgPool,
+    tenant_pool: &PgPool,
+    tenant_id: Uuid,
+    name: &str,
+    cert_subject: &str,
+    owner_team: &str,
+    contact: &str,
+    actor: &str,
+) -> Result<RegisterOutcome, ProducerError> {
+    if let Some(outcome) = classify_registration(
+        control_pool,
+        tenant_pool,
+        tenant_id,
+        name,
+        cert_subject,
+        owner_team,
+        contact,
+        actor,
+    )
+    .await?
+    {
+        return Ok(outcome);
+    }
+
     let producer_id = Uuid::new_v4();
-    repo::insert(
+    let inserted = repo::insert_if_absent(
         tenant_pool,
         producer_id,
         name,
@@ -233,6 +290,27 @@ async fn register_producer_inner(
         contact,
     )
     .await?;
+
+    if !inserted {
+        let outcome = classify_registration(
+            control_pool,
+            tenant_pool,
+            tenant_id,
+            name,
+            cert_subject,
+            owner_team,
+            contact,
+            actor,
+        )
+        .await?
+        .expect(
+            "insert_if_absent lost a race but re-classification found no conflicting row — \
+             producer's name/cert_subject UNIQUE constraints guarantee one exists",
+        );
+
+        return Ok(outcome);
+    }
+
     cert_repo::upsert_producer_cert(control_pool, cert_subject, tenant_id, producer_id)
         .await?;
 
