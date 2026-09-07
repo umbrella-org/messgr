@@ -246,8 +246,9 @@ needs no change.
   environment — conscious skip. No `.adoc`/`.md` prose changed by this branch regardless.
 - [x] Findings recorded with severity, class, and disposition; disposition summary and cost line
   below (step 5).
-- [ ] Ticket moved to `tickets/6-done/` or `tickets/5-rework/`; `## History` appended (step 6) —
-  in progress, see History below.
+- [x] Ticket moved to `tickets/6-done/`; `## History` appended (step 6). Two rework rounds
+  preceded this verdict (F2, then F5 found in F2's own scoped re-review) — see the rework fix
+  records above and the History below.
 - [x] Other references updated if needed; governing documents reconciled (step 7): grepped all
   14 `development/design/*.md` files, `DESIGN.md`, and AGENTS.md's ten invariants for any claim
   about the internal check-then-act vs. write-then-classify shape of `register_producer`/
@@ -255,8 +256,7 @@ needs no change.
   omission.
 - [x] Remaining-tickets impact sweep (step 8): no ticket in `1-to-do/` or `2-ready/` references
   T-026 or depends on it — nothing to patch.
-- [ ] Summary + commit message & MR attributes presented for approval (step 9) — pending F2's
-  rework round concluding.
+- [x] Summary + commit message & MR attributes presented for approval (step 9).
 
 | id | severity | class | disposition | description | evidence | suggestion |
 |---|---|---|---|---|---|---|
@@ -296,6 +296,13 @@ T-018/F3: "accepted as noted... isn't practically simulable in this integration-
 `just build`/`just lint`/`just test`/`just docs-check` re-run clean on
 `feat/T-026-check-then-act-races` at this commit.
 
+**Scoped re-review of round 2** (delegated, independent — same-session-authorship rule applies
+again): confirmed F5 resolved — the new `audit(...)` call's action, arg order, and values match
+every other rejection site in this function exactly; audit fires before the `Err` return with
+`?` present (no silent-swallow risk); no double-audit possible (`classify_registration`'s own
+`None` return path doesn't audit). No new defect found. `just build`/`just lint`/`just test`/
+`just docs-check` re-verified clean by hand afterward. **Verdict: no blocking findings remain.**
+
 ## History
 
 - 2026-09-02 — created (TO DO). source: audit: batches four check-then-act races noted across prior reviews (T-010/F1 and its two named sibling instances in producer registration and tenant-config set; T-006/F3's dev-PKI root race), each individually accepted under a single-operator-CLI tolerance this audit records as expiring once the admin panel/platform console land.
@@ -308,3 +315,4 @@ T-018/F3: "accepted as noted... isn't practically simulable in this integration-
 - 2026-09-07 — REWORK → IN REVIEW: F2 fixed (commit 6744ba6)
 - 2026-09-07 — IN REVIEW → REWORK: F5 blocking: F2's own fix skipped the platform_audit call on its new rejected path
 - 2026-09-07 — REWORK → IN REVIEW: F5 fixed (commit 6faad13)
+- 2026-09-07 — IN REVIEW → DONE: review clean after 2 rework rounds (F2, F5); 3 non-blocking findings fixed inline (F1, F3, F4)
