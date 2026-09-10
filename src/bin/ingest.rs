@@ -70,11 +70,17 @@ async fn main() {
             "failed to connect to Vault (has VAULT_ADDR/VAULT_TOKEN been set?)",
         ));
 
+    let registry = Arc::new(TenantRegistry::new());
+    registry.start_eviction_sweep(
+        messgr::tenant::registry::TENANT_IDLE_TTL,
+        messgr::tenant::registry::EVICTION_SWEEP_INTERVAL,
+    );
+
     let app_state = AppState {
         control_pool,
         control_database_url: config.control_database_url.clone(),
         keystore,
-        registry: Arc::new(TenantRegistry::new()),
+        registry,
         tenant_pool_max_connections: config.database_max_connections,
         profile: config.profile,
     };
