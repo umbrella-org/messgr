@@ -1,0 +1,69 @@
+@startuml e2e
+title scripts/e2e.sh -- step flow
+
+actor User
+participant "e2e.sh" as E2E
+participant "docker compose\n(postgres+vault)" as Docker
+participant Vault
+participant Postgres
+participant "just\n(control/provision)" as Just
+participant "messgr-ingest" as Ingest
+participant "messgr-dispatcher" as Dispatcher
+participant "mock provider\n(sms/email)" as Mock
+
+== 1-destroy-env ==
+User -> E2E: 1-destroy-env
+E2E -> Ingest: kill pid
+E2E -> Dispatcher: kill pid
+E2E -> Mock: kill pid (sms, email)
+E2E -> Docker: compose down -v
+E2E -> E2E: rm -rf .e2e/
+
+== 2-setup-env ==
+User -> E2E: 2-setup-env
+E2E -> E2E: cargo build (control/ingest/dispatcher)
+E2E -> Docker: compose up -d
+E2E -> Vault: poll /sys/health
+E2E -> Postgres: poll pg_isready
+E2E -> Just: vault-dev-init
+E2E -> Just: control-migrate
+E2E -> Just: provision(tenant)
+Just -> Postgres: create tenant db
+Just -> Vault: create role/wrapped secret
+Just --> E2E: tenant_id, vault_role_id, vault_wrapped_secret_id
+E2E -> Just: tenant-config-set
+E2E -> Just: producer-register
+E2E -> Just: provider-config-set (sms, email)
+E2E -> Just: template-approve (sms, email)
+E2E -> Just: dev-pki-bootstrap / issue-cert / issue-server-cert
+E2E -> Mock: start (sms :19091, email :19092)
+E2E -> Ingest: start (mTLS certs)
+Ingest --> E2E: log "listening"
+E2E -> Dispatcher: start (vault role/secret, channels)
+Dispatcher --> E2E: log "starting claim loop"
+
+== 3-send-sms / 4-send-email ==
+User -> E2E: 3-send-sms [n] / 4-send-email [n]
+alt n == 1
+    E2E -> Ingest: POST /comms (mTLS, Idempotency-Key)
+else n > 1 (bulk_send)
+    E2E -> Ingest: POST /comms x n (batched, concurrent)
+end
+Ingest -> Postgres: insert comms_request + outbox
+Ingest --> E2E: comms_request_id
+E2E -> E2E: state_set LAST_*_REQUEST_ID
+
+Dispatcher -> Postgres: claim outbox row
+Dispatcher -> Mock: POST /messages
+Mock --> Dispatcher: 200 {message_id, status}
+Dispatcher -> Postgres: write comms_event, update outbox/final_status
+
+== 5-trace-sms-in-db ==
+User -> E2E: 5-trace-sms-in-db
+E2E -> Postgres: select comms_request
+E2E -> Postgres: select outbox
+E2E -> Postgres: select comms_event
+Postgres --> E2E: rows
+E2E --> User: print trace
+
+@enduml
