@@ -238,7 +238,42 @@ Task 4 above.
 
 ## Review
 
-<!-- empty until IN REVIEW -->
+- [x] Reviewer independence settled (step 0): **delegated**. This session authored
+  `feat/T-032-health-endpoints`, so steps 2–4a (implementation/quality/consistency/docs audits)
+  were run by a freshly spawned, independent sub-agent with no memory of writing the code,
+  briefed adversarially (find defects, don't confirm). Every finding it returned was
+  independently re-verified by hand before being recorded below (protocol §0: "delegation buys
+  independence, not accuracy"). Classification, severity, disposition, and the move stayed with
+  this (orchestrating) reviewer.
+- [x] Implementation audit (step 2): every task done, every confirmed decision honored — bare
+  `200 OK` empty body; one shared `messgr::health::router()` used by both binaries, not
+  duplicated; the handler takes no `AppState`/pool/keystore (hard invariants 1 and 3 clean — the
+  module has zero references to the queue, gate chain, or dispatch path); both env vars present
+  in `.env.example` and the relevant `.adoc`. `just build` / `just test` / `just lint` all pass.
+  `tests/health.rs` re-run and mutation-tested (handler changed to return `500` locally,
+  confirmed the test goes red, then reverted) — not tautological.
+- [x] Quality audit (step 3): see F2 below (non-blocking).
+- [x] Consistency audit (step 4): see F1 (blocking) and F3 (non-blocking). `DESIGN.md` has no
+  mention of health checks, liveness, or per-binary listener/port counts anywhere in
+  `development/design/` — nothing for this ticket to make stale, nothing to reconcile (step 7).
+- [x] Documentation audit (step 4a): coverage present for both new env vars. `just docs-check`
+  still fails locally with `snowball: command not found` — the same pre-existing environment
+  gap noted during implementation (the binary isn't installed on this machine; not a finding).
+- [x] Docs-readability pass (step 4b): no docs-readability reviewer configured in this
+  environment — conscious skip.
+- [x] Remaining-tickets impact sweep (step 8): no ticket in `1-to-do/` or `2-ready/` references
+  or depends on T-032. Nothing to patch.
+
+| id | severity | class | disposition | description | evidence | suggestion |
+|---|---|---|---|---|---|---|
+| F1 | blocking | correctness | — | `INGEST_HEALTH_LISTEN_ADDR` and `DISPATCHER_HEALTH_LISTEN_ADDR` both default to `0.0.0.0:8080`, colliding when both binaries run on the same host — exactly the sequence `docs/user-manual/ingest.adoc`'s own walkthrough runs (`just ingest-run`, then `messgr-dispatcher` against it, on one dev machine). Confirmed: an OS-level second bind to the same address fails; in-process this surfaces as the second binary's spawned health-listener task panicking at its `.expect("failed to bind ..._HEALTH_LISTEN_ADDR")`. The panic is swallowed (F2), so the second binary keeps running normal traffic with a permanently-dead health endpoint and no visible error beyond a stderr backtrace. | `src/bin/ingest.rs:53-56`, `src/bin/dispatcher.rs:77-81`, `.env.example:12,27`, `docs/user-manual/ingest.adoc:73` ("Once `messgr-dispatcher` is running against this tenant and channel...") | Give the two binaries distinct default health ports (e.g. keep `INGEST_HEALTH_LISTEN_ADDR` at `0.0.0.0:8080`, change `DISPATCHER_HEALTH_LISTEN_ADDR`'s default to `0.0.0.0:8081`); update `.env.example` and both `.adoc` pages' documented defaults to match. |
+| F2 | non-blocking | design | note and close | A failed/panicked health-listener task (F1's bind collision, or any other bind/serve error) is silently swallowed by `for handle in handles { let _ = handle.await; }` — the process keeps running its main traffic with a permanently-dead health endpoint and no signal beyond a stderr backtrace. | `src/bin/ingest.rs` (new `handles` loop this ticket introduced), `src/bin/dispatcher.rs` (pre-existing identical pattern, unchanged by this ticket) | Repo-wide `handles`-vector question, not scoped to this ticket: consider treating any handle returning early as fatal (log at error level, exit non-zero) since every task in that vector is meant to run forever. F1's fix removes the only practical trigger this ticket introduces. |
+| F3 | non-blocking | docs-gap | note and close | `.env.example`'s `# messgr-ingest (T-011) -- no defaults; the binary refuses to start without them.` header is contradicted by `INGEST_LISTEN_ADDR=0.0.0.0:8443` (pre-existing) and now also by this ticket's own `INGEST_HEALTH_LISTEN_ADDR=0.0.0.0:8080` line — both have defaults. | `.env.example:7-12` | Reword the header comment; pre-existing inaccuracy this ticket's addition merely repeats, not introduces. Out of scope to fix here. |
+
+Disposition summary: 1 blocking (F1, correctness) → `5-rework/` for a scoped fix; 2 non-blocking,
+both note-and-close (F2 design, F3 docs-gap).
+
+cost: estimated S, actual S
 
 ## History
 
@@ -246,3 +281,4 @@ Task 4 above.
 - 2026-09-14 — TO DO → READY: plan complete
 - 2026-09-14 — READY → IN DEVELOPMENT: picked up
 - 2026-09-14 — IN DEVELOPMENT → IN REVIEW: acceptance green
+- 2026-09-14 — IN REVIEW → REWORK: F1 blocking: default health-listener ports collide across binaries

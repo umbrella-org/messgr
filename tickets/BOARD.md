@@ -20,11 +20,10 @@ Last updated: 2026-09-14
 
 ## IN REVIEW
 
-### messgr (1/1)
+### messgr (0/1)
 
 | id | title | depends-on |
 |---|---|---|
-| T-032 | Health endpoints for messgr-ingest and messgr-dispatcher | [] |
 
 ## REWORK
 
@@ -32,6 +31,7 @@ Last updated: 2026-09-14
 
 | id | title | open findings |
 |---|---|---|
+| T-032 | Health endpoints for messgr-ingest and messgr-dispatcher | F1 blocking: default health-listener ports collide across binaries |
 
 ## READY (impact order, per child)
 
