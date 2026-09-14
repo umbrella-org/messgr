@@ -288,7 +288,34 @@ level (a plain Python socket test) that both defaults now bind concurrently with
 F2 and F3 were dispositioned note-and-close in the review above, not fixed here — out of this
 round's scope.
 
-## History
+### Scoped re-review — round 1
+
+Reviewer independence: **delegated** (this session authored the fix commit `ea2924b`) to a
+fresh sub-agent, briefed adversarially and scoped to exactly this round's diff (`git show
+ea2924b`) per protocol §1's scoped-re-review bound — not a re-audit of the whole feature.
+Every claim re-verified by hand before being recorded here.
+
+- F1 confirmed closed: `src/bin/dispatcher.rs`'s `DISPATCHER_HEALTH_LISTEN_ADDR` default is
+  `0.0.0.0:8081`; `src/bin/ingest.rs`'s `INGEST_HEALTH_LISTEN_ADDR` default remains
+  `0.0.0.0:8080`, unchanged. Verified both bind concurrently on one host with an OS-level
+  two-socket test — no collision.
+- No new port collision introduced: grepped `compose.yml`, `justfile`,
+  `.github/workflows/*.yml`, `scripts/*.sh` for `8081` — unused elsewhere (Postgres `5432`,
+  Vault `8200` are the only other claimed ports in this stack); not a well-known/reserved port.
+- `.env.example` and `docs/user-manual/dispatcher.adoc` both updated to match the new default;
+  the `.adoc` prose now explicitly explains *why* the two binaries' health ports differ, so a
+  reader isn't left to infer it. `docs/user-manual/ingest.adoc` correctly untouched.
+- Repo-wide grep for the old `0.0.0.0:8080` dispatcher default and for
+  `DISPATCHER_HEALTH_LISTEN_ADDR`/`INGEST_HEALTH_LISTEN_ADDR` found no stale reference left
+  behind.
+- `git show ea2924b --stat` confirms exactly the 3 files the fix record names — F2 (the
+  `handles`-swallows-panics pattern) and F3 (`.env.example`'s stale header comment) are
+  untouched, consistent with their note-and-close disposition; this round did not silently
+  expand scope.
+- `just build` / `just test` (full suite, including `tests/health.rs`) / `just lint` all green,
+  re-run independently.
+
+No new findings. Verdict: **F1 closed, clean.** Proceeding to `6-done/`.
 
 - 2026-09-05 — created (TO DO). source: review: split out of T-025's item 8 at refinement — needs a real architecture decision (a second unauthenticated listener per binary), not a one-line route addition, a scope big enough to warrant its own ticket.
 - 2026-09-14 — TO DO → READY: plan complete
@@ -296,3 +323,7 @@ round's scope.
 - 2026-09-14 — IN DEVELOPMENT → IN REVIEW: acceptance green
 - 2026-09-14 — IN REVIEW → REWORK: F1 blocking: default health-listener ports collide across binaries
 - 2026-09-14 — REWORK → IN REVIEW: findings fixed
+
+## History
+
+- 2026-09-14 — IN REVIEW → DONE: scoped re-review clean, F1 closed
