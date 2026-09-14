@@ -245,3 +245,4 @@ Task 4 above.
 - 2026-09-05 — created (TO DO). source: review: split out of T-025's item 8 at refinement — needs a real architecture decision (a second unauthenticated listener per binary), not a one-line route addition, a scope big enough to warrant its own ticket.
 - 2026-09-14 — TO DO → READY: plan complete
 - 2026-09-14 — READY → IN DEVELOPMENT: picked up
+- 2026-09-14 — IN DEVELOPMENT → IN REVIEW: acceptance green
