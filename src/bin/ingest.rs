@@ -50,6 +50,10 @@ async fn main() {
         .unwrap_or_else(|_| "0.0.0.0:8443".to_string())
         .parse()
         .expect("INGEST_LISTEN_ADDR must be a valid socket address");
+    let health_listen_addr: SocketAddr = std::env::var("INGEST_HEALTH_LISTEN_ADDR")
+        .unwrap_or_else(|_| "0.0.0.0:8080".to_string())
+        .parse()
+        .expect("INGEST_HEALTH_LISTEN_ADDR must be a valid socket address");
     let cert_file = env_var("INGEST_TLS_CERT_FILE");
     let key_file = env_var("INGEST_TLS_KEY_FILE");
     let client_ca_file = env_var("INGEST_TLS_CLIENT_CA_FILE");
@@ -94,12 +98,30 @@ async fn main() {
     let rustls_config = RustlsConfig::from_config(Arc::new(tls_config));
     let acceptor = ClientCertAcceptor::new(RustlsAcceptor::new(rustls_config));
 
-    tracing::info!(%listen_addr, "messgr-ingest listening");
-    axum_server::bind(listen_addr)
-        .acceptor(acceptor)
-        .serve(app.into_make_service())
-        .await
-        .expect("server error");
+    let mut handles = Vec::new();
+
+    handles.push(tokio::spawn(async move {
+        let listener = tokio::net::TcpListener::bind(health_listen_addr)
+            .await
+            .expect("failed to bind INGEST_HEALTH_LISTEN_ADDR");
+        tracing::info!(%health_listen_addr, "messgr-ingest health listener up");
+        axum::serve(listener, messgr::health::router())
+            .await
+            .expect("health server error");
+    }));
+
+    handles.push(tokio::spawn(async move {
+        tracing::info!(%listen_addr, "messgr-ingest listening");
+        axum_server::bind(listen_addr)
+            .acceptor(acceptor)
+            .serve(app.into_make_service())
+            .await
+            .expect("server error");
+    }));
+
+    for handle in handles {
+        let _ = handle.await;
+    }
 }
 
 #[cfg(test)]

@@ -74,6 +74,12 @@ async fn main() {
     tracing_subscriber::fmt().init();
     let config = Config::from_env();
 
+    let health_listen_addr: std::net::SocketAddr =
+        std::env::var("DISPATCHER_HEALTH_LISTEN_ADDR")
+            .unwrap_or_else(|_| "0.0.0.0:8081".to_string())
+            .parse()
+            .expect("DISPATCHER_HEALTH_LISTEN_ADDR must be a valid socket address");
+
     let tenant_slug = env_var("DISPATCHER_TENANT_SLUG");
     let channels: Vec<String> = std::env::var("DISPATCHER_CHANNELS")
         .unwrap_or_else(|_| "sms".to_string())
@@ -202,6 +208,16 @@ async fn main() {
     }
 
     let mut handles = Vec::new();
+
+    handles.push(tokio::spawn(async move {
+        let listener = tokio::net::TcpListener::bind(health_listen_addr)
+            .await
+            .expect("failed to bind DISPATCHER_HEALTH_LISTEN_ADDR");
+        tracing::info!(%health_listen_addr, "messgr-dispatcher health listener up");
+        axum::serve(listener, messgr::health::router())
+            .await
+            .expect("health server error");
+    }));
 
     let mut refresh_listener = sqlx::postgres::PgListener::connect_with(&tenant_pool)
         .await

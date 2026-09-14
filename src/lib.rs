@@ -5,6 +5,7 @@ pub mod db;
 pub mod destination_hmac;
 pub mod dispatcher;
 pub mod encryption;
+pub mod health;
 pub mod ingest;
 pub mod key_cache;
 pub mod keystore;
