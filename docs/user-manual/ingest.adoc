@@ -22,7 +22,10 @@ through PgBouncer transaction mode, where `LISTEN` never fires (DESIGN.md §2.3,
 
 Requires four env vars, no defaults (`.env.example`): `INGEST_LISTEN_ADDR` (default
 `0.0.0.0:8443` if unset), `INGEST_TLS_CERT_FILE`, `INGEST_TLS_KEY_FILE`,
-`INGEST_TLS_CLIENT_CA_FILE`. Locally, mint a server identity with a DNS SAN (unlike a producer's
+`INGEST_TLS_CLIENT_CA_FILE`. A fifth, `INGEST_HEALTH_LISTEN_ADDR` (default `0.0.0.0:8080`,
+`T-032`), binds a second, plain (non-TLS) listener serving only `GET /healthz` -- a bare `200`
+for an orchestrator/LB liveness probe, no client certificate needed. Locally, mint a server
+identity with a DNS SAN (unlike a producer's
 own client certificate, a server's certificate _is_ hostname-checked by whatever connects to
 it):
 

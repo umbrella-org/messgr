@@ -34,8 +34,12 @@ Requires `DISPATCHER_TENANT_SLUG` (which tenant this process serves), `VAULT_ROL
 provisioning run), and, per channel in `DISPATCHER_CHANNELS` (default `sms`),
 `DISPATCHER_<CHANNEL>_BASE_URL` -- a dev stand-in `Sender` endpoint, since `provider_config` has
 no `base_url` column. The credential itself comes from `provider_config.credential_path` via
-Vault KV (T-023) -- no `DISPATCHER_<CHANNEL>_API_KEY` env var anymore. Seed it locally the same
-way `scripts/e2e.sh` does:
+Vault KV (T-023) -- no `DISPATCHER_<CHANNEL>_API_KEY` env var anymore. `DISPATCHER_HEALTH_LISTEN_ADDR`
+(default `0.0.0.0:8081` -- distinct from `messgr-ingest`'s own `INGEST_HEALTH_LISTEN_ADDR`
+default of `0.0.0.0:8080`, so the two can run on the same host unmodified; `T-032`) binds a
+plain listener serving only `GET /healthz` -- a bare `200` for an orchestrator/LB liveness
+probe; this binary otherwise has no HTTP surface at all.
+Seed the channel credential locally the same way `scripts/e2e.sh` does:
 
 [source,bash]
 ----
