@@ -9,7 +9,7 @@ hand — edit the tickets. Hand-written planning notes live in [`NOTES.md`](NOTE
 **WIP limits (per child-project):**
 - `messgr`: `3-in-development/` ≤ 1 · `4-in-review/` ≤ 1
 
-Last updated: 2026-09-07
+Last updated: 2026-09-14
 
 ## IN DEVELOPMENT
 
@@ -38,6 +38,7 @@ Last updated: 2026-09-07
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
+| T-032 | Health endpoints for messgr-ingest and messgr-dispatcher | medium | low | S | [] |  |
 
 ## TO DO (impact order, per child)
 
@@ -45,7 +46,6 @@ Last updated: 2026-09-07
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
-| T-032 | Health endpoints for messgr-ingest and messgr-dispatcher | medium | medium | M | [] |  |
 | T-029 | Nightly idempotency-sweep job | low | low | S | [] |  |
 | T-030 | Reconcile orphan_event rows into comms_event | low | low | S | [] |  |
 
