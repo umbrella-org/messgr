@@ -13,10 +13,11 @@ Last updated: 2026-09-14
 
 ## IN DEVELOPMENT
 
-### messgr (0/1)
+### messgr (1/1)
 
 | id | title | depends-on |
 |---|---|---|
+| T-032 | Health endpoints for messgr-ingest and messgr-dispatcher | [] |
 
 ## IN REVIEW
 
@@ -38,7 +39,6 @@ Last updated: 2026-09-14
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
-| T-032 | Health endpoints for messgr-ingest and messgr-dispatcher | medium | low | S | [] |  |
 
 ## TO DO (impact order, per child)
 
