@@ -275,6 +275,19 @@ both note-and-close (F2 design, F3 docs-gap).
 
 cost: estimated S, actual S
 
+### Rework fix record — round 1 (commit ea2924b)
+
+Fixed F1 only, per scope: `DISPATCHER_HEALTH_LISTEN_ADDR`'s default changed from `0.0.0.0:8080`
+to `0.0.0.0:8081` (`src/bin/dispatcher.rs`), distinct from `messgr-ingest`'s own
+`INGEST_HEALTH_LISTEN_ADDR` default (`0.0.0.0:8080`, unchanged). `.env.example` and
+`docs/user-manual/dispatcher.adoc` updated to match, the latter now also naming the distinction
+explicitly so a reader doesn't have to infer it from two separate pages. Re-verified at the OS
+level (a plain Python socket test) that both defaults now bind concurrently without collision.
+`just build`/`just test`/`just lint` all green.
+
+F2 and F3 were dispositioned note-and-close in the review above, not fixed here — out of this
+round's scope.
+
 ## History
 
 - 2026-09-05 — created (TO DO). source: review: split out of T-025's item 8 at refinement — needs a real architecture decision (a second unauthenticated listener per binary), not a one-line route addition, a scope big enough to warrant its own ticket.
@@ -282,3 +295,4 @@ cost: estimated S, actual S
 - 2026-09-14 — READY → IN DEVELOPMENT: picked up
 - 2026-09-14 — IN DEVELOPMENT → IN REVIEW: acceptance green
 - 2026-09-14 — IN REVIEW → REWORK: F1 blocking: default health-listener ports collide across binaries
+- 2026-09-14 — REWORK → IN REVIEW: findings fixed
