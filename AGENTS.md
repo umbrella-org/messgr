@@ -6,10 +6,15 @@ Guidance for AI agents working in this repository.
 
 **messgr** — a centralized communications orchestration system and audit ledger for a bank: every SMS, email, and WhatsApp message sent to a customer, in one place, with an API and a UI over it.
 
-**Status: design only.** The design is the single artifact — `DESIGN.md` at the root indexes it,
-split across [`development/design/`](development/design/) one file per top-level section (see
-[`development/README.md`](development/README.md)). No code exists yet. Do not scaffold an
-implementation unless asked.
+**Status: implementation in progress.** `DESIGN.md` at the root indexes the design, split across
+[`development/design/`](development/design/) one file per top-level section (see
+[`development/README.md`](development/README.md)) — it remains the source of truth; code follows
+it, not the other way around. Build-order steps 0–4 (§14) are built and merged: Vault/KMS, control
+DB and provisioning, producer registry and mTLS, ledger/outbox/ingest with one channel (SMS), the
+customer projection, and kill switches, plus operational hardening on top. **Step 5, the gate
+chain (verification/consent/suppression enforcement at dispatch), is not yet built** — see
+`tickets/BOARD.md` for what's in flight. No feature is built directly from a chat message or a raw
+idea; see "Brine" below.
 
 `DESIGN.md` is long because it records *why* decisions were made and what was rejected, not just what was chosen. That rationale is the valuable part — when editing, preserve it. Several sections deliberately document mistakes made during design (see "Corrections on the record" below); do not tidy those away.
 
