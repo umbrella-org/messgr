@@ -20,11 +20,10 @@ Last updated: 2026-09-15
 
 ## IN REVIEW
 
-### messgr (1/1)
+### messgr (0/1)
 
 | id | title | depends-on |
 |---|---|---|
-| T-034 | Validate orphan-reconcile event_type before promoting and make find_match deterministic | [] |
 
 ## REWORK
 
@@ -32,6 +31,7 @@ Last updated: 2026-09-15
 
 | id | title | open findings |
 |---|---|---|
+| T-034 | Validate orphan-reconcile event_type before promoting and make find_match deterministic | F1: user manual now misstates the age-out invariant |
 
 ## READY (impact order, per child)
 

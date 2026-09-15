@@ -73,11 +73,15 @@ None. No `depends-on:`. `spawned-by: T-030` is already merged to `main` (PR #48,
    narrowed by one because 0 is nonsensical here specifically (`kill_switch_release_rate` and
    `schedule_horizon_days` both have a sensible 0).
 5. **The warn is emitted from `orphan_reconcile::reconcile::run`'s existing age-out arm**, once
-   per aged-out row, carrying `tenant_slug`, the orphan's `id`, and its `provider_ref` — enough
-   to find the lost receipt in provider logs without the ciphertext-free `orphan_event` row
-   itself surviving to be inspected. No `platform_audit` row: F2/F3 and this ticket's own Scope
-   line ask only for `tracing::warn!`, matching `partition_lifecycle`'s `retention_skipped`
-   precedent, which also doesn't audit.
+   per aged-out row, carrying `tenant_slug`, the orphan's `id`, its `provider_ref`, and its
+   `event_type` — enough to find the lost receipt in provider logs without the ciphertext-free
+   `orphan_event` row itself surviving to be inspected. `event_type` was added by T-034's review
+   (2026-09-15): that ticket landed a second age-out reason (an `event_type` outside the
+   documented set never reaches `find_match` at all), and without it in the warn, "no match"
+   and "matched but rejected on `event_type`" are indistinguishable to whoever gets paged — see
+   `event_type`'s own doc comment in `reconcile.rs` for which set is enforced. No `platform_audit`
+   row: F2/F3 and this ticket's own Scope line ask only for `tracing::warn!`, matching
+   `partition_lifecycle`'s `retention_skipped` precedent, which also doesn't audit.
 
 ### Tasks
 
@@ -154,10 +158,14 @@ Add `reconcile_attempts_cap: 5,` (matching each site's existing `kill_switch_rel
       tenant_slug,
       orphan_id = %orphan.id,
       provider_ref = %orphan.provider_ref,
+      event_type = %orphan.event_type,
       "orphan_reconcile: row exceeded reconcile_attempts_cap and was deleted -- \
        the delivery receipt it held is now unrecoverable"
   );
   ```
+  `event_type` distinguishes a genuine no-match from a row whose `event_type` T-034's
+  `is_recognized_event_type` rejected outright (that row never reaches `find_match`, but still
+  ages out through this same arm) — decision 5, amended by T-034's review.
 
 #### Task 6 — tests
 
@@ -233,3 +241,7 @@ configuration" section (that section's field enumeration already excludes
 
 - 2026-09-15 — created (TO DO). source: review: T-030's review (findings F2, F3) found the reconcile-attempts cap is hardcoded and its exhaustion path emits no alert, both contradicting DESIGN.md §4.4/§10's own correction note — batched into one follow-up ticket.
 - 2026-09-15 — TO DO → READY: plan complete
+- 2026-09-15 — plan amended inline: decision 5 and Task 5's `tracing::warn!` now also carry
+  `event_type`, folded in from T-034's review (finding F7) — T-034 gave `orphan_reconcile` a
+  second age-out reason (an unrecognized `event_type` never reaches `find_match`) that this
+  ticket's warn couldn't previously distinguish from a genuine no-match.
