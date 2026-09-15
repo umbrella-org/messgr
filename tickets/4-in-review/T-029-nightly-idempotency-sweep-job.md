@@ -269,3 +269,4 @@ just docs-check
   "matches partition_lifecycle" claim is loose (that error has no such variant) — is noted and
   closed; the plan's own error shape is fine as written, no ticket change needed.
 - 2026-09-15 — READY → IN DEVELOPMENT: picked up
+- 2026-09-15 — IN DEVELOPMENT → IN REVIEW: acceptance green
