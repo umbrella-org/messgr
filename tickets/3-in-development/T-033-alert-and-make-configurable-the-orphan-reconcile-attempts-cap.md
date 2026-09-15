@@ -245,3 +245,4 @@ configuration" section (that section's field enumeration already excludes
   `event_type`, folded in from T-034's review (finding F7) — T-034 gave `orphan_reconcile` a
   second age-out reason (an unrecognized `event_type` never reaches `find_match`) that this
   ticket's warn couldn't previously distinguish from a genuine no-match.
+- 2026-09-15 — READY → IN DEVELOPMENT: picked up
