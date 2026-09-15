@@ -7,6 +7,7 @@ use messgr::customer_dek::lifecycle::pre_provision_for_tenant;
 use messgr::db;
 use messgr::idempotency_sweep::run_for_tenant as run_idempotency_sweep;
 use messgr::keystore::VaultKeyStore;
+use messgr::orphan_reconcile::reconcile::run_for_tenant as run_orphan_reconcile;
 use messgr::partition_lifecycle::lifecycle::run_for_tenant as run_partition_lifecycle;
 use messgr::producer::dev_pki;
 use messgr::producer::register::{disable_producer, list_producers, register_producer};
@@ -110,6 +111,17 @@ enum Command {
     IdempotencySweep {
         #[command(subcommand)]
         command: IdempotencySweepCommand,
+    },
+    /// Match pending orphan_event rows (delivery-receipt webhooks that
+    /// arrived before, or without, a matching comms_request) against
+    /// comms_event.provider_ref, promote matches into a real comms_event row
+    /// encrypted under the customer's DEK, and age out rows past a
+    /// fixed-attempt reconcile cap (DESIGN.md §4.4/§10, T-022, T-030). Meant
+    /// to run on a schedule (cron/systemd timer) -- this binary does not
+    /// daemonize or loop.
+    OrphanReconcile {
+        #[command(subcommand)]
+        command: OrphanReconcileCommand,
     },
     /// Message-volume counts by channel and status for one tenant (DESIGN.md
     /// §11.4: counts/metadata only, never payload content). Reads
@@ -389,6 +401,17 @@ enum PartitionLifecycleCommand {
 #[derive(Subcommand)]
 enum IdempotencySweepCommand {
     /// Delete every idempotency row whose expires_at is at or before now.
+    Run {
+        #[arg(long = "tenant-slug")]
+        tenant_slug: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum OrphanReconcileCommand {
+    /// Match pending orphan_event rows against comms_event.provider_ref,
+    /// promote matches into comms_event (encrypted under the customer's
+    /// DEK), age out rows past the reconcile_attempts cap.
     Run {
         #[arg(long = "tenant-slug")]
         tenant_slug: String,
@@ -968,6 +991,42 @@ async fn run(
                 println!("deleted={deleted}");
             }
         },
+        Command::OrphanReconcile { command } => {
+            // Unlike idempotency-sweep and partition-lifecycle, this command
+            // does connect to Vault (admin-token client): a promoted
+            // orphan_event's raw payload must be encrypted under the
+            // matched customer's DEK before it becomes a comms_event row
+            // (AGENTS.md hard invariant 7) -- matching messgr-ingest's own
+            // T-011 decision 5 rationale, this is a per-invocation,
+            // multi-tenant-over-time CLI, not the single-tenant AppRole case
+            // `connect_as_tenant` fits. Connecting to Vault is startup-class
+            // regardless of call site (decision 2) -- left as `.expect()`.
+            let vault_keystore = VaultKeyStore::connect(config.profile).expect(
+                "failed to connect to Vault (has VAULT_ADDR/VAULT_TOKEN been set?)",
+            );
+            match command {
+                OrphanReconcileCommand::Run { tenant_slug } => {
+                    let report = run_orphan_reconcile(
+                        &control_pool,
+                        &config.control_database_url,
+                        &tenant_slug,
+                        &vault_keystore,
+                        config.database_max_connections,
+                    )
+                    .await
+                    .map_err(|err| {
+                        format!(
+                            "orphan reconcile run failed for tenant {tenant_slug:?}: {err}"
+                        )
+                    })?;
+
+                    println!(
+                        "reconciled={} aged_out={} still_pending={}",
+                        report.reconciled, report.aged_out, report.still_pending
+                    );
+                }
+            }
+        }
         Command::Stats { tenant_slug, since } => {
             let rows = tenant_message_stats(
                 &control_pool,
