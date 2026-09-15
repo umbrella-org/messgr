@@ -328,3 +328,4 @@ patch.
 - 2026-09-15 — READY → IN DEVELOPMENT: picked up
 - 2026-09-15 — IN DEVELOPMENT → IN REVIEW: acceptance green
 - 2026-09-15 — IN REVIEW → DONE: review clean, 2 non-blocking findings fixed inline
+- 2026-09-15 — MERGED: PR #47 merged to `main` (`a5d5900`)
