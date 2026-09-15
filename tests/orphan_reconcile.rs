@@ -453,6 +453,183 @@ async fn no_match_at_cap_deletes_the_row() {
     tenant.teardown().await;
 }
 
+// T-034 finding F4: an orphan row carrying an event_type outside the
+// documented comms_event/orphan_event set must never be promoted -- it
+// should age out through the existing reconcile_attempts cap path exactly
+// like a provider_ref that matches nothing.
+#[tokio::test]
+async fn unrecognized_event_type_ages_out_instead_of_promoting() {
+    let tenant = TestTenant::provision("bad_type").await;
+    let vault = vault_keystore();
+
+    let comms_request_id = Uuid::new_v4();
+    let customer_id = Uuid::new_v4();
+    let created_at = Utc::now();
+    let occurred_at = Utc::now();
+
+    insert_comms_request(
+        &tenant.tenant_pool,
+        comms_request_id,
+        customer_id,
+        created_at,
+        None,
+    )
+    .await;
+    insert_comms_event(
+        &tenant.tenant_pool,
+        comms_request_id,
+        customer_id,
+        occurred_at,
+        "abc",
+    )
+    .await;
+    let orphan_id = Uuid::new_v4();
+    insert_orphan_event(
+        &tenant.tenant_pool,
+        orphan_id,
+        "abc",
+        "made_up_status",
+        occurred_at,
+        None,
+        0,
+    )
+    .await;
+
+    let report = run_for_tenant(
+        &tenant.control_pool,
+        &tenant.control_url,
+        &tenant.slug,
+        &vault,
+        5,
+    )
+    .await
+    .expect("reconcile run failed");
+    assert_eq!(
+        report.reconciled, 0,
+        "an unrecognized event_type must never be promoted"
+    );
+    assert_eq!(report.still_pending, 1);
+
+    let reconcile_attempts: i16 =
+        sqlx::query_scalar("SELECT reconcile_attempts FROM orphan_event WHERE id = $1")
+            .bind(orphan_id)
+            .fetch_one(&tenant.tenant_pool)
+            .await
+            .expect("fetching reconcile_attempts failed");
+    assert_eq!(reconcile_attempts, 1);
+
+    let comms_event_count: i64 = sqlx::query_scalar("SELECT count(*) FROM comms_event")
+        .fetch_one(&tenant.tenant_pool)
+        .await
+        .expect("counting comms_event rows failed");
+    assert_eq!(
+        comms_event_count, 1,
+        "no new comms_event row should have been written for the unrecognized orphan"
+    );
+
+    tenant.teardown().await;
+}
+
+// T-034 finding F5: when more than one comms_event row shares a
+// provider_ref, find_match must deterministically pick the most recently
+// occurred one rather than leaving the choice to Postgres' LIMIT 1.
+#[tokio::test]
+async fn multi_match_resolves_to_the_most_recently_occurred_row() {
+    let tenant = TestTenant::provision("multi_match").await;
+    let vault = vault_keystore();
+
+    let shared_provider_ref = "shared-ref";
+
+    let older_request_id = Uuid::new_v4();
+    let older_customer_id = Uuid::new_v4();
+    let older_created_at = Utc::now() - chrono::Duration::minutes(10);
+    let older_occurred_at = Utc::now() - chrono::Duration::minutes(10);
+    insert_comms_request(
+        &tenant.tenant_pool,
+        older_request_id,
+        older_customer_id,
+        older_created_at,
+        None,
+    )
+    .await;
+    insert_comms_event(
+        &tenant.tenant_pool,
+        older_request_id,
+        older_customer_id,
+        older_occurred_at,
+        shared_provider_ref,
+    )
+    .await;
+
+    let newer_request_id = Uuid::new_v4();
+    let newer_customer_id = Uuid::new_v4();
+    let newer_created_at = Utc::now();
+    let newer_occurred_at = Utc::now();
+    insert_comms_request(
+        &tenant.tenant_pool,
+        newer_request_id,
+        newer_customer_id,
+        newer_created_at,
+        None,
+    )
+    .await;
+    insert_comms_event(
+        &tenant.tenant_pool,
+        newer_request_id,
+        newer_customer_id,
+        newer_occurred_at,
+        shared_provider_ref,
+    )
+    .await;
+
+    insert_orphan_event(
+        &tenant.tenant_pool,
+        Uuid::new_v4(),
+        shared_provider_ref,
+        "delivered",
+        Utc::now(),
+        None,
+        0,
+    )
+    .await;
+
+    let report = run_for_tenant(
+        &tenant.control_pool,
+        &tenant.control_url,
+        &tenant.slug,
+        &vault,
+        5,
+    )
+    .await
+    .expect("reconcile run failed");
+    assert_eq!(report.reconciled, 1);
+
+    let newer_final_status: Option<String> =
+        sqlx::query_scalar("SELECT final_status FROM comms_request WHERE id = $1")
+            .bind(newer_request_id)
+            .fetch_one(&tenant.tenant_pool)
+            .await
+            .expect("fetching the newer request's final_status failed");
+    assert_eq!(
+        newer_final_status.as_deref(),
+        Some("delivered"),
+        "the match must resolve to the comms_event row with the later occurred_at"
+    );
+
+    let older_final_status: Option<String> =
+        sqlx::query_scalar("SELECT final_status FROM comms_request WHERE id = $1")
+            .bind(older_request_id)
+            .fetch_one(&tenant.tenant_pool)
+            .await
+            .expect("fetching the older request's final_status failed");
+    assert_eq!(
+        older_final_status, None,
+        "the older comms_event row sharing the provider_ref must not be promoted against"
+    );
+
+    tenant.teardown().await;
+}
+
 // T-030 review finding F1: an orphan row whose own provider_ref is empty
 // must never match against the '' every dispatch-internal comms_event row
 // carries by default -- that is a sentinel, not a real reference, and

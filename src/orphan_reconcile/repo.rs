@@ -51,6 +51,11 @@ pub async fn list_pending(pool: &PgPool) -> Result<Vec<PendingOrphan>, sqlx::Err
 /// silently promoting a stranger's third-party payload under a stranger's
 /// DEK and mutating that stranger's `final_status` (T-030 review finding
 /// F1).
+///
+/// Orders by `occurred_at DESC` so the most recently occurred row wins when
+/// several `comms_event` rows legitimately share a `provider_ref` (e.g.
+/// `sent` and `delivered` on the same request) — otherwise `LIMIT 1` picks
+/// whichever Postgres happens to return first (T-030 review finding F5).
 pub async fn find_match(
     pool: &PgPool,
     provider_ref: &str,
@@ -61,6 +66,7 @@ pub async fn find_match(
         FROM comms_event ce
         JOIN comms_request cr ON cr.id = ce.comms_request_id
         WHERE ce.provider_ref = $1 AND ce.provider_ref <> ''
+        ORDER BY ce.occurred_at DESC
         LIMIT 1
         "#,
     )
