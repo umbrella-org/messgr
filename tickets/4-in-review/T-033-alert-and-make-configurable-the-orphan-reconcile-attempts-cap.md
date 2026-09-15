@@ -246,3 +246,4 @@ configuration" section (that section's field enumeration already excludes
   second age-out reason (an unrecognized `event_type` never reaches `find_match`) that this
   ticket's warn couldn't previously distinguish from a genuine no-match.
 - 2026-09-15 — READY → IN DEVELOPMENT: picked up
+- 2026-09-15 — IN DEVELOPMENT → IN REVIEW: acceptance green
