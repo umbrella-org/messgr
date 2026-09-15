@@ -5,6 +5,7 @@ use clap::{Parser, Subcommand};
 use messgr::config::Config;
 use messgr::customer_dek::lifecycle::pre_provision_for_tenant;
 use messgr::db;
+use messgr::idempotency_sweep::run_for_tenant as run_idempotency_sweep;
 use messgr::keystore::VaultKeyStore;
 use messgr::partition_lifecycle::lifecycle::run_for_tenant as run_partition_lifecycle;
 use messgr::producer::dev_pki;
@@ -102,6 +103,13 @@ enum Command {
     PartitionLifecycle {
         #[command(subcommand)]
         command: PartitionLifecycleCommand,
+    },
+    /// Deletes idempotency rows past their retention window (DESIGN.md §4.3:
+    /// "retained 30 days, swept nightly"). Meant to run on a schedule
+    /// (cron/systemd timer) — this binary does not daemonize or loop. T-029.
+    IdempotencySweep {
+        #[command(subcommand)]
+        command: IdempotencySweepCommand,
     },
     /// Message-volume counts by channel and status for one tenant (DESIGN.md
     /// §11.4: counts/metadata only, never payload content). Reads
@@ -372,6 +380,15 @@ enum PartitionLifecycleCommand {
     /// tenant's `tenant_config.retention_years` boundary. Skips the drop
     /// step entirely (never assumes a default) when the tenant has no
     /// `tenant_config` row.
+    Run {
+        #[arg(long = "tenant-slug")]
+        tenant_slug: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum IdempotencySweepCommand {
+    /// Delete every idempotency row whose expires_at is at or before now.
     Run {
         #[arg(long = "tenant-slug")]
         tenant_slug: String,
@@ -928,6 +945,27 @@ async fn run(
                 if report.retention_skipped {
                     println!("retention: skipped (tenant_config not set)");
                 }
+            }
+        },
+        // No Vault client is connected here either — idempotency holds no
+        // PII (the key and comms_request_id are opaque).
+        Command::IdempotencySweep { command } => match command {
+            IdempotencySweepCommand::Run { tenant_slug } => {
+                let deleted = run_idempotency_sweep(
+                    &control_pool,
+                    &config.control_database_url,
+                    &tenant_slug,
+                    chrono::Utc::now(),
+                    config.database_max_connections,
+                )
+                .await
+                .map_err(|err| {
+                    format!(
+                        "idempotency sweep failed for tenant {tenant_slug:?}: {err}"
+                    )
+                })?;
+
+                println!("deleted={deleted}");
             }
         },
         Command::Stats { tenant_slug, since } => {

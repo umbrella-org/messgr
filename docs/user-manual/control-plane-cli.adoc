@@ -118,6 +118,19 @@ partitions past the tenant's `tenant_config.retention_years` boundary. **If the 
 Safe to re-run; meant to be invoked on a schedule (cron/systemd timer), not run continuously --
 this binary does not daemonize.
 
+== Idempotency sweep
+
+[source,bash]
+----
+cargo run --bin messgr-control -- idempotency-sweep run --tenant-slug acme
+----
+
+`idempotency` (DESIGN.md §4.3) rows are retained 30 days from the write that created them, then
+swept. This command (T-029) deletes every row whose `expires_at` is at or before the time it
+runs, for one tenant. No Vault/Transit dependency -- the table holds no PII. Safe to re-run;
+meant to be invoked on a schedule (cron/systemd timer), not run continuously -- this binary does
+not daemonize.
+
 == Message stats
 
 [source,bash]
