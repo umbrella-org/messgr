@@ -1,6 +1,6 @@
 # messgr — Design
 
-**Version 5** · 2026-09-15 · `adc5e79` (T-034 review: §4.4's `event_type` comment was missing `discarded`)
+**Version 6** · 2026-09-15 · T-033 review: §4.10's `tenant_config` DDL and field-count prose were missing `kill_switch_release_rate` (T-016) and `reconcile_attempts_cap` (T-033)
 
 Centralized communications orchestration and audit ledger for customer messaging across SMS, email, and WhatsApp.
 

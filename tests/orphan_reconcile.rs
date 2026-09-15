@@ -13,6 +13,8 @@ use messgr::orphan_reconcile::reconcile::run_for_tenant;
 use messgr::profile::Profile;
 use messgr::tenant::pool::connect_tenant_pool;
 use messgr::tenant::provision::provision_tenant;
+use messgr::tenant_config::configure::set_tenant_config;
+use messgr::tenant_config::model::{TenantConfigInput, verification_mode};
 
 fn control_database_url() -> String {
     dotenvy::dotenv().ok();
@@ -201,6 +203,28 @@ async fn insert_orphan_event(
     .execute(pool)
     .await
     .expect("inserting orphan_event failed");
+}
+
+async fn set_reconcile_attempts_cap(tenant: &TestTenant, cap: i16) {
+    let input = TenantConfigInput {
+        retention_years: 7,
+        default_timezone: "Europe/London".to_string(),
+        default_locale: "en-GB".to_string(),
+        schedule_horizon_days: 90,
+        quota_day_boundary_tz: "Europe/London".to_string(),
+        verification_mode: verification_mode::OBSERVE.to_string(),
+        kill_switch_release_rate: 500,
+        reconcile_attempts_cap: cap,
+    };
+    set_tenant_config(
+        &tenant.control_pool,
+        &tenant.control_url,
+        &tenant.slug,
+        input,
+        "test-actor",
+    )
+    .await
+    .expect("setting tenant_config failed");
 }
 
 #[tokio::test]
@@ -448,6 +472,101 @@ async fn no_match_at_cap_deletes_the_row() {
     assert_eq!(
         remaining, 0,
         "a row past the reconcile_attempts cap must be deleted"
+    );
+
+    tenant.teardown().await;
+}
+
+// T-033: the reconcile-attempts cap now comes from tenant_config, not the
+// hardcoded default -- prove a configured value actually gates aging-out.
+#[tokio::test]
+async fn configured_reconcile_attempts_cap_is_honored() {
+    let tenant = TestTenant::provision("configured_cap").await;
+    let vault = vault_keystore();
+
+    set_reconcile_attempts_cap(&tenant, 2).await;
+
+    let orphan_id = Uuid::new_v4();
+    insert_orphan_event(
+        &tenant.tenant_pool,
+        orphan_id,
+        "never-matches",
+        "delivered",
+        Utc::now(),
+        None,
+        1, // one below the configured cap of 2 -- this run's increment reaches it
+    )
+    .await;
+
+    let report = run_for_tenant(
+        &tenant.control_pool,
+        &tenant.control_url,
+        &tenant.slug,
+        &vault,
+        5,
+    )
+    .await
+    .expect("reconcile run failed");
+    assert_eq!(report.reconciled, 0);
+    assert_eq!(
+        report.aged_out, 1,
+        "the configured cap of 2, not the hardcoded default of 5, must gate aging-out"
+    );
+    assert_eq!(report.still_pending, 0);
+
+    let remaining: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM orphan_event WHERE id = $1")
+            .bind(orphan_id)
+            .fetch_one(&tenant.tenant_pool)
+            .await
+            .expect("counting remaining orphan_event rows failed");
+    assert_eq!(
+        remaining, 0,
+        "a row past the configured reconcile_attempts cap must be deleted"
+    );
+
+    tenant.teardown().await;
+}
+
+// T-033: an unconfigured tenant (no tenant_config row) must still fall back
+// to the hardcoded default of 5.
+#[tokio::test]
+async fn unconfigured_tenant_still_ages_out_at_the_hardcoded_default() {
+    let tenant = TestTenant::provision("unconfigured_cap").await;
+    let vault = vault_keystore();
+
+    let orphan_id = Uuid::new_v4();
+    insert_orphan_event(
+        &tenant.tenant_pool,
+        orphan_id,
+        "never-matches",
+        "delivered",
+        Utc::now(),
+        None,
+        4, // one below the hardcoded default of 5
+    )
+    .await;
+
+    let report = run_for_tenant(
+        &tenant.control_pool,
+        &tenant.control_url,
+        &tenant.slug,
+        &vault,
+        5,
+    )
+    .await
+    .expect("reconcile run failed");
+    assert_eq!(report.aged_out, 1);
+
+    let remaining: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM orphan_event WHERE id = $1")
+            .bind(orphan_id)
+            .fetch_one(&tenant.tenant_pool)
+            .await
+            .expect("counting remaining orphan_event rows failed");
+    assert_eq!(
+        remaining, 0,
+        "an unconfigured tenant must still age out at the hardcoded default of 5"
     );
 
     tenant.teardown().await;

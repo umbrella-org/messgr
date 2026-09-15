@@ -40,6 +40,7 @@ fn sample_tenant_config() -> TenantConfigInput {
         quota_day_boundary_tz: "UTC".to_string(),
         verification_mode: verification_mode::OBSERVE.to_string(),
         kill_switch_release_rate: 500,
+        reconcile_attempts_cap: 5,
     }
 }
 

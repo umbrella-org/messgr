@@ -37,6 +37,7 @@ fn sample_input(retention_years: i32) -> TenantConfigInput {
         quota_day_boundary_tz: "Europe/London".to_string(),
         verification_mode: verification_mode::OBSERVE.to_string(),
         kill_switch_release_rate: 500,
+        reconcile_attempts_cap: 7,
     }
 }
 
@@ -173,6 +174,7 @@ async fn setting_and_loading_round_trips_every_typed_field() {
     assert_eq!(loaded.quota_day_boundary_tz, "Europe/London");
     assert_eq!(loaded.verification_mode, verification_mode::OBSERVE);
     assert_eq!(loaded.kill_switch_release_rate, 500);
+    assert_eq!(loaded.reconcile_attempts_cap, 7);
 
     tenant_pool.close().await;
     drop_test_tenant(&control_pool, &db_name, &slug).await;

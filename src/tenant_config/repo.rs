@@ -11,7 +11,7 @@ pub async fn load(pool: &PgPool) -> Result<Option<TenantConfig>, sqlx::Error> {
         r#"
         SELECT retention_years, default_timezone, default_locale, schedule_horizon_days,
                quota_day_boundary_tz, verification_mode,
-               kill_switch_release_rate
+               kill_switch_release_rate, reconcile_attempts_cap
         FROM tenant_config
         WHERE singleton
         "#,
@@ -31,7 +31,7 @@ pub async fn load_tx(
         r#"
         SELECT retention_years, default_timezone, default_locale, schedule_horizon_days,
                quota_day_boundary_tz, verification_mode,
-               kill_switch_release_rate
+               kill_switch_release_rate, reconcile_attempts_cap
         FROM tenant_config
         WHERE singleton
         "#,
@@ -74,9 +74,9 @@ pub async fn upsert_tx(
         INSERT INTO tenant_config (
             singleton, retention_years, default_timezone, default_locale,
             schedule_horizon_days, quota_day_boundary_tz, verification_mode,
-            kill_switch_release_rate
+            kill_switch_release_rate, reconcile_attempts_cap
         )
-        VALUES (true, $1, $2, $3, $4, $5, $6, $7)
+        VALUES (true, $1, $2, $3, $4, $5, $6, $7, $8)
         ON CONFLICT (singleton) DO UPDATE SET
             retention_years = EXCLUDED.retention_years,
             default_timezone = EXCLUDED.default_timezone,
@@ -84,7 +84,8 @@ pub async fn upsert_tx(
             schedule_horizon_days = EXCLUDED.schedule_horizon_days,
             quota_day_boundary_tz = EXCLUDED.quota_day_boundary_tz,
             verification_mode = EXCLUDED.verification_mode,
-            kill_switch_release_rate = EXCLUDED.kill_switch_release_rate
+            kill_switch_release_rate = EXCLUDED.kill_switch_release_rate,
+            reconcile_attempts_cap = EXCLUDED.reconcile_attempts_cap
         "#,
     )
     .bind(input.retention_years)
@@ -94,6 +95,7 @@ pub async fn upsert_tx(
     .bind(&input.quota_day_boundary_tz)
     .bind(&input.verification_mode)
     .bind(input.kill_switch_release_rate)
+    .bind(input.reconcile_attempts_cap)
     .execute(&mut **tx)
     .await
     .map(|_| ())
