@@ -246,3 +246,4 @@ scope).
 - 2026-09-15 — IN REVIEW → REWORK: F1: user manual now misstates the age-out invariant
 - 2026-09-15 — REWORK → IN REVIEW: F1 fixed
 - 2026-09-15 — IN REVIEW → DONE: scoped re-review clean: F1 fixed; 4 fixed inline, 1 noted, 1 folded
+- 2026-09-15 — merged to main (PR #49, adab8bc)

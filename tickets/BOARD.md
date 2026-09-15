@@ -84,7 +84,7 @@ Last updated: 2026-09-15
 | T-030 | Reconcile orphan_event rows into comms_event | yes — MERGED: PR #48 merged to `main` (`4e5d31e`) |
 | T-031 | TenantRegistry eviction: idle-TTL sweep with poll-loop cancellation | yes — MERGED: PR #40 merged to `main` (`ec2caae`) |
 | T-032 | Health endpoints for messgr-ingest and messgr-dispatcher | yes — MERGED: PR #46 merged to `main` (`3cd8b15`) |
-| T-034 | Validate orphan-reconcile event_type before promoting and make find_match deterministic | no — publish-gated |
+| T-034 | Validate orphan-reconcile event_type before promoting and make find_match deterministic | yes — merged to main (PR #49, adab8bc) |
 
 ## DROPPED
 
