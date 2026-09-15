@@ -28,8 +28,8 @@ tenant, on a nightly cadence. No gate-chain, consent, or encryption surface is t
 table holds no PII (the key and `comms_request_id` are opaque; the request payload itself lives
 in `comms_request`).
 
-T-022 rescopes `idempotency`'s primary key to `(producer_id, key)` — this ticket's sweep query
-is unaffected either way, since it deletes on `expires_at` alone.
+T-022 rescoped `idempotency`'s primary key to `(producer_id, key)` (already merged) — this
+ticket's sweep query is unaffected either way, since it deletes on `expires_at` alone.
 
 ## Implementation Plan
 
@@ -90,6 +90,7 @@ pub async fn run_for_tenant(
     control_database_url: &str,
     tenant_slug: &str,
     as_of: DateTime<Utc>,
+    max_connections: u32,
 ) -> Result<u64, SweepError> {
     let tenant = tenant_repo::find_by_slug(control_pool, tenant_slug)
         .await
@@ -101,7 +102,7 @@ pub async fn run_for_tenant(
         control_database_url,
         tenant.id,
         &tenant.database_name,
-        // reuse the same max-connections the caller's Config carries; see Task 2
+        max_connections,
     )
     .await
     .map_err(SweepError::Database)?
@@ -161,6 +162,7 @@ Register in `src/lib.rs`: add `pub mod idempotency_sweep;` (alphabetical, betwee
               &config.control_database_url,
               &tenant_slug,
               chrono::Utc::now(),
+              config.database_max_connections,
           )
           .await
           .map_err(|err| {
@@ -172,9 +174,11 @@ Register in `src/lib.rs`: add `pub mod idempotency_sweep;` (alphabetical, betwee
   },
   ```
 
-  `run_for_tenant`'s `connect_tenant_pool` call needs `config.database_max_connections` —
-  thread it through as a fifth parameter (matching `run_partition_lifecycle`'s own call site,
-  which reads `config.database_max_connections` from the same `Config` already in scope).
+  `run_for_tenant` takes `config.database_max_connections` as its fifth parameter and threads
+  it straight into `connect_tenant_pool`. (Applicability-gate note: `partition_lifecycle`
+  itself hardcodes `5` at this call site rather than reading `Config` — there is no existing
+  precedent to mirror here, so this ticket makes its own call to thread `Config` through
+  instead, since a hardcoded literal has no upside over the field that already exists for it.)
 
 #### Task 3 — docs (`docs/user-manual/control-plane-cli.adoc`)
 
@@ -257,3 +261,11 @@ just docs-check
 
 - 2026-09-04 — created (TO DO). source: field-use: spawned while refining T-022, which named this deferred, unowned sweep job (deferred by T-009 and T-011, neither claiming it) as a follow-up to file if no ticket already existed.
 - 2026-09-15 — TO DO → READY: plan complete
+- 2026-09-15 — plan amended inline: applicability-gate audit (independent sub-agent) found all
+  9 load-bearing assumptions still hold; two non-blocking findings fixed inline —
+  `run_for_tenant` signature/call site given the `max_connections` parameter Task 2 already
+  called for (Task 1's sample omitted it), and the Description's "T-022 rescopes" reworded to
+  past tense (T-022 is merged). A third finding — the `SweepError::UnknownTenant`
+  "matches partition_lifecycle" claim is loose (that error has no such variant) — is noted and
+  closed; the plan's own error shape is fine as written, no ticket change needed.
+- 2026-09-15 — READY → IN DEVELOPMENT: picked up

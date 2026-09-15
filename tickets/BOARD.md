@@ -13,10 +13,11 @@ Last updated: 2026-09-15
 
 ## IN DEVELOPMENT
 
-### messgr (0/1)
+### messgr (1/1)
 
 | id | title | depends-on |
 |---|---|---|
+| T-029 | Nightly idempotency-sweep job | [] |
 
 ## IN REVIEW
 
@@ -38,7 +39,6 @@ Last updated: 2026-09-15
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
-| T-029 | Nightly idempotency-sweep job | low | low | S | [] |  |
 | T-030 | Reconcile orphan_event rows into comms_event | low | medium | M | [] |  |
 
 ## TO DO (impact order, per child)
