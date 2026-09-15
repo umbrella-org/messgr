@@ -254,6 +254,43 @@ mod tests {
         assert!(!is_recognized_event_type("made_up_status"));
     }
 
+    /// T-034 review F4: `every_status_order_value_is_recognized` and
+    /// `every_absorbing_status_is_recognized` above are tautological against
+    /// `is_recognized_event_type`'s own implementation -- they can only fail
+    /// if the function stops consulting the two constants, not if the
+    /// constants themselves drift from the 12 values migration
+    /// `0004_ledger_outbox_schema.sql` documents. This pins the union
+    /// against that literal list, so dropping or adding a value to either
+    /// constant without updating the migration comment (or vice versa)
+    /// fails here.
+    #[test]
+    fn recognized_set_matches_the_documented_twelve_event_types() {
+        let mut recognized: Vec<&str> = STATUS_ORDER
+            .iter()
+            .chain(ABSORBING_STATUSES.iter())
+            .copied()
+            .collect();
+        recognized.sort_unstable();
+
+        let mut documented = [
+            "queued",
+            "sent",
+            "delivered",
+            "failed",
+            "bounced",
+            "read",
+            "complaint",
+            "expired",
+            "cancelled",
+            "suppressed_consent",
+            "suppressed_list",
+            "unverified_address",
+        ];
+        documented.sort_unstable();
+
+        assert_eq!(recognized, documented);
+    }
+
     #[test]
     fn an_empty_event_type_is_rejected() {
         assert!(!is_recognized_event_type(""));

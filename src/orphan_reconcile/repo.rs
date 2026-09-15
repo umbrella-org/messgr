@@ -56,6 +56,18 @@ pub async fn list_pending(pool: &PgPool) -> Result<Vec<PendingOrphan>, sqlx::Err
 /// several `comms_event` rows legitimately share a `provider_ref` (e.g.
 /// `sent` and `delivered` on the same request) — otherwise `LIMIT 1` picks
 /// whichever Postgres happens to return first (T-030 review finding F5).
+/// `comms_request_id DESC` breaks a further tie on `occurred_at` itself
+/// (two rows sharing both a `provider_ref` and a timestamp), so the choice
+/// stays fully deterministic rather than only "usually" (T-034 review).
+///
+/// `comms_event` is partitioned by `occurred_at` (§4.4) and `provider_ref`
+/// is not the partition key, so this `ORDER BY` can no longer let the
+/// planner stop at the first partition with a match the way a bare
+/// `LIMIT 1` could — it must consider every partition the per-partition
+/// `provider_ref` index (migration 0011) can return a row from before
+/// picking the most recent. Each such probe is a cheap index lookup, so
+/// this trades a little more planning work for the correctness this
+/// function now guarantees (T-034 review).
 pub async fn find_match(
     pool: &PgPool,
     provider_ref: &str,
@@ -66,7 +78,7 @@ pub async fn find_match(
         FROM comms_event ce
         JOIN comms_request cr ON cr.id = ce.comms_request_id
         WHERE ce.provider_ref = $1 AND ce.provider_ref <> ''
-        ORDER BY ce.occurred_at DESC
+        ORDER BY ce.occurred_at DESC, ce.comms_request_id DESC
         LIMIT 1
         "#,
     )
