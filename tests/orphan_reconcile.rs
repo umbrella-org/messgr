@@ -4,6 +4,11 @@
 
 use chrono::Utc;
 use sqlx::PgPool;
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::sync::Once;
+use tracing::field::{Field, Visit};
+use tracing_subscriber::layer::{Context, SubscriberExt};
 use uuid::Uuid;
 
 use messgr::db;
@@ -225,6 +230,87 @@ async fn set_reconcile_attempts_cap(tenant: &TestTenant, cap: i16) {
     )
     .await
     .expect("setting tenant_config failed");
+}
+
+#[derive(Default)]
+struct FieldMap(HashMap<String, String>);
+
+impl Visit for FieldMap {
+    fn record_str(&mut self, field: &Field, value: &str) {
+        self.0.insert(field.name().to_string(), value.to_string());
+    }
+    fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
+        self.0
+            .entry(field.name().to_string())
+            .or_insert_with(|| format!("{value:?}"));
+    }
+}
+
+thread_local! {
+    static CAPTURED_WARN_EVENTS: RefCell<Vec<HashMap<String, String>>> = const { RefCell::new(Vec::new()) };
+}
+
+struct CapturingLayer;
+
+impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for CapturingLayer {
+    fn on_event(&self, event: &tracing::Event<'_>, _ctx: Context<'_, S>) {
+        if *event.metadata().level() != tracing::Level::WARN {
+            return;
+        }
+        let mut fields = FieldMap::default();
+        event.record(&mut fields);
+        CAPTURED_WARN_EVENTS.with(|events| events.borrow_mut().push(fields.0));
+    }
+}
+
+static INIT_WARN_CAPTURE: Once = Once::new();
+
+/// Installs a single process-wide default subscriber, once, that captures
+/// every WARN-level event's fields into a thread-local buffer (T-035 rework,
+/// F1). A per-test `tracing::subscriber::set_default` looked simpler, but
+/// `reconcile.rs`'s shared `tracing::warn!` call site only ever decides its
+/// cached `Interest` once, lazily, the first time it fires anywhere in the
+/// process (`tracing_core::callsite::DefaultCallsite::register`) -- and that
+/// one-time decision reads whichever thread's dispatcher happens to be
+/// current *at that instant*. If the very first test to hit this line has no
+/// subscriber installed (the global no-op default), the callsite is cached
+/// `never` for the rest of the process, and no *other* test's own
+/// `set_default` call rebuilds this specific callsite's cache to fix it --
+/// `tracing-core`'s new-`Dispatch` rebuild does walk every *already
+/// registered* callsite, but only ones some test has already hit at least
+/// once. Reproduced live, roughly 1-in-10 runs under the default parallel
+/// test harness. Installing exactly one subscriber for the whole test
+/// binary's lifetime side-steps this: whichever test's `run_for_tenant` call
+/// happens to hit the line first, it always finds this permanently-installed
+/// subscriber already current (never the no-op default), so the callsite's
+/// one-time decision is always correct; even if some other, non-participating
+/// test raced ahead and had already cached it `never` before this subscriber
+/// was installed, the `Dispatch::new()` call inside `set_global_default`
+/// walks every already-registered callsite (this one included, by then) and
+/// recomputes it against the newly-installed subscriber, correcting it.
+fn init_warn_capture() {
+    INIT_WARN_CAPTURE.call_once(|| {
+        let subscriber = tracing_subscriber::registry().with(CapturingLayer);
+        tracing::subscriber::set_global_default(subscriber)
+            .expect("installing the test-wide WARN-capturing subscriber failed");
+    });
+}
+
+/// Clears this thread's captured WARN events (T-035) -- call immediately
+/// before the call under test. Threads are reused across tests by the
+/// default harness, so a stale event from an earlier test that happened to
+/// run on this same thread would otherwise still be sitting in the buffer.
+fn reset_warn_capture() {
+    init_warn_capture();
+    CAPTURED_WARN_EVENTS.with(|events| events.borrow_mut().clear());
+}
+
+/// Snapshots this thread's captured WARN events since the last
+/// `reset_warn_capture()` call (T-035). Captures are thread-local and
+/// `#[tokio::test]`'s single-threaded runtime keeps a whole test on one OS
+/// thread, so no test sees another's events.
+fn captured_warn_events() -> Vec<HashMap<String, String>> {
+    CAPTURED_WARN_EVENTS.with(|events| events.borrow().clone())
 }
 
 #[tokio::test]
@@ -498,6 +584,7 @@ async fn configured_reconcile_attempts_cap_is_honored() {
     )
     .await;
 
+    reset_warn_capture();
     let report = run_for_tenant(
         &tenant.control_pool,
         &tenant.control_url,
@@ -525,6 +612,31 @@ async fn configured_reconcile_attempts_cap_is_honored() {
         "a row past the configured reconcile_attempts cap must be deleted"
     );
 
+    let events = captured_warn_events();
+    let warn = events
+        .iter()
+        .find(|f| {
+            f.get("message")
+                .is_some_and(|m| m.contains("exceeded reconcile_attempts_cap"))
+        })
+        .expect("expected the age-out warn to fire");
+    assert_eq!(
+        warn.get("tenant_slug").map(String::as_str),
+        Some(tenant.slug.as_str())
+    );
+    assert_eq!(
+        warn.get("orphan_id").map(String::as_str),
+        Some(orphan_id.to_string()).as_deref()
+    );
+    assert_eq!(
+        warn.get("provider_ref").map(String::as_str),
+        Some("never-matches")
+    );
+    assert_eq!(
+        warn.get("event_type").map(String::as_str),
+        Some("delivered")
+    );
+
     tenant.teardown().await;
 }
 
@@ -547,6 +659,7 @@ async fn unconfigured_tenant_still_ages_out_at_the_hardcoded_default() {
     )
     .await;
 
+    reset_warn_capture();
     let report = run_for_tenant(
         &tenant.control_pool,
         &tenant.control_url,
@@ -567,6 +680,31 @@ async fn unconfigured_tenant_still_ages_out_at_the_hardcoded_default() {
     assert_eq!(
         remaining, 0,
         "an unconfigured tenant must still age out at the hardcoded default of 5"
+    );
+
+    let events = captured_warn_events();
+    let warn = events
+        .iter()
+        .find(|f| {
+            f.get("message")
+                .is_some_and(|m| m.contains("exceeded reconcile_attempts_cap"))
+        })
+        .expect("expected the age-out warn to fire");
+    assert_eq!(
+        warn.get("tenant_slug").map(String::as_str),
+        Some(tenant.slug.as_str())
+    );
+    assert_eq!(
+        warn.get("orphan_id").map(String::as_str),
+        Some(orphan_id.to_string()).as_deref()
+    );
+    assert_eq!(
+        warn.get("provider_ref").map(String::as_str),
+        Some("never-matches")
+    );
+    assert_eq!(
+        warn.get("event_type").map(String::as_str),
+        Some("delivered")
     );
 
     tenant.teardown().await;
