@@ -20,10 +20,11 @@ Last updated: 2026-09-15
 
 ## IN REVIEW
 
-### messgr (0/1)
+### messgr (1/1)
 
 | id | title | depends-on |
 |---|---|---|
+| T-030 | Reconcile orphan_event rows into comms_event | [] |
 
 ## REWORK
 
@@ -31,7 +32,6 @@ Last updated: 2026-09-15
 
 | id | title | open findings |
 |---|---|---|
-| T-030 | Reconcile orphan_event rows into comms_event | F1 blocking: find_match has no guard against the provider_ref='' sentinel |
 
 ## READY (impact order, per child)
 

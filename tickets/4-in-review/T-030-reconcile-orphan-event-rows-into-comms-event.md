@@ -377,6 +377,21 @@ batched into T-034 (orphan-reconcile input validation + match determinism).
 
 cost: estimated M, actual M
 
+### Rework fix record — round 1 (commit 63a62aa)
+
+Fixed F1 only, on `feat/T-030-orphan-event-reconcile` (branch tip before this fix: `d8ba736`).
+`find_match`'s WHERE clause gained `AND ce.provider_ref <> ''`
+(`src/orphan_reconcile/repo.rs`), so an orphan row with an empty `provider_ref` now finds no
+match instead of matching an arbitrary unrelated request. Added
+`empty_provider_ref_never_matches_the_dispatch_internal_sentinel`
+(`tests/orphan_reconcile.rs`), reproducing the exact failure mode found in review: a victim
+request with a dispatch-internal `comms_event` row (`provider_ref = ''`) alongside an unrelated
+orphan row whose own `provider_ref` is also `''` — asserts no match, the victim's
+`final_status` stays untouched, and the orphan row remains pending rather than being wrongly
+promoted. Re-ran verbatim: `cargo test --test orphan_reconcile` (5/5 pass, up from 4),
+`just build`/`just test` (full suite)/`just lint`/`just docs-check` all clean. No other files
+touched.
+
 ## History
 
 - 2026-09-04 — created (TO DO). source: review: T-022's review (finding F4) found `orphan_event`'s reconciliation job named in design but never ticketed, unlike the parallel idempotency-sweep gap T-022 itself filed as T-029 — filed here rather than left to drift a third time.
@@ -384,3 +399,4 @@ cost: estimated M, actual M
 - 2026-09-15 — READY → IN DEVELOPMENT: picked up
 - 2026-09-15 — IN DEVELOPMENT → IN REVIEW: acceptance green
 - 2026-09-15 — IN REVIEW → REWORK: F1 blocking: find_match has no guard against the provider_ref='' sentinel
+- 2026-09-15 — REWORK → IN REVIEW: findings fixed
