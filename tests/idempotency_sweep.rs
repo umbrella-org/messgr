@@ -124,6 +124,7 @@ async fn sweep_deletes_only_rows_past_their_expiry() {
 
     let as_of = Utc::now();
     insert_idempotency_row(&tenant_pool, as_of - Duration::days(1)).await;
+    insert_idempotency_row(&tenant_pool, as_of).await; // exactly at the boundary: `<=` must catch this
     insert_idempotency_row(&tenant_pool, as_of + Duration::days(1)).await;
 
     let deleted =
@@ -131,7 +132,7 @@ async fn sweep_deletes_only_rows_past_their_expiry() {
             .await
             .expect("sweep run failed");
 
-    assert_eq!(deleted, 1);
+    assert_eq!(deleted, 2);
 
     let remaining: i64 = sqlx::query_scalar("SELECT count(*) FROM idempotency")
         .fetch_one(&tenant_pool)
