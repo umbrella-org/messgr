@@ -306,3 +306,4 @@ or Description. No corrections needed.
 - 2026-09-15 — IN DEVELOPMENT → IN REVIEW: acceptance green
 - 2026-09-15 — IN REVIEW → DONE: review verdict: no blocking findings; 3 fixed inline (F3-F5), 2 noted (F1-F2), 1 spawned as T-035 (F6)
 - 2026-09-15 — MR opened: PR #50 (`feat/T-033-orphan-reconcile-cap-config`) against `main`, pending human merge.
+- 2026-09-15 — MERGED: PR #50 merged to `main` (`06ef25b`).
