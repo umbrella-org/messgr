@@ -268,18 +268,26 @@ static INIT_WARN_CAPTURE: Once = Once::new();
 /// Installs a single process-wide default subscriber, once, that captures
 /// every WARN-level event's fields into a thread-local buffer (T-035 rework,
 /// F1). A per-test `tracing::subscriber::set_default` looked simpler, but
-/// each call constructs a fresh `Dispatch`, and `tracing-core` rebuilds its
-/// *process-wide* per-callsite `Interest` cache every time a new `Dispatch`
-/// is constructed -- using a snapshot of the calling thread's *pre-install*
-/// default whenever it is the only live scoped dispatch, which is the common
-/// case here. Two tests independently calling `set_default` could re-poison
-/// each other's (and their own) cached interest for `reconcile.rs`'s shared
-/// `tracing::warn!` call site back to "never" moments before it fires --
-/// reproduced live, roughly 1-in-10 runs under the default parallel test
-/// harness. Installing exactly one subscriber for the whole test binary's
-/// lifetime means the callsite's own one-time, lazily-triggered registration
-/// (on its first hit, from any test) sees the final, permanently-installed
-/// subscriber and is never rebuilt against a different one afterward.
+/// `reconcile.rs`'s shared `tracing::warn!` call site only ever decides its
+/// cached `Interest` once, lazily, the first time it fires anywhere in the
+/// process (`tracing_core::callsite::DefaultCallsite::register`) -- and that
+/// one-time decision reads whichever thread's dispatcher happens to be
+/// current *at that instant*. If the very first test to hit this line has no
+/// subscriber installed (the global no-op default), the callsite is cached
+/// `never` for the rest of the process, and no *other* test's own
+/// `set_default` call rebuilds this specific callsite's cache to fix it --
+/// `tracing-core`'s new-`Dispatch` rebuild does walk every *already
+/// registered* callsite, but only ones some test has already hit at least
+/// once. Reproduced live, roughly 1-in-10 runs under the default parallel
+/// test harness. Installing exactly one subscriber for the whole test
+/// binary's lifetime side-steps this: whichever test's `run_for_tenant` call
+/// happens to hit the line first, it always finds this permanently-installed
+/// subscriber already current (never the no-op default), so the callsite's
+/// one-time decision is always correct; even if some other, non-participating
+/// test raced ahead and had already cached it `never` before this subscriber
+/// was installed, the `Dispatch::new()` call inside `set_global_default`
+/// walks every already-registered callsite (this one included, by then) and
+/// recomputes it against the newly-installed subscriber, correcting it.
 fn init_warn_capture() {
     INIT_WARN_CAPTURE.call_once(|| {
         let subscriber = tracing_subscriber::registry().with(CapturingLayer);
