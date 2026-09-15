@@ -200,3 +200,4 @@ surface changes.
   dependency and can capture the event without a new one.
 - 2026-09-15 — TO DO → READY: plan complete
 - 2026-09-15 — READY → IN DEVELOPMENT: picked up
+- 2026-09-15 — IN DEVELOPMENT → IN REVIEW: acceptance green
