@@ -38,6 +38,7 @@ Last updated: 2026-09-15
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
+| T-034 | Validate orphan-reconcile event_type before promoting and make find_match deterministic | medium | low | S | [] |  |
 
 ## TO DO (impact order, per child)
 
@@ -45,7 +46,6 @@ Last updated: 2026-09-15
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
-| T-034 | Validate orphan-reconcile event_type before promoting and make find_match deterministic | medium | low | S | [] |  |
 | T-033 | Alert and make configurable the orphan-reconcile attempts cap | low-medium | low | S | [] |  |
 
 ## DONE
