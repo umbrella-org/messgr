@@ -4,6 +4,10 @@
 
 use chrono::Utc;
 use sqlx::PgPool;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use tracing::field::{Field, Visit};
+use tracing_subscriber::layer::{Context, SubscriberExt};
 use uuid::Uuid;
 
 use messgr::db;
@@ -225,6 +229,45 @@ async fn set_reconcile_attempts_cap(tenant: &TestTenant, cap: i16) {
     )
     .await
     .expect("setting tenant_config failed");
+}
+
+#[derive(Default)]
+struct FieldMap(HashMap<String, String>);
+
+impl Visit for FieldMap {
+    fn record_str(&mut self, field: &Field, value: &str) {
+        self.0.insert(field.name().to_string(), value.to_string());
+    }
+    fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
+        self.0
+            .entry(field.name().to_string())
+            .or_insert_with(|| format!("{value:?}"));
+    }
+}
+
+type CapturedWarnEvents = Arc<Mutex<Vec<HashMap<String, String>>>>;
+
+struct CapturingLayer(CapturedWarnEvents);
+
+impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for CapturingLayer {
+    fn on_event(&self, event: &tracing::Event<'_>, _ctx: Context<'_, S>) {
+        if *event.metadata().level() != tracing::Level::WARN {
+            return;
+        }
+        let mut fields = FieldMap::default();
+        event.record(&mut fields);
+        self.0.lock().unwrap().push(fields.0);
+    }
+}
+
+/// Installs a subscriber that captures every WARN-level event's fields for
+/// the lifetime of the returned guard (T-035) -- drop it (or let it fall out
+/// of scope) once the call under test has returned.
+fn capture_warn_events() -> (tracing::subscriber::DefaultGuard, CapturedWarnEvents) {
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let subscriber =
+        tracing_subscriber::registry().with(CapturingLayer(events.clone()));
+    (tracing::subscriber::set_default(subscriber), events)
 }
 
 #[tokio::test]
@@ -498,6 +541,7 @@ async fn configured_reconcile_attempts_cap_is_honored() {
     )
     .await;
 
+    let (_guard, events) = capture_warn_events();
     let report = run_for_tenant(
         &tenant.control_pool,
         &tenant.control_url,
@@ -525,6 +569,33 @@ async fn configured_reconcile_attempts_cap_is_honored() {
         "a row past the configured reconcile_attempts cap must be deleted"
     );
 
+    {
+        let events = events.lock().unwrap();
+        let warn = events
+            .iter()
+            .find(|f| {
+                f.get("message")
+                    .is_some_and(|m| m.contains("exceeded reconcile_attempts_cap"))
+            })
+            .expect("expected the age-out warn to fire");
+        assert_eq!(
+            warn.get("tenant_slug").map(String::as_str),
+            Some(tenant.slug.as_str())
+        );
+        assert_eq!(
+            warn.get("orphan_id").map(String::as_str),
+            Some(orphan_id.to_string()).as_deref()
+        );
+        assert_eq!(
+            warn.get("provider_ref").map(String::as_str),
+            Some("never-matches")
+        );
+        assert_eq!(
+            warn.get("event_type").map(String::as_str),
+            Some("delivered")
+        );
+    }
+
     tenant.teardown().await;
 }
 
@@ -547,6 +618,7 @@ async fn unconfigured_tenant_still_ages_out_at_the_hardcoded_default() {
     )
     .await;
 
+    let (_guard, events) = capture_warn_events();
     let report = run_for_tenant(
         &tenant.control_pool,
         &tenant.control_url,
@@ -568,6 +640,33 @@ async fn unconfigured_tenant_still_ages_out_at_the_hardcoded_default() {
         remaining, 0,
         "an unconfigured tenant must still age out at the hardcoded default of 5"
     );
+
+    {
+        let events = events.lock().unwrap();
+        let warn = events
+            .iter()
+            .find(|f| {
+                f.get("message")
+                    .is_some_and(|m| m.contains("exceeded reconcile_attempts_cap"))
+            })
+            .expect("expected the age-out warn to fire");
+        assert_eq!(
+            warn.get("tenant_slug").map(String::as_str),
+            Some(tenant.slug.as_str())
+        );
+        assert_eq!(
+            warn.get("orphan_id").map(String::as_str),
+            Some(orphan_id.to_string()).as_deref()
+        );
+        assert_eq!(
+            warn.get("provider_ref").map(String::as_str),
+            Some("never-matches")
+        );
+        assert_eq!(
+            warn.get("event_type").map(String::as_str),
+            Some("delivered")
+        );
+    }
 
     tenant.teardown().await;
 }
