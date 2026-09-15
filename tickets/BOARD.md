@@ -13,10 +13,11 @@ Last updated: 2026-09-15
 
 ## IN DEVELOPMENT
 
-### messgr (0/1)
+### messgr (1/1)
 
 | id | title | depends-on |
 |---|---|---|
+| T-034 | Validate orphan-reconcile event_type before promoting and make find_match deterministic | [] |
 
 ## IN REVIEW
 
@@ -38,7 +39,6 @@ Last updated: 2026-09-15
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
-| T-034 | Validate orphan-reconcile event_type before promoting and make find_match deterministic | medium | low | S | [] |  |
 | T-033 | Alert and make configurable the orphan-reconcile attempts cap | low | low | S | [] |  |
 
 ## TO DO (impact order, per child)

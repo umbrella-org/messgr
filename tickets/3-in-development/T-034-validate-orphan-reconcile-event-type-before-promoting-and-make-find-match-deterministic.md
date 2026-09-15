@@ -179,3 +179,4 @@ enforces in code; nothing there changes.
 
 - 2026-09-15 — created (TO DO). source: review: T-030's review (findings F4, F5) found orphan_reconcile promotes an unvalidated event_type into comms_request.final_status and find_match's row choice is nondeterministic when provider_ref is shared — batched into one follow-up ticket.
 - 2026-09-15 — TO DO → READY: plan complete
+- 2026-09-15 — READY → IN DEVELOPMENT: picked up
