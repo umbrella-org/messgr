@@ -309,3 +309,6 @@ new scope)
   See `## Review` for full detail.
 - 2026-09-15 — REWORK → IN REVIEW: F1 fixed
 - 2026-09-15 — IN REVIEW → DONE: scoped re-review clean, F2 fixed inline
+- 2026-09-15 — pushed `feat/T-035-orphan-reconcile-warn-coverage` and opened PR #51
+  (https://github.com/umbrella-org/messgr/pull/51) against `main`, 3 commits kept as history
+  (not squashed, root-path default). Not yet merged — merging is the human's.
