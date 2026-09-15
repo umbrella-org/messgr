@@ -235,7 +235,64 @@ configuration" section (that section's field enumeration already excludes
 
 ## Review
 
-<!-- empty until IN REVIEW -->
+**Reviewer independence (step 0):** delegated. The orchestrating reviewer authored this branch
+in this same session, so steps 2-4a were run by a fresh sub-agent with no memory of writing the
+code, briefed adversarially against the ticket, `AGENTS.md`'s hard invariants, `DESIGN.md`
+§4.4/§10, and this project's review addendum. Every delegated finding below was re-verified by
+hand against the actual diff/files before being recorded (protocol step 0: "delegation buys
+independence, not accuracy").
+
+**Step 2 (Implementation audit):** all tasks met. Acceptance test re-run verbatim on the branch:
+`just build`, `just test` (every suite green, including the new `orphan_reconcile.rs`/
+`tenant_config.rs`/`control.rs` cases), `just lint`, `just docs-check` — all clean. Migration
+0012 confirmed as the next-free number and shaped like 0010's precedent. Plumbing parity with
+`kill_switch_release_rate` verified site by site across `model.rs`, `repo.rs`, `configure.rs`,
+`control.rs`. All confirmed decisions honoured, including the `event_type` amendment. Addendum
+Step 2 items 1-8 checked explicitly; none triggered (no NULL-distinctness hole, no lease/lock,
+no secrets, no new PII table, new column has a reader, no hard-invariant touch, no
+justfile/workflow diff).
+
+**Step 3 (Quality audit):** mutation-tested `configured_reconcile_attempts_cap_is_honored` by
+hand — reverting the cap resolution to the hardcoded default flips `report.aged_out` from 1 to 0
+and the assertion goes red, confirming it is not vacuous. No security or error-handling defects
+found beyond F1/F2/F6 below.
+
+**Step 4 (Consistency audit):** no caller/callee contract drift — `run(...)`'s new params have
+one call site, updated; `run_for_tenant`'s public signature is unchanged so no test call site
+needed edits. Project-wide grep confirms zero surviving references to the old
+`RECONCILE_ATTEMPTS_CAP` name. F3 is the one consistency defect found (a governing document, not
+this branch's own code).
+
+**Step 4a (Documentation audit):** coverage present at the right place (mirrors
+`kill-switches.adoc`'s point-of-use convention); `just docs-check` clean; whole-tree sweep found
+F4 and F5.
+
+**Step 4b (Docs-readability pass):** conscious skip — no docs-readability reviewer configured in
+this host environment.
+
+| id | severity | class | disposition | description | evidence | suggestion |
+|---|---|---|---|---|---|---|
+| F1 | non-blocking | plan-wrong | noted | Decision 4's rationale for `range(1..)` doesn't hold: the age-out predicate is `orphan.reconcile_attempts + 1 >= cap`, so `cap = 1` ages out a fresh row (`reconcile_attempts = 0`) on its very first pass with zero retries — behaviourally identical to the `cap = 0` the decision banned. | `src/bin/control.rs` (`.range(1..)`) vs `src/orphan_reconcile/reconcile.rs:208` | If "at least one retry" is the intent, the bound should be `range(2..)`; otherwise amend decision 4's stated reason. |
+| F2 | non-blocking | design | noted | `--reconcile-attempts-cap` has no upper bound (`range(1..)`, i16); a very large cap reinstates the "permanent plaintext-PII table" DESIGN.md §4.4's correction note exists to prevent, and the value is settable well past what "a small bound" means. | `src/bin/control.rs`; `development/design/03-data-model.md` §4.4/§10 correction note | Bound the range (e.g. `range(2..=100)`) in a future pass. |
+| F3 | non-blocking | stale-xref | fixed inline | `DESIGN.md` §4.10's canonical `tenant_config` DDL and its "T-007 ships only ... six fields" prose predated `kill_switch_release_rate` (T-016) and now also `reconcile_attempts_cap` (T-033); this branch made the drift worse. | `development/design/03-data-model.md` §4.10 (pre-fix) | Fixed in this review: both columns added to the DDL block and the prose corrected; `DESIGN.md`'s version stamp bumped to 6. |
+| F4 | non-blocking | docs-gap | fixed inline | The CLI manual said the age-out warn names "the tenant, orphan id, and provider_ref", omitting `event_type` — the field decision 5 (amended 2026-09-15 from T-034's F7) added specifically so a paged operator can distinguish a genuine no-match from an `event_type` rejection. The docs task text predated that amendment and was transcribed unchanged. | `docs/user-manual/control-plane-cli.adoc` (pre-fix) vs `src/orphan_reconcile/reconcile.rs:210-217` | Fixed in this review: `event_type` added to the sentence. |
+| F5 | non-blocking | docs-gap | fixed inline | `control-plane-cli.adoc`'s "Tenant configuration" section still said `tenant_config` was scoped to "the six fields above" and showed neither tunable flag in its example — stale since T-016, worsened by this ticket adding an eighth field. | `docs/user-manual/control-plane-cli.adoc` "Tenant configuration" section (pre-fix) | Fixed in this review: prose now points to each tunable's own point-of-use documentation, following the same convention the ticket's own docs task used. |
+| F6 | non-blocking | test-gap | new ticket (T-035) | Nothing asserts the age-out `tracing::warn!` actually fires — the ticket's headline Outcome has zero coverage. The plan's stated reason for skipping this (needing the `tracing_test` crate) doesn't hold: `tracing-subscriber` is already a direct dependency and can capture the event with no new dependency. Separately, `unconfigured_tenant_still_ages_out_at_the_hardcoded_default` is near-duplicate of the pre-existing `no_match_at_cap_deletes_the_row`. | `Cargo.toml`; `tests/orphan_reconcile.rs` | Filed as T-035 (`spawned-by: T-033`), batched as a single follow-up. |
+
+**Disposition summary:** fixed inline — F3, F4, F5; noted — F1, F2; new ticket — F6 (T-035).
+
+cost: estimated S, actual S
+
+**Governing-document reconciliation (step 7):** `DESIGN.md` §4.10 amended (F3) and its version
+stamp bumped to 6. Filing T-035 collided with a ticket-number placeholder `DESIGN.md` and the CLI
+manual had been using for a not-yet-filed OIDC ticket (`development/design/03-data-model.md`
+§4.10, `docs/user-manual/control-plane-cli.adoc`); both forward-references were corrected in the
+same review to stop naming a number that now belongs to something else. `tickets/6-done/T-007-...`
+keeps its original "T-035" mention as-is — a done ticket's own historical prose, not a live
+governing document.
+
+**Impact sweep (step 8):** no ticket in `1-to-do/` or `2-ready/` references T-033 in `depends-on:`
+or Description. No corrections needed.
 
 ## History
 
@@ -247,3 +304,4 @@ configuration" section (that section's field enumeration already excludes
   ticket's warn couldn't previously distinguish from a genuine no-match.
 - 2026-09-15 — READY → IN DEVELOPMENT: picked up
 - 2026-09-15 — IN DEVELOPMENT → IN REVIEW: acceptance green
+- 2026-09-15 — IN REVIEW → DONE: review verdict: no blocking findings; 3 fixed inline (F3-F5), 2 noted (F1-F2), 1 spawned as T-035 (F6)
