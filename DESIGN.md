@@ -1,6 +1,6 @@
 # messgr — Design
 
-**Version 3** · 2026-09-03 · `0d8f82d` (T-019 review: per-tenant storage sizing, cluster and restore-RTO limits)
+**Version 4** · 2026-09-15 · `85e231e` (T-029 review: §4.3 no longer says the idempotency sweep is unbuilt)
 
 Centralized communications orchestration and audit ledger for customer messaging across SMS, email, and WhatsApp.
 

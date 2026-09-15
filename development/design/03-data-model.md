@@ -124,7 +124,7 @@ CREATE TABLE idempotency (
 );
 ```
 
-Retained 30 days, swept nightly (the sweep job itself is not yet built — track it against one ticket, not two; see build order). A retried POST returns the original `comms_request_id` with `200`, not a duplicate send.
+Retained 30 days, swept nightly (`messgr-control idempotency-sweep run`, T-029). A retried POST returns the original `comms_request_id` with `200`, not a duplicate send.
 
 **Correction: the key was a bare `PRIMARY KEY (key)`, scoped to nobody.** Idempotency keys are caller-supplied (§2.4 step 1). A bare `text PRIMARY KEY` means two different producers who happen to choose the same key — a sequential counter, a UUID library seeded the same way, a copy-pasted test value — collide on each other's rows: the second producer's request silently returns the *first* producer's `comms_request_id`. Idempotency is a per-producer contract, not a platform-wide namespace; the key is now `(producer_id, key)`, matching how quotas and kill switches already scope to the authenticated caller (§4.9).
 
