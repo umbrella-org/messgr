@@ -41,6 +41,16 @@ pub async fn list_pending(pool: &PgPool) -> Result<Vec<PendingOrphan>, sqlx::Err
 /// `PRIMARY KEY (created_at, id)`, but is generated as a fresh UUID per
 /// request, so joining on `id` alone (without `created_at`) is safe in
 /// practice and matches this ticket's own Description.
+///
+/// Excludes `ce.provider_ref = ''` — that is not a real provider reference,
+/// it is the default every dispatch-internal `comms_event` row carries when
+/// the provider gave none (migration 0004's own comment on the column).
+/// Without this guard, an `orphan_event` row that itself ends up with an
+/// empty `provider_ref` (a malformed receipt, say) would match an
+/// arbitrary, unrelated `comms_request` here instead of finding nothing —
+/// silently promoting a stranger's third-party payload under a stranger's
+/// DEK and mutating that stranger's `final_status` (T-030 review finding
+/// F1).
 pub async fn find_match(
     pool: &PgPool,
     provider_ref: &str,
@@ -50,7 +60,7 @@ pub async fn find_match(
         SELECT cr.id, cr.created_at, cr.customer_id, cr.final_status
         FROM comms_event ce
         JOIN comms_request cr ON cr.id = ce.comms_request_id
-        WHERE ce.provider_ref = $1
+        WHERE ce.provider_ref = $1 AND ce.provider_ref <> ''
         LIMIT 1
         "#,
     )

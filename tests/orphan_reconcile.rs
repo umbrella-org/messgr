@@ -452,3 +452,90 @@ async fn no_match_at_cap_deletes_the_row() {
 
     tenant.teardown().await;
 }
+
+// T-030 review finding F1: an orphan row whose own provider_ref is empty
+// must never match against the '' every dispatch-internal comms_event row
+// carries by default -- that is a sentinel, not a real reference, and
+// matching on it would promote an unrelated stranger's request.
+#[tokio::test]
+async fn empty_provider_ref_never_matches_the_dispatch_internal_sentinel() {
+    let tenant = TestTenant::provision("empty_ref").await;
+    let vault = vault_keystore();
+
+    // A real customer's request, with a dispatch-internal comms_event row
+    // (provider_ref defaults to '' for these -- migration 0004).
+    let victim_request_id = Uuid::new_v4();
+    let victim_customer_id = Uuid::new_v4();
+    let created_at = Utc::now();
+    insert_comms_request(
+        &tenant.tenant_pool,
+        victim_request_id,
+        victim_customer_id,
+        created_at,
+        None,
+    )
+    .await;
+    sqlx::query(
+        "INSERT INTO comms_event (comms_request_id, customer_id, occurred_at, event_type) \
+         VALUES ($1, $2, $3, 'queued')",
+    )
+    .bind(victim_request_id)
+    .bind(victim_customer_id)
+    .bind(Utc::now())
+    .execute(&tenant.tenant_pool)
+    .await
+    .expect("inserting the victim's dispatch-internal comms_event failed");
+
+    // An unrelated orphan row that itself ends up with an empty
+    // provider_ref (a malformed receipt, say).
+    let orphan_id = Uuid::new_v4();
+    insert_orphan_event(
+        &tenant.tenant_pool,
+        orphan_id,
+        "",
+        "delivered",
+        Utc::now(),
+        Some(serde_json::json!({"secret": "unrelated-stranger-payload"})),
+        0,
+    )
+    .await;
+
+    let report = run_for_tenant(
+        &tenant.control_pool,
+        &tenant.control_url,
+        &tenant.slug,
+        &vault,
+        5,
+    )
+    .await
+    .expect("reconcile run failed");
+    assert_eq!(
+        report.reconciled, 0,
+        "an empty provider_ref must never be treated as a match"
+    );
+    assert_eq!(report.still_pending, 1);
+
+    let victim_final_status: Option<String> =
+        sqlx::query_scalar("SELECT final_status FROM comms_request WHERE id = $1")
+            .bind(victim_request_id)
+            .fetch_one(&tenant.tenant_pool)
+            .await
+            .expect("fetching the victim's final_status failed");
+    assert_eq!(
+        victim_final_status, None,
+        "the unrelated victim's final_status must be untouched"
+    );
+
+    let orphan_still_present: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM orphan_event WHERE id = $1")
+            .bind(orphan_id)
+            .fetch_one(&tenant.tenant_pool)
+            .await
+            .expect("counting the orphan row failed");
+    assert_eq!(
+        orphan_still_present, 1,
+        "the orphan row must remain pending, not be wrongly promoted"
+    );
+
+    tenant.teardown().await;
+}
