@@ -209,11 +209,12 @@ surface changes.
 | id | severity | class | disposition | description | evidence | suggestion |
 |---|---|---|---|---|---|---|
 | F1 | blocking | correctness | — | The two touched tests are flaky under the default parallel test harness: `tracing::subscriber::set_default` interacts with `tracing-core`'s process-wide, per-callsite `Interest` cache, not a per-thread one. `no_match_at_cap_deletes_the_row` (and any other concurrently-running test) exercises the exact same `tracing::warn!` call site (`reconcile.rs:210`) with no subscriber installed; if its thread reaches that callsite first, tracing caches `Interest::never()` for it globally, and neither touched test's `CapturingLayer::on_event` is ever invoked again for the rest of the process — even though the warn genuinely fires, on the correct thread, with the guard correctly installed. | Reproduced live (real Postgres/Vault, not the delegated reviewer's sandbox): `unconfigured_tenant_still_ages_out_at_the_hardcoded_default` failed 1/25, 1/14, then 1/6 direct-binary runs (`target/debug/deps/orphan_reconcile-*`, no cargo overhead), always the same test, always `tests/orphan_reconcile.rs:6xx: expected the age-out warn to fire`. Added temporary thread-id diagnostics (reverted, not committed): on a reproduced failure, the capture guard's install thread and the `tracing::warn!` call-site thread were **identical** (`ThreadId(9)` both), yet `CapturingLayer::on_event` never printed — ruling out a cross-thread/false-guard-scope bug and pointing at the interest-cache race. Never reproduces running either touched test alone (40+ isolated runs, 0 failures). | Root cause is the interaction between per-test `set_default` and the global per-callsite interest cache — a known class of hazard with this pattern under a parallel test harness. I tried the standard documented mitigation (`tracing::callsite::rebuild_interest_cache()` called right after `set_default` inside `capture_warn_events()`) and stress-tested it (80 direct-binary runs): it did **not** reliably fix the race and the failure rate was *higher* (9/80) than baseline, so it is not a safe drop-in fix — whoever reworks this needs their own stress-test loop (dozens of direct binary runs, not one green `cargo test`) to validate whatever fix is chosen before trusting it. Candidates worth evaluating: serializing the tests that share this call site (`serial_test`'s `#[serial]`, a new dev-dependency — arguably justified now, given this specific documented hazard with the dependency-free approach); or running just these two tests with `--test-threads=1`-equivalent isolation. |
+| F2 | non-blocking | docs-gap | fixed inline | The round-1 rework fix's own doc comment on `init_warn_capture()`, its commit message (45edd45), and this ticket's "Rework fix record — round 1" all misattribute the race mechanism: they blame `Dispatch::new()`'s own rebuild taking a `has_just_one`/`JustOne` pre-install-snapshot shortcut on every `set_default` call. `Dispatchers::register_dispatch` (invoked from every `Dispatch::new()`) always builds `Rebuilder::Write` directly and never takes that shortcut; it's only reachable from a callsite's own one-time lazy self-registration. The fix itself is unaffected — closes the real hazard either way — only the stated reasoning was wrong. | Found by the scoped re-review's independent re-read of `tracing-core-0.1.36/src/callsite.rs` (`Dispatchers::register_dispatch`, lines ~551-558, vs. `Dispatchers::rebuilder`, lines ~544-549) — confirmed by hand against the same source before recording. | Doc comment corrected in place (commit 57131f6); this ticket's round-1 record left as the historical record, with a dated correction appended below it rather than rewritten, per `AGENTS.md`'s "Corrections on the record" — say so plainly, don't quietly patch. The delegated reviewer also suggested adding an explicit `tracing::callsite::rebuild_interest_cache()` call at the end of the `Once` block as extra insurance; declined as redundant — `set_global_default`'s own `Dispatch::new()` call already performs the equivalent full-registry rebuild, which is precisely why a callsite poisoned before the global install still gets corrected (see the correction note below). |
 
 cost: estimated S, actual S
 
-**Disposition summary:** 1 blocking (F1, correctness) — ticket moves to `5-rework/` for a
-scoped fix. No non-blocking findings.
+**Round 1 disposition summary:** 1 blocking (F1, correctness) — ticket moved to `5-rework/` for a
+scoped fix. No non-blocking findings that round.
 
 ### Rework fix record — round 1 (commit 45edd45)
 
@@ -252,6 +253,47 @@ with **0 failures** (100 + 150 runs), against a pre-fix baseline that reproduced
 clean) — both touched tests correctly went red (`expected the age-out warn to fire`), confirming
 the assertion still can fail.
 
+#### Scoped re-review — round 1's fix (commit 45edd45)
+
+- [x] Reviewer independence settled (step 0): **delegated** — the reviewing agent authored the
+  fix commit in this same session, so the scoped audit (F1's fix + the diff that closed it) was
+  run by a fresh, independent sub-agent, briefed adversarially. Its findings were re-verified by
+  hand before recording.
+- [x] Scoped implementation audit: fix re-read against F1's evidence; independently re-ran the
+  stress test live (150 direct-binary runs, 0 failures — corroborates round 1's own 250-run,
+  0-failure claim, 400 combined); confirmed `just build`/`just lint` clean; confirmed no stale
+  references to the old `capture_warn_events`/`CapturedWarnEvents`/`DefaultGuard` API anywhere
+  in the repo; confirmed `reset_warn_capture()` is called immediately before `.await`ing
+  `run_for_tenant` in both touched tests with no intervening yield point, and that no code path
+  under test uses `tokio::spawn`, so the thread-local capture cannot see another task's events.
+  See F2 for the one finding.
+
+**Correction (found during the scoped re-review below, commit 57131f6):** the paragraph above's
+root-cause mechanism is wrong on the specific attribution. `Dispatchers::register_dispatch`
+(invoked from every `Dispatch::new()`, including `set_default`'s) always builds
+`Rebuilder::Write` directly against the live dispatcher list — it never takes the
+`has_just_one`/`JustOne` pre-install-snapshot shortcut described above; that shortcut is reachable
+only from a callsite's own one-time, lazily-triggered self-registration
+(`DefaultCallsite::register`, `tracing-core`'s `callsite.rs`). The real hazard: `reconcile.rs`'s
+shared warn call site decides its cached interest exactly once, the first time it fires anywhere
+in the process, based on whichever dispatcher is current *at that instant* — if that is the
+global no-op default (no test has installed anything yet), it is cached `never` for the rest of
+the process. The chosen fix (one globally-installed subscriber) still correctly closes this real
+hazard, for a related reason also given here: the single `Dispatch::new()` call inside
+`set_global_default` walks every *already-registered* callsite and recomputes its interest
+against the newly-installed subscriber, correcting even a callsite poisoned before that install
+happened. Net effect on the fix's correctness: none — the mechanism was misattributed, not the
+conclusion. Doc comment corrected in place per this project's stated preference for fixing a
+reasoning error on the record rather than patching around it quietly (`AGENTS.md`, "Corrections
+on the record").
+
+**Scoped re-review disposition summary:** 0 blocking. 1 non-blocking (F2, docs-gap, fixed
+inline). No new tickets spawned — F2 was fixed in this same review, not deferred. Ticket proceeds
+to `6-done/`.
+
+cost: estimated S, actual S (unchanged from round 1 — the correction was a doc-comment fix, not
+new scope)
+
 ## History
 
 - 2026-09-15 — created (TO DO). source: review: T-033's review (finding F6) found the age-out
@@ -266,3 +308,4 @@ the assertion still can fail.
   `set_default`); reproduced live, root-caused, one candidate fix tried and found insufficient.
   See `## Review` for full detail.
 - 2026-09-15 — REWORK → IN REVIEW: F1 fixed
+- 2026-09-15 — IN REVIEW → DONE: scoped re-review clean, F2 fixed inline
