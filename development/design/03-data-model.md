@@ -413,9 +413,10 @@ CREATE TABLE tenant_config (
                                                           -- admits after a switch releases (§5.2, T-016)
     reconcile_attempts_cap smallint NOT NULL DEFAULT 5,  -- orphan_event reconcile-attempts bound
                                                           -- before age-out deletes the row (§4.4/§10, T-033)
-    oidc_issuer         text,                   -- the tenant's own IdP (§11.1) — not yet created, added by T-035
-    oidc_client_id      text,                   -- not yet created, added by T-035
-    oidc_group_claim    text,                   -- not yet created, added by T-035
+    oidc_issuer         text,                   -- the tenant's own IdP (§11.1) — not yet created,
+                                                 -- added by a future OIDC ticket (not yet filed)
+    oidc_client_id      text,                   -- not yet created, added by that same ticket
+    oidc_group_claim    text,                   -- not yet created, added by that same ticket
     PRIMARY KEY (singleton)
 );
 
@@ -443,8 +444,10 @@ T-007 ships only `tenant_config`'s `retention_years`, `default_timezone`, `defau
 `schedule_horizon_days`, `quota_day_boundary_tz`, and `verification_mode`; `kill_switch_release_rate`
 (T-016) and `reconcile_attempts_cap` (T-033) were added later, each its own migration rather than
 an edit to T-007's original one. `display_name` and the `oidc_*` columns are shown above as the
-eventual design but are not yet migrated; nothing reads them yet (T-035 adds the `oidc_*` columns
-when real OIDC lands).
+eventual design but are not yet migrated; nothing reads them yet (a future, not-yet-filed OIDC
+ticket adds the `oidc_*` columns when real OIDC lands -- not a citable id yet, since one earlier
+draft of this note named a specific ticket number for it before that number was claimed by
+something else; do not cite a number here again until that ticket actually exists).
 
 **Correction: T-007 also shipped `staleness_max_age`, and it is now dead in the shipped
 schema, not just cut from the design above.** §4.8 explains why the gate it backed could never

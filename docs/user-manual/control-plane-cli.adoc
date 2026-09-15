@@ -66,7 +66,7 @@ table to the six fields above; two further tunables were added later and are eac
 their own point of use rather than here -- `--kill-switch-release-rate` (kill-switches.adoc,
 "Releasing a switch") and `--reconcile-attempts-cap` ("Orphan-event reconciliation" below).
 `display_name` and the `oidc_*` columns from DESIGN.md's full §4.10 table arrive later, when a
-ticket actually reads them (OIDC: T-035).
+ticket actually reads them (a future OIDC ticket, not yet filed).
 
 NOTE: A tenant needs a `tenant_config` row before `messgr-ingest` will serve any request against
 it -- the tenant registry rejects a send with "tenant has no tenant_config row" otherwise. Run
