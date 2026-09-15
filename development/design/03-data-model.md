@@ -136,8 +136,8 @@ CREATE TABLE comms_event (              -- partitioned monthly, append-only
     customer_id       uuid        NOT NULL,  -- denormalized so erasure can find these rows
     occurred_at       timestamptz NOT NULL,
     event_type        text        NOT NULL,
-      -- queued | sent | delivered | failed | bounced | read | complaint
-      -- | expired | cancelled | suppressed_consent | suppressed_list | unverified_address
+      -- queued | sent | delivered | failed | bounced | read | complaint | expired
+      -- | cancelled | suppressed_consent | suppressed_list | unverified_address | discarded
     provider_ref      text        NOT NULL DEFAULT '',  -- '' for dispatch-internal events; see below
     provider_status   text,                  -- normalized code, safe to keep in clear
     provider_payload_ciphertext bytea,       -- raw provider JSON, under customer DEK — see below
@@ -192,6 +192,16 @@ CREATE TABLE template (
 > The general lesson for review: every new table needs asking *what PII lands here, and which erasure path reaches it*. Third-party payloads are the easiest place to miss, because nobody chose their contents.
 
 **Correction: `comms_event`'s dedup constraint was inert for exactly the events that need it most.** `UNIQUE (occurred_at, comms_request_id, event_type, provider_ref)` relies on Postgres unique-index semantics — but Postgres treats every NULL as distinct from every other NULL, so two rows with the same `(occurred_at, comms_request_id, event_type)` and both `provider_ref IS NULL` do **not** collide. `provider_ref` is NULL for every event this system generates itself rather than receives from a provider — gate-chain terminal outcomes (`expired`, `suppressed_consent`, and the rest) and dispatch-internal events (`queued`, `sent`, `failed`) all have no provider reference. §10's "inserts use `ON CONFLICT DO NOTHING`; duplicates are free" is true only for provider-sourced events keyed by a real `provider_ref` — a retried write of a gate outcome (a crash between the `comms_event` insert and the `comms_request.final_status` update, then a safe retry of the whole transaction) inserts a second, indistinguishable row instead of no-opping. Fixed by giving every event a value to dedupe on regardless of source: `provider_ref` becomes `NOT NULL DEFAULT ''`, with providers supplying the real reference and dispatch-internal events writing `''` — an empty string is not NULL, so the unique index now catches both cases uniformly.
+
+**Correction: this comment's `event_type` vocabulary was missing `discarded`.** `write_discarded`
+(`src/dispatcher/drain.rs`, a kill-switch discard sweep) writes `event_type = 'discarded'` into
+`comms_event`, and has since that code shipped; this comment never listed it, and neither did
+migration `0004_ledger_outbox_schema.sql`'s own copy of the same comment. Caught by T-034's
+review, which added code (`orphan_reconcile::reconcile::is_recognized_event_type`) that validates
+`orphan_event.event_type` against exactly this list before promotion — a stale list there would
+have been a silent compliance gap, not just a stale comment, even though `discarded` itself can
+never legitimately arrive in a provider receipt. Added above; no schema change, no behaviour
+change.
 
 **Correction: `orphan_event` (§10) was named but never given a schema.** Added above. Its payload is deliberately **not** encrypted under a customer DEK, unlike `comms_event` — the whole reason a receipt lands here is that `comms_request_id` (and therefore `customer_id`) isn't known yet, so there is no DEK to encrypt under. This is a genuine, narrow exception to "PII is always written encrypted" (hard invariant 7's spirit, if not its letter, since no customer is yet identified to scope a key to), and it must stay narrow: reconciliation is a "short delay" per §10, and `reconcile_attempts` exists so a row that fails to reconcile past a small bound (config, not hardcoded) pages someone rather than accumulating as a permanent plaintext-PII table. A row that reconciles is deleted from `orphan_event` once re-inserted into `comms_event` proper, encrypted, under the now-known customer's DEK.
 

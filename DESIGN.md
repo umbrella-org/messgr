@@ -1,6 +1,6 @@
 # messgr — Design
 
-**Version 4** · 2026-09-15 · `85e231e` (T-029 review: §4.3 no longer says the idempotency sweep is unbuilt)
+**Version 5** · 2026-09-15 · `adc5e79` (T-034 review: §4.4's `event_type` comment was missing `discarded`)
 
 Centralized communications orchestration and audit ledger for customer messaging across SMS, email, and WhatsApp.
 

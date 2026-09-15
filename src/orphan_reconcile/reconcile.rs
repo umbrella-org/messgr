@@ -35,6 +35,14 @@ const ABSORBING_STATUSES: &[&str] = &[
     "unverified_address",
 ];
 
+/// T-034 F4: the only set of values that may reach `comms_request.final_status`
+/// via promotion -- `orphan.event_type` can originate from third-party
+/// (`messgr-webhook`) input, unlike `dispatcher::repo::write_terminal`'s
+/// dispatcher-internal argument of the same name.
+fn is_recognized_event_type(event_type: &str) -> bool {
+    STATUS_ORDER.contains(&event_type) || ABSORBING_STATUSES.contains(&event_type)
+}
+
 /// Decision 3: `final_status` only ever advances. No current status always
 /// advances; an absorbing status always wins regardless of the current one
 /// (compliance-relevant, must never be silently dropped by an earlier, more
@@ -165,7 +173,12 @@ async fn run(
     let mut report = ReconcileReport::default();
 
     for orphan in repo::list_pending(tenant_pool).await? {
-        match repo::find_match(tenant_pool, &orphan.provider_ref).await? {
+        let m = if is_recognized_event_type(&orphan.event_type) {
+            repo::find_match(tenant_pool, &orphan.provider_ref).await?
+        } else {
+            None
+        };
+        match m {
             Some(m) => {
                 promote_match(tenant_pool, keystore, cache, vault_mount, &orphan, m)
                     .await?;
@@ -216,4 +229,70 @@ async fn promote_match(
     let advance = should_advance(m.current_final_status.as_deref(), &orphan.event_type);
     repo::promote(tenant_pool, orphan, &m, ciphertext, advance).await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_status_order_value_is_recognized() {
+        for status in STATUS_ORDER {
+            assert!(is_recognized_event_type(status));
+        }
+    }
+
+    #[test]
+    fn every_absorbing_status_is_recognized() {
+        for status in ABSORBING_STATUSES {
+            assert!(is_recognized_event_type(status));
+        }
+    }
+
+    #[test]
+    fn an_unrecognized_event_type_is_rejected() {
+        assert!(!is_recognized_event_type("made_up_status"));
+    }
+
+    /// T-034 review F4: `every_status_order_value_is_recognized` and
+    /// `every_absorbing_status_is_recognized` above are tautological against
+    /// `is_recognized_event_type`'s own implementation -- they can only fail
+    /// if the function stops consulting the two constants, not if the
+    /// constants themselves drift from the 12 values migration
+    /// `0004_ledger_outbox_schema.sql` documents. This pins the union
+    /// against that literal list, so dropping or adding a value to either
+    /// constant without updating the migration comment (or vice versa)
+    /// fails here.
+    #[test]
+    fn recognized_set_matches_the_documented_twelve_event_types() {
+        let mut recognized: Vec<&str> = STATUS_ORDER
+            .iter()
+            .chain(ABSORBING_STATUSES.iter())
+            .copied()
+            .collect();
+        recognized.sort_unstable();
+
+        let mut documented = [
+            "queued",
+            "sent",
+            "delivered",
+            "failed",
+            "bounced",
+            "read",
+            "complaint",
+            "expired",
+            "cancelled",
+            "suppressed_consent",
+            "suppressed_list",
+            "unverified_address",
+        ];
+        documented.sort_unstable();
+
+        assert_eq!(recognized, documented);
+    }
+
+    #[test]
+    fn an_empty_event_type_is_rejected() {
+        assert!(!is_recognized_event_type(""));
+    }
 }
