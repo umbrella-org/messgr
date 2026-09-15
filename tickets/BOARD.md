@@ -82,7 +82,7 @@ Last updated: 2026-09-15
 | T-026 | Fix check-then-act races in CLI write paths | yes — merged to main (PR #39, bcbf080) |
 | T-028 | messgr-control: stats subcommand for per-tenant message volume | yes — merged to main (PR #20, ed46117) |
 | T-029 | Nightly idempotency-sweep job | yes — MERGED: PR #47 merged to `main` (`a5d5900`) |
-| T-030 | Reconcile orphan_event rows into comms_event | no — publish-gated |
+| T-030 | Reconcile orphan_event rows into comms_event | yes — MERGED: PR #48 merged to `main` (`4e5d31e`) |
 | T-031 | TenantRegistry eviction: idle-TTL sweep with poll-loop cancellation | no — publish-gated |
 | T-032 | Health endpoints for messgr-ingest and messgr-dispatcher | no — publish-gated |
 

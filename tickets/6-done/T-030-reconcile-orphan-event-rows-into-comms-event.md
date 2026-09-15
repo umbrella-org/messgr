@@ -428,3 +428,4 @@ spawned as T-033/T-034) correctly left out of scope, not re-litigated. `just lin
 - 2026-09-15 — REWORK → IN REVIEW: findings fixed
 - 2026-09-15 — IN REVIEW → DONE: scoped re-review clean: F1 fixed, no new findings; non-blocking F2-F5 spawned as T-033/T-034
 - 2026-09-15 — PR #48 opened (`feat/T-030-orphan-event-reconcile` → `main`), pending merge.
+- 2026-09-15 — MERGED: PR #48 merged to `main` (`4e5d31e`)
