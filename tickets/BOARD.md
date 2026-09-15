@@ -38,6 +38,7 @@ Last updated: 2026-09-15
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
+| T-035 | Assert orphan-reconcile's age-out tracing::warn! actually fires | low | low | S | [] |  |
 
 ## TO DO (impact order, per child)
 
@@ -45,7 +46,6 @@ Last updated: 2026-09-15
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
-| T-035 | Assert orphan-reconcile's age-out tracing::warn! actually fires | low | low | S | [] |  |
 
 ## DONE
 
