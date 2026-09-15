@@ -13,18 +13,18 @@ Last updated: 2026-09-15
 
 ## IN DEVELOPMENT
 
+### messgr (0/1)
+
+| id | title | depends-on |
+|---|---|---|
+
+## IN REVIEW
+
 ### messgr (1/1)
 
 | id | title | depends-on |
 |---|---|---|
 | T-034 | Validate orphan-reconcile event_type before promoting and make find_match deterministic | [] |
-
-## IN REVIEW
-
-### messgr (0/1)
-
-| id | title | depends-on |
-|---|---|---|
 
 ## REWORK
 
