@@ -62,8 +62,11 @@ default DESIGN.md has settled on, so there is nothing sensible to seed automatic
 there); every call, including a rejected one against an unknown `--tenant-slug`, writes a
 `tenant_config.set` `platform_audit` row. `--schedule-horizon-days` and `--verification-mode`
 are optional, defaulting to DESIGN.md's own `90`/`observe`. This ticket (T-007) scopes the
-table to the six fields above -- `display_name` and the `oidc_*` columns from DESIGN.md's full
-§4.10 table arrive later, when a ticket actually reads them (OIDC: T-035).
+table to the six fields above; two further tunables were added later and are each documented at
+their own point of use rather than here -- `--kill-switch-release-rate` (kill-switches.adoc,
+"Releasing a switch") and `--reconcile-attempts-cap` ("Orphan-event reconciliation" below).
+`display_name` and the `oidc_*` columns from DESIGN.md's full §4.10 table arrive later, when a
+ticket actually reads them (OIDC: T-035).
 
 NOTE: A tenant needs a `tenant_config` row before `messgr-ingest` will serve any request against
 it -- the tenant registry rejects a send with "tenant has no tenant_config row" otherwise. Run
@@ -147,7 +150,7 @@ with no match, or whose `event_type` is outside the set DESIGN.md §4.4 document
 against `comms_event` at all in that case), has its `reconcile_attempts` counter incremented and
 is deleted once that counter reaches `tenant_config.reconcile_attempts_cap` (default 5; set with
 `messgr-control tenant-config set --reconcile-attempts-cap <n> ...`), which also emits a
-`tracing::warn!` naming the tenant, orphan id, and provider_ref. Unlike idempotency-sweep and
+`tracing::warn!` naming the tenant, orphan id, provider_ref, and event_type. Unlike idempotency-sweep and
 partition-lifecycle, this command does connect to Vault -- promotion is the payload's first write under a customer scope. Safe to re-run;
 meant to be invoked on a schedule (cron/systemd timer), not run continuously -- this binary does
 not daemonize.

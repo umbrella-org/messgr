@@ -409,6 +409,10 @@ CREATE TABLE tenant_config (
     schedule_horizon_days int NOT NULL DEFAULT 90,
     quota_day_boundary_tz text NOT NULL,
     verification_mode   text NOT NULL DEFAULT 'observe',  -- enforce | observe (§5)
+    kill_switch_release_rate int NOT NULL DEFAULT 500,   -- rows/second the release-drain ramp
+                                                          -- admits after a switch releases (§5.2, T-016)
+    reconcile_attempts_cap smallint NOT NULL DEFAULT 5,  -- orphan_event reconcile-attempts bound
+                                                          -- before age-out deletes the row (§4.4/§10, T-033)
     oidc_issuer         text,                   -- the tenant's own IdP (§11.1) — not yet created, added by T-035
     oidc_client_id      text,                   -- not yet created, added by T-035
     oidc_group_claim    text,                   -- not yet created, added by T-035
@@ -436,9 +440,11 @@ CREATE TABLE provider_config (
 **Correction: `quiet_hours_policy`'s primary key could not represent its own `default` scope.** `scope_key` was nullable, and the `default` scope (institution-wide fallback, per §6.1's resolution order `customer tz -> segment policy -> institution default`) is exactly the row with no natural key — but a `PRIMARY KEY` column is implicitly `NOT NULL`, so a `default`-scope row could never be inserted at all under the schema as originally written. Same fix as `kill_switch` above, adapted to a primary key rather than a partial unique index (which cannot itself wrap an expression): `scope_key` is `NOT NULL DEFAULT ''`, with `''` reserved for the scope that has no key.
 
 T-007 ships only `tenant_config`'s `retention_years`, `default_timezone`, `default_locale`,
-`schedule_horizon_days`, `quota_day_boundary_tz`, and `verification_mode` —
-`display_name` and the `oidc_*` columns are shown above as the eventual design but are not yet
-migrated; nothing reads them yet (T-035 adds the `oidc_*` columns when real OIDC lands).
+`schedule_horizon_days`, `quota_day_boundary_tz`, and `verification_mode`; `kill_switch_release_rate`
+(T-016) and `reconcile_attempts_cap` (T-033) were added later, each its own migration rather than
+an edit to T-007's original one. `display_name` and the `oidc_*` columns are shown above as the
+eventual design but are not yet migrated; nothing reads them yet (T-035 adds the `oidc_*` columns
+when real OIDC lands).
 
 **Correction: T-007 also shipped `staleness_max_age`, and it is now dead in the shipped
 schema, not just cut from the design above.** §4.8 explains why the gate it backed could never
