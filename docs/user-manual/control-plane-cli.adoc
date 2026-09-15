@@ -143,9 +143,10 @@ in `orphan_event` rather than discarded (DESIGN.md §4.4/§10). This command (T-
 matching each pending row's `provider_ref` against `comms_event.provider_ref` rows written since:
 a match is encrypted under the matched customer's DEK and promoted into a real `comms_event` row,
 advancing `comms_request.final_status` without ever regressing an already-more-final status; a row
-with no match has its `reconcile_attempts` counter incremented and is deleted once that counter
-reaches a fixed cap of 5. Unlike idempotency-sweep and partition-lifecycle, this command does
-connect to Vault -- promotion is the payload's first write under a customer scope. Safe to re-run;
+with no match, or whose `event_type` is outside the set DESIGN.md §4.4 documents (never checked
+against `comms_event` at all in that case), has its `reconcile_attempts` counter incremented and
+is deleted once that counter reaches a fixed cap of 5. Unlike idempotency-sweep and
+partition-lifecycle, this command does connect to Vault -- promotion is the payload's first write under a customer scope. Safe to re-run;
 meant to be invoked on a schedule (cron/systemd timer), not run continuously -- this binary does
 not daemonize.
 
