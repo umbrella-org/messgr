@@ -1,0 +1,259 @@
+---
+id: T-029
+title: Nightly idempotency-sweep job
+project: messgr
+depends-on: []
+spawned-by: [T-022]
+impact: low
+complexity: low
+cost: S
+---
+
+# T-029 — Nightly idempotency-sweep job
+
+## Outcome
+
+After this ships, the `idempotency` table is actually bounded at the 30-day retention DESIGN.md
+§4.3 already promises ("retained 30 days, swept nightly"), instead of growing forever.
+
+## Description
+
+`idempotency` (§4.3) has never had its sweep built. T-009 shipped the table and T-011 shipped
+the write path, and both deferred the nightly sweep without either claiming it — it has sat
+unowned since. Every row currently lives forever; nothing deletes an expired one. This is
+narrow, bounded hygiene work, not a design question: a scheduled job (or a `messgr-control`
+subcommand invoked by an external cron, matching this project's existing operational pattern —
+see `partition-lifecycle run`) that runs `DELETE FROM idempotency WHERE expires_at < now()` per
+tenant, on a nightly cadence. No gate-chain, consent, or encryption surface is touched — the
+table holds no PII (the key and `comms_request_id` are opaque; the request payload itself lives
+in `comms_request`).
+
+T-022 rescopes `idempotency`'s primary key to `(producer_id, key)` — this ticket's sweep query
+is unaffected either way, since it deletes on `expires_at` alone.
+
+## Implementation Plan
+
+### 0. Feature branch (mandatory)
+
+```
+git checkout main
+git checkout -b feat/T-029-idempotency-sweep
+```
+
+### Prerequisite gate (hard)
+
+None. No `depends-on:`; nothing else must land first.
+
+### Confirmed design decisions (do not deviate without asking)
+
+1. **Mirrors `partition-lifecycle`'s exact shape** (`src/partition_lifecycle/lifecycle.rs`,
+   `src/bin/control.rs`'s `PartitionLifecycle` subcommand): a `messgr-control` subcommand,
+   per-tenant, one-shot, meant to run on an external schedule (cron/systemd timer) — this binary
+   does not daemonize or loop.
+2. **`as_of: DateTime<Utc>` is an explicit parameter**, not read from `Utc::now()` inside the
+   sweep function — mirrors `partition_lifecycle::lifecycle`'s own decision 4, so the acceptance
+   test can synthesize expired/not-yet-expired rows deterministically instead of waiting on wall
+   clock time.
+3. **No Vault/keystore connection.** `idempotency` holds no PII (the ticket's own Description:
+   the key and `comms_request_id` are opaque) — matches `partition-lifecycle`'s own "no Vault
+   client connected, touches neither Transit nor AppRole" precedent.
+4. **A bare `DELETE`, no soft-delete or archive.** Nothing reads an expired idempotency row ever
+   again — DESIGN.md §4.3 only promises the 30-day retention window, not an audit trail of swept
+   rows.
+
+### Tasks
+
+#### Task 1 — sweep function (`src/idempotency_sweep.rs`)
+
+New file, single function (no `model.rs`/`repo.rs` split — one query doesn't warrant it):
+
+```rust
+use chrono::{DateTime, Utc};
+use sqlx::PgPool;
+
+use crate::tenant::pool::connect_tenant_pool;
+use crate::tenant::repo as tenant_repo;
+
+#[derive(Debug)]
+pub enum SweepError {
+    Database(sqlx::Error),
+    UnknownTenant(String),
+}
+
+// Display/Error impls matching partition_lifecycle::PartitionLifecycleError's shape
+// (Database variant wraps sqlx::Error; UnknownTenant carries the slug).
+
+/// Deletes every `idempotency` row whose `expires_at` is at or before `as_of`,
+/// for the tenant named by `tenant_slug`. Returns the number of rows removed.
+pub async fn run_for_tenant(
+    control_pool: &PgPool,
+    control_database_url: &str,
+    tenant_slug: &str,
+    as_of: DateTime<Utc>,
+) -> Result<u64, SweepError> {
+    let tenant = tenant_repo::find_by_slug(control_pool, tenant_slug)
+        .await
+        .map_err(SweepError::Database)?
+        .ok_or_else(|| SweepError::UnknownTenant(tenant_slug.to_string()))?;
+
+    let tenant_pool = connect_tenant_pool(
+        control_pool,
+        control_database_url,
+        tenant.id,
+        &tenant.database_name,
+        // reuse the same max-connections the caller's Config carries; see Task 2
+    )
+    .await
+    .map_err(SweepError::Database)?
+    .pool;
+
+    sweep(&tenant_pool, as_of).await
+}
+
+async fn sweep(tenant_pool: &PgPool, as_of: DateTime<Utc>) -> Result<u64, SweepError> {
+    let result = sqlx::query("DELETE FROM idempotency WHERE expires_at <= $1")
+        .bind(as_of)
+        .execute(tenant_pool)
+        .await
+        .map_err(SweepError::Database)?;
+
+    Ok(result.rows_affected())
+}
+```
+
+Register in `src/lib.rs`: add `pub mod idempotency_sweep;` (alphabetical, between `health` and
+`ingest`).
+
+#### Task 2 — `messgr-control idempotency-sweep run` subcommand (`src/bin/control.rs`)
+
+- Add to the `Command` enum, next to `PartitionLifecycle`:
+
+  ```rust
+  /// Deletes idempotency rows past their retention window (DESIGN.md §4.3:
+  /// "retained 30 days, swept nightly"). Meant to run on a schedule
+  /// (cron/systemd timer) — this binary does not daemonize or loop. T-029.
+  IdempotencySweep {
+      #[command(subcommand)]
+      command: IdempotencySweepCommand,
+  },
+  ```
+
+- New enum, next to `PartitionLifecycleCommand`:
+
+  ```rust
+  #[derive(Subcommand)]
+  enum IdempotencySweepCommand {
+      /// Delete every idempotency row whose expires_at is at or before now.
+      Run {
+          #[arg(long = "tenant-slug")]
+          tenant_slug: String,
+      },
+  }
+  ```
+
+- Handler, next to the `PartitionLifecycle` arm (same "no Vault client" comment style):
+
+  ```rust
+  Command::IdempotencySweep { command } => match command {
+      IdempotencySweepCommand::Run { tenant_slug } => {
+          let deleted = messgr::idempotency_sweep::run_for_tenant(
+              &control_pool,
+              &config.control_database_url,
+              &tenant_slug,
+              chrono::Utc::now(),
+          )
+          .await
+          .map_err(|err| {
+              format!("idempotency sweep failed for tenant {tenant_slug:?}: {err}")
+          })?;
+
+          println!("deleted={deleted}");
+      }
+  },
+  ```
+
+  `run_for_tenant`'s `connect_tenant_pool` call needs `config.database_max_connections` —
+  thread it through as a fifth parameter (matching `run_partition_lifecycle`'s own call site,
+  which reads `config.database_max_connections` from the same `Config` already in scope).
+
+#### Task 3 — docs (`docs/user-manual/control-plane-cli.adoc`)
+
+Add a new section immediately after the existing "partition-lifecycle" section (they are the
+same kind of scheduled-hygiene command), mirroring its structure exactly:
+
+```
+[source,bash]
+----
+cargo run --bin messgr-control -- idempotency-sweep run --tenant-slug acme
+----
+
+`idempotency` (DESIGN.md §4.3) rows are retained 30 days from the write that created them, then
+swept. This command (T-029) deletes every row whose `expires_at` is at or before the time it
+runs, for one tenant. No Vault/Transit dependency -- the table holds no PII. Safe to re-run;
+meant to be invoked on a schedule (cron/systemd timer), not run continuously -- this binary does
+not daemonize.
+```
+
+### Acceptance test
+
+New file `tests/idempotency_sweep.rs`, following `tests/partition_lifecycle.rs`'s conventions
+(real provisioning against the local stack, no mocks; `idempotency` has no foreign-key
+constraints — rows can be inserted directly with fabricated `producer_id`/`comms_request_id`
+UUIDs, no need to provision a producer):
+
+```rust
+#[tokio::test]
+async fn sweep_deletes_only_rows_past_their_expiry() {
+    // provision a real test tenant (tests/partition_lifecycle.rs's own helpers)
+    // insert one idempotency row with expires_at in the past, one with expires_at
+    // in the future
+    // call idempotency_sweep::run_for_tenant(..., as_of: <a fixed instant between the two>)
+    // assert: exactly 1 row deleted, the expired row is gone, the future one remains
+}
+```
+
+Run:
+
+```
+just build
+just test    # includes tests/idempotency_sweep.rs
+just lint
+just docs-check
+```
+
+### Docs update (mandatory when user-facing)
+
+`docs/user-manual/control-plane-cli.adoc` — see Task 3 above.
+
+### Finish (mandatory)
+
+1. Acceptance test green; `just build`/`just test`/`just lint`/`just docs-check` clean.
+2. Docs updated per Task 3.
+3. Write a summary: files touched (`src/idempotency_sweep.rs`, `src/lib.rs`,
+   `src/bin/control.rs`, `tests/idempotency_sweep.rs`,
+   `docs/user-manual/control-plane-cli.adoc`), decisions made (the four above), anything
+   deferred (none — this ticket is fully bounded).
+4. Suggested commit message:
+
+   ```
+   feat(control): add idempotency-sweep run subcommand (T-029)
+
+   Deletes idempotency rows past their 30-day retention window
+   (DESIGN.md §4.3), per tenant, mirroring partition-lifecycle's
+   scheduled-command shape. Meant to run on cron/systemd timer.
+   ```
+
+5. Root-path child (`path = "."`) — tidy WIP commits into atomic ones before presenting.
+6. Commit locally on `feat/T-029-idempotency-sweep`. Publish only per commit policy (no push/MR
+   without user approval). Present the commit message; after approval, verify
+   `git fetch origin main && git diff --name-only origin/main...HEAD | grep '^tickets/'` prints
+   nothing, then push and open the MR. Hand back to the user.
+
+## Review
+
+<!-- empty until IN REVIEW -->
+
+## History
+
+- 2026-09-04 — created (TO DO). source: field-use: spawned while refining T-022, which named this deferred, unowned sweep job (deferred by T-009 and T-011, neither claiming it) as a follow-up to file if no ticket already existed.
+- 2026-09-15 — TO DO → READY: plan complete
