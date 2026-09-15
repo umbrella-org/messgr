@@ -48,7 +48,12 @@ Last updated: 2026-09-15
 |---|---|---|---|---|---|---|
 | T-036 | Verification gate at dispatch | critical | medium | M | [] |  |
 | T-038 | Suppression gate at dispatch | critical | medium | M | [] |  |
+| T-039 | Dispatcher leader election (HA) | critical | medium | M | [] |  |
+| T-040 | Wire scheduled delivery and expiry into the outbox | critical | medium | M | [] |  |
 | T-037 | Consent gate at dispatch | critical | medium-high | M-L | [] |  |
+| T-041 | Cancellation endpoint with dispatch-time race check | high | low-medium | S-M | [] |  |
+| T-042 | Producer quotas and producer_usage enforcement | high | high | L | [] |  |
+| T-043 | Quiet hours with jitter and DST handling | medium | medium | M | [] |  |
 
 ## DONE
 
