@@ -392,6 +392,32 @@ promoted. Re-ran verbatim: `cargo test --test orphan_reconcile` (5/5 pass, up fr
 `just build`/`just test` (full suite)/`just lint`/`just docs-check` all clean. No other files
 touched.
 
+### Scoped re-review — round 1
+
+**Reviewer independence:** delegated (same-session authorship of the fix commit). An
+independent, freshly spawned reviewer verified F1's fix and audited its own replacement text —
+not a re-audit of the whole feature. Re-verified by hand before recording: repo re-checked
+clean on `feat/T-030-orphan-event-reconcile` at `63a62aa`, `cargo test --test orphan_reconcile`
+independently re-run (5/5 pass).
+
+**F1: confirmed fixed**, with mutation-test evidence — reverting the SQL guard by hand made
+`empty_provider_ref_never_matches_the_dispatch_internal_sentinel` go red
+(`report.still_pending` `1` vs expected `0`); restoring it (file byte-identical to `63a62aa`)
+made it green again. Scope discipline held: `git show 63a62aa --stat` touches exactly
+`src/orphan_reconcile/repo.rs` and `tests/orphan_reconcile.rs`, nothing else.
+
+**Fix's own replacement text audited for new defects — none found.** SQL guard reasoning
+verified structurally sound (`ce.provider_ref = $1 AND ce.provider_ref <> ''` cannot both hold
+when `$1 = ''`, and is a no-op for any non-empty `$1`; both columns are `NOT NULL`, no NULL-
+semantics surprise). The new test's four assertions (`report.reconciled == 0`,
+`report.still_pending == 1`, victim's `final_status` untouched, orphan row still present) are
+specific, not tautological. `find_match` has exactly one call site
+(`src/orphan_reconcile/reconcile.rs:168`); no other path bypasses the guard. F2–F5 (already
+spawned as T-033/T-034) correctly left out of scope, not re-litigated. `just lint` and
+`just docs-check` re-confirmed clean.
+
+**Verdict: no blocking findings remain.** Proceeding to `6-done/`.
+
 ## History
 
 - 2026-09-04 — created (TO DO). source: review: T-022's review (finding F4) found `orphan_event`'s reconciliation job named in design but never ticketed, unlike the parallel idempotency-sweep gap T-022 itself filed as T-029 — filed here rather than left to drift a third time.
@@ -400,3 +426,4 @@ touched.
 - 2026-09-15 — IN DEVELOPMENT → IN REVIEW: acceptance green
 - 2026-09-15 — IN REVIEW → REWORK: F1 blocking: find_match has no guard against the provider_ref='' sentinel
 - 2026-09-15 — REWORK → IN REVIEW: findings fixed
+- 2026-09-15 — IN REVIEW → DONE: scoped re-review clean: F1 fixed, no new findings; non-blocking F2-F5 spawned as T-033/T-034
