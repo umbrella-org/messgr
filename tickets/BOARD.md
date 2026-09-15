@@ -20,11 +20,10 @@ Last updated: 2026-09-15
 
 ## IN REVIEW
 
-### messgr (1/1)
+### messgr (0/1)
 
 | id | title | depends-on |
 |---|---|---|
-| T-029 | Nightly idempotency-sweep job | [] |
 
 ## REWORK
 
@@ -81,6 +80,7 @@ Last updated: 2026-09-15
 | T-025 | Operability and error-handling cleanup across CLI and services | yes — MERGED: PR #38 (`5beb467`) into `main` |
 | T-026 | Fix check-then-act races in CLI write paths | yes — merged to main (PR #39, bcbf080) |
 | T-028 | messgr-control: stats subcommand for per-tenant message volume | yes — merged to main (PR #20, ed46117) |
+| T-029 | Nightly idempotency-sweep job | no — publish-gated |
 | T-031 | TenantRegistry eviction: idle-TTL sweep with poll-loop cancellation | no — publish-gated |
 | T-032 | Health endpoints for messgr-ingest and messgr-dispatcher | no — publish-gated |
 

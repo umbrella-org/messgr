@@ -255,7 +255,64 @@ just docs-check
 
 ## Review
 
-<!-- empty until IN REVIEW -->
+- [x] Reviewer independence settled (step 0): I authored branch `feat/T-029-idempotency-sweep`
+  this session, so steps 2–4a were **delegated** to an independent sub-agent (fresh, no memory
+  of writing the code, briefed adversarially against the ticket + the review addendum). Every
+  delegated finding below was re-verified by hand before recording.
+- [x] Implementation audit (steps 1–2): all four tasks done in the named files/shape. Acceptance
+  test re-run (`cargo test --test idempotency_sweep`) — green. `just build` — green. `just test`
+  (full suite) — green (no Vault approle gap hit on the independent reviewer's run). `just lint`
+  — green, zero warnings. Every confirmed design decision honoured (mirrors
+  `partition_lifecycle`'s shape including pool close-on-return; explicit `as_of`; no Vault
+  connection; bare DELETE).
+- [x] Quality audit (step 3): idiomatic; `SweepError` has correct `Debug`/`Display`/`Error`
+  impls; no `unwrap`/`expect` on the production path. PII claim independently verified against
+  `migrations/tenant/0004_ledger_outbox_schema.sql:57-63` — `idempotency` has exactly
+  `producer_id`/`key`/`comms_request_id`/`expires_at`, nothing else.
+- [x] Consistency audit (step 4): CLI wiring, comment style, and pool-lifecycle handling
+  (`tenant_pool.pool.close().await`) all match `partition_lifecycle`'s sibling pattern. No stale
+  cross-references inside the new code itself.
+- [x] Documentation audit (step 4a): `just docs-check` could not run in this environment
+  (`snowball` binary not installed — pre-existing local gap, not a code defect); the new
+  "Idempotency sweep" section was instead checked by hand against the sibling "Partition
+  lifecycle" section (heading level, code-fence, prose style) and confirmed correct. Whole-tree
+  grep for "idempotency" found no other stale/duplicate coverage.
+- [ ] Docs-readability pass (step 4b): no docs-readability reviewer configured in this host —
+  conscious skip.
+- [x] Findings recorded below, with severity/class/disposition and a cost line (step 5).
+- [x] Ticket moved (step 6).
+- [x] Governing documents reconciled (step 7) — see F2.
+- [x] Impact sweep (step 8) — see below.
+- [x] Summary + commit message/MR attributes presented for approval (step 9).
+
+### Findings
+
+| id | severity | class | disposition | description | evidence | suggestion |
+|---|---|---|---|---|---|---|
+| F1 | non-blocking | test-gap | fixed inline | Acceptance test only inserted rows strictly before/after `as_of`, so it passed equally against a `<=`-vs-`<` boundary inversion — confirmed by mutating the operator and re-running (test stayed green). | `tests/idempotency_sweep.rs` (pre-fix); mutation test on `src/idempotency_sweep.rs:70` | Add a row at exactly `as_of` and assert it is swept too. |
+| F2 | non-blocking | stale-xref | fixed inline | `development/design/03-data-model.md` §4.3 still said "the sweep job itself is not yet built" after this ticket built it. | `development/design/03-data-model.md:127` (pre-fix) | Reword to name the shipped command; bump `DESIGN.md`'s version stamp per the review addendum step 5. |
+
+Disposition summary: 2 findings, both `fixed inline` (F1, F2). No findings folded, spawned, or
+merely noted.
+
+cost: estimated S, actual S
+
+**F1 fix** — commit `b77bf23` on `feat/T-029-idempotency-sweep` (adds the boundary row +
+strengthens the assertion; re-verified the mutation now fails the test).
+
+**F2 fix** — commit `2fc839b` on `main` (governing-document reconciliation is overarching
+bookkeeping, per `AGENTS.md`'s "docs" carve-out — committed straight to the base branch, not the
+feature branch).
+
+### Impact sweep (step 8)
+
+`tickets/2-ready/T-030-reconcile-orphan-event-rows-into-comms-event.md` cites T-029 repeatedly as
+a shape precedent ("mirrors T-029's shape exactly", docs section placed "after `idempotency-sweep`'s
+(Task 3 of T-029)", CLI wiring "same file"). Checked against what actually shipped: the
+`IdempotencySweep`/`IdempotencySweepCommand` wiring lives in `src/bin/control.rs` as T-030 assumes,
+and the "Idempotency sweep" doc section sits immediately before "Message stats" — exactly where
+T-030's own planned section would land right after it. No assumption invalidated; T-030 needs no
+patch.
 
 ## History
 
@@ -270,3 +327,4 @@ just docs-check
   closed; the plan's own error shape is fine as written, no ticket change needed.
 - 2026-09-15 — READY → IN DEVELOPMENT: picked up
 - 2026-09-15 — IN DEVELOPMENT → IN REVIEW: acceptance green
+- 2026-09-15 — IN REVIEW → DONE: review clean, 2 non-blocking findings fixed inline
