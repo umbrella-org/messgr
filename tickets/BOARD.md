@@ -46,6 +46,9 @@ Last updated: 2026-09-15
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
+| T-036 | Verification gate at dispatch | critical | medium | M | [] |  |
+| T-038 | Suppression gate at dispatch | critical | medium | M | [] |  |
+| T-037 | Consent gate at dispatch | critical | medium-high | M-L | [] |  |
 
 ## DONE
 
