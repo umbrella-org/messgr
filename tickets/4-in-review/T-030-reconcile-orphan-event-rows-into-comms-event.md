@@ -333,3 +333,4 @@ just docs-check
 - 2026-09-04 — created (TO DO). source: review: T-022's review (finding F4) found `orphan_event`'s reconciliation job named in design but never ticketed, unlike the parallel idempotency-sweep gap T-022 itself filed as T-029 — filed here rather than left to drift a third time.
 - 2026-09-15 — TO DO → READY: plan complete
 - 2026-09-15 — READY → IN DEVELOPMENT: picked up
+- 2026-09-15 — IN DEVELOPMENT → IN REVIEW: acceptance green
