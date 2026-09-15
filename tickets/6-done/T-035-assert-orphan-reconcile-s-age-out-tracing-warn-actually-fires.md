@@ -312,3 +312,4 @@ new scope)
 - 2026-09-15 — pushed `feat/T-035-orphan-reconcile-warn-coverage` and opened PR #51
   (https://github.com/umbrella-org/messgr/pull/51) against `main`, 3 commits kept as history
   (not squashed, root-path default). Not yet merged — merging is the human's.
+- 2026-09-15 — MERGED: PR #51 merged to `main` (`b7d5bae`).

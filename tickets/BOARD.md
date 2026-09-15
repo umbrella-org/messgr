@@ -93,7 +93,7 @@ Last updated: 2026-09-15
 | T-032 | Health endpoints for messgr-ingest and messgr-dispatcher | yes — MERGED: PR #46 merged to `main` (`3cd8b15`) |
 | T-033 | Alert and make configurable the orphan-reconcile attempts cap | yes — MERGED: PR #50 merged to `main` (`06ef25b`). |
 | T-034 | Validate orphan-reconcile event_type before promoting and make find_match deterministic | yes — merged to main (PR #49, adab8bc) |
-| T-035 | Assert orphan-reconcile's age-out tracing::warn! actually fires | no — publish-gated |
+| T-035 | Assert orphan-reconcile's age-out tracing::warn! actually fires | yes — MERGED: PR #51 merged to `main` (`b7d5bae`). |
 
 ## DROPPED
 
