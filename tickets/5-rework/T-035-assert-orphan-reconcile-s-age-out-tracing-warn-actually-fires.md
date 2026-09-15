@@ -190,7 +190,30 @@ surface changes.
 
 ## Review
 
-<!-- empty until IN REVIEW -->
+- [x] Reviewer independence settled (step 0): **delegated** — the reviewing agent authored the
+  branch in this same session, so the implementation/quality/consistency/docs audits (steps
+  2-4a) were run by a fresh, independent sub-agent briefed adversarially (no memory of writing
+  the code). Its findings were re-verified by hand before recording (below) — one finding it
+  could not fully discharge (live acceptance-test execution; its sandbox had no
+  Postgres/Vault) was independently re-run and extended by the orchestrating reviewer, who
+  found a defect the delegated pass could not have caught without that live execution.
+- [x] Implementation audit — tasks and confirmed decisions verified against the diff; acceptance
+  test re-run live multiple times (see F1: **not consistently green**) (steps 1, 2)
+- [x] Quality audit (step 3) — see F1
+- [x] Consistency audit (step 4) — no findings; no duplicate capture helper exists elsewhere in
+  `tests/`; hard invariants 1 and 3 not implicated (test-only diff)
+- [x] Documentation audit (step 4a) — confirmed accurate: no CLI/HTTP/documented-behaviour
+  surface touched; `just docs-check` correctly not run
+- [x] Docs-readability pass — skipped, no `.adoc`/`.md` changed by this ticket (step 4b)
+
+| id | severity | class | disposition | description | evidence | suggestion |
+|---|---|---|---|---|---|---|
+| F1 | blocking | correctness | — | The two touched tests are flaky under the default parallel test harness: `tracing::subscriber::set_default` interacts with `tracing-core`'s process-wide, per-callsite `Interest` cache, not a per-thread one. `no_match_at_cap_deletes_the_row` (and any other concurrently-running test) exercises the exact same `tracing::warn!` call site (`reconcile.rs:210`) with no subscriber installed; if its thread reaches that callsite first, tracing caches `Interest::never()` for it globally, and neither touched test's `CapturingLayer::on_event` is ever invoked again for the rest of the process — even though the warn genuinely fires, on the correct thread, with the guard correctly installed. | Reproduced live (real Postgres/Vault, not the delegated reviewer's sandbox): `unconfigured_tenant_still_ages_out_at_the_hardcoded_default` failed 1/25, 1/14, then 1/6 direct-binary runs (`target/debug/deps/orphan_reconcile-*`, no cargo overhead), always the same test, always `tests/orphan_reconcile.rs:6xx: expected the age-out warn to fire`. Added temporary thread-id diagnostics (reverted, not committed): on a reproduced failure, the capture guard's install thread and the `tracing::warn!` call-site thread were **identical** (`ThreadId(9)` both), yet `CapturingLayer::on_event` never printed — ruling out a cross-thread/false-guard-scope bug and pointing at the interest-cache race. Never reproduces running either touched test alone (40+ isolated runs, 0 failures). | Root cause is the interaction between per-test `set_default` and the global per-callsite interest cache — a known class of hazard with this pattern under a parallel test harness. I tried the standard documented mitigation (`tracing::callsite::rebuild_interest_cache()` called right after `set_default` inside `capture_warn_events()`) and stress-tested it (80 direct-binary runs): it did **not** reliably fix the race and the failure rate was *higher* (9/80) than baseline, so it is not a safe drop-in fix — whoever reworks this needs their own stress-test loop (dozens of direct binary runs, not one green `cargo test`) to validate whatever fix is chosen before trusting it. Candidates worth evaluating: serializing the tests that share this call site (`serial_test`'s `#[serial]`, a new dev-dependency — arguably justified now, given this specific documented hazard with the dependency-free approach); or running just these two tests with `--test-threads=1`-equivalent isolation. |
+
+cost: estimated S, actual S
+
+**Disposition summary:** 1 blocking (F1, correctness) — ticket moves to `5-rework/` for a
+scoped fix. No non-blocking findings.
 
 ## History
 
@@ -201,3 +224,7 @@ surface changes.
 - 2026-09-15 — TO DO → READY: plan complete
 - 2026-09-15 — READY → IN DEVELOPMENT: picked up
 - 2026-09-15 — IN DEVELOPMENT → IN REVIEW: acceptance green
+- 2026-09-15 — IN REVIEW → REWORK: F1 (blocking, correctness) — the two touched tests are flaky
+  under the default parallel test harness (tracing per-callsite interest-cache race with
+  `set_default`); reproduced live, root-caused, one candidate fix tried and found insufficient.
+  See `## Review` for full detail.

@@ -20,11 +20,10 @@ Last updated: 2026-09-15
 
 ## IN REVIEW
 
-### messgr (1/1)
+### messgr (0/1)
 
 | id | title | depends-on |
 |---|---|---|
-| T-035 | Assert orphan-reconcile's age-out tracing::warn! actually fires | [] |
 
 ## REWORK
 
@@ -32,6 +31,7 @@ Last updated: 2026-09-15
 
 | id | title | open findings |
 |---|---|---|
+| T-035 | Assert orphan-reconcile's age-out tracing::warn! actually fires | F1 (blocking, correctness) — the two touched tests are flaky under the default parallel test harness (tracing per-calls… |
 
 ## READY (impact order, per child)
 
