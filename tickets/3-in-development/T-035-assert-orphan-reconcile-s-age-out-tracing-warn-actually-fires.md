@@ -199,3 +199,4 @@ surface changes.
   (no `tracing_test` dependency) doesn't hold — `tracing-subscriber` is already a direct
   dependency and can capture the event without a new one.
 - 2026-09-15 — TO DO → READY: plan complete
+- 2026-09-15 — READY → IN DEVELOPMENT: picked up
