@@ -174,6 +174,7 @@ async fn audit(
             "quota_day_boundary_tz": input.quota_day_boundary_tz,
             "verification_mode": input.verification_mode,
             "kill_switch_release_rate": input.kill_switch_release_rate,
+            "reconcile_attempts_cap": input.reconcile_attempts_cap,
             "outcome": outcome,
         }),
     )

@@ -3,7 +3,8 @@
 //! against `comms_event.provider_ref`, promoting a match into a real
 //! `comms_event` row -- encrypted under the matched customer's DEK, since
 //! this is the payload's first write under a customer scope (AGENTS.md hard
-//! invariant 7) -- and ageing out rows past `RECONCILE_ATTEMPTS_CAP`.
+//! invariant 7) -- and ageing out rows past `tenant_config.reconcile_attempts_cap`
+//! (T-033).
 
 use sqlx::PgPool;
 
@@ -13,15 +14,18 @@ use crate::key_cache::KeyCache;
 use crate::keystore::{KeyStore, KeyStoreError};
 use crate::tenant::pool::connect_tenant_pool;
 use crate::tenant::repo as tenant_repo;
+use crate::tenant_config::repo as tenant_config_repo;
 
 use super::repo::{self, Match, PendingOrphan};
 
-/// A one-shot `messgr-control` subcommand invoked by cron (mirrors T-029's
-/// shape), not a continuous poll loop -- 5 attempts means 5 separate cron
-/// invocations before an unmatched receipt is given up on. Tune later
-/// against the real cron interval once `messgr-webhook` gives real traffic
-/// to observe.
-pub const RECONCILE_ATTEMPTS_CAP: i16 = 5;
+/// Fallback when a tenant has no `tenant_config` row (T-007 decision 4) or
+/// hasn't set `reconcile_attempts_cap` -- matches migration 0012's own
+/// column default (T-033; mirrors `messgr-dispatcher`'s
+/// `DEFAULT_KILL_SWITCH_RELEASE_RATE` convention). A one-shot
+/// `messgr-control` subcommand invoked by cron (mirrors T-029's shape), not
+/// a continuous poll loop -- 5 attempts means 5 separate cron invocations
+/// before an unmatched receipt is given up on.
+const DEFAULT_RECONCILE_ATTEMPTS_CAP: i16 = 5;
 
 const STATUS_ORDER: &[&str] = &["queued", "sent", "delivered", "read"];
 const ABSORBING_STATUSES: &[&str] = &[
@@ -127,9 +131,11 @@ pub struct ReconcileReport {
     pub still_pending: u64,
 }
 
-/// Resolves `tenant_slug`, opens its pool, and reconciles every pending
-/// `orphan_event` row -- mirrors `idempotency_sweep::run_for_tenant`'s
-/// resolve/connect/close shape.
+/// Resolves `tenant_slug`, opens its pool, loads the reconcile-attempts cap
+/// from `tenant_config` (falling back to the hardcoded default for an
+/// unconfigured tenant, matching `messgr-dispatcher`'s `release_rate`
+/// resolution), and reconciles every pending `orphan_event` row -- mirrors
+/// `idempotency_sweep::run_for_tenant`'s resolve/connect/close shape.
 pub async fn run_for_tenant(
     control_pool: &PgPool,
     control_database_url: &str,
@@ -150,6 +156,11 @@ pub async fn run_for_tenant(
     )
     .await?;
 
+    let cap = tenant_config_repo::load(&tenant_pool.pool)
+        .await?
+        .map(|c| c.reconcile_attempts_cap)
+        .unwrap_or(DEFAULT_RECONCILE_ATTEMPTS_CAP);
+
     // A single one-shot run, not a long-lived process -- small fixed
     // capacity and a short TTL, matching the reasoning `customer_dek`'s own
     // `KeyCache` sizing note gives for a caller with no load history yet.
@@ -158,7 +169,15 @@ pub async fn run_for_tenant(
         std::time::Duration::from_secs(60),
     );
 
-    let result = run(&tenant_pool.pool, keystore, &cache, &tenant.vault_mount).await;
+    let result = run(
+        &tenant_pool.pool,
+        keystore,
+        &cache,
+        &tenant.vault_mount,
+        cap,
+        tenant_slug,
+    )
+    .await;
 
     tenant_pool.pool.close().await;
     result
@@ -169,6 +188,8 @@ async fn run(
     keystore: &dyn KeyStore,
     cache: &KeyCache,
     vault_mount: &str,
+    cap: i16,
+    tenant_slug: &str,
 ) -> Result<ReconcileReport, OrphanReconcileError> {
     let mut report = ReconcileReport::default();
 
@@ -184,14 +205,20 @@ async fn run(
                     .await?;
                 report.reconciled += 1;
             }
-            None if orphan.reconcile_attempts + 1 >= RECONCILE_ATTEMPTS_CAP => {
-                repo::record_miss(tenant_pool, orphan.id, RECONCILE_ATTEMPTS_CAP)
-                    .await?;
+            None if orphan.reconcile_attempts + 1 >= cap => {
+                repo::record_miss(tenant_pool, orphan.id, cap).await?;
+                tracing::warn!(
+                    tenant_slug,
+                    orphan_id = %orphan.id,
+                    provider_ref = %orphan.provider_ref,
+                    event_type = %orphan.event_type,
+                    "orphan_reconcile: row exceeded reconcile_attempts_cap and was deleted -- \
+                     the delivery receipt it held is now unrecoverable"
+                );
                 report.aged_out += 1;
             }
             None => {
-                repo::record_miss(tenant_pool, orphan.id, RECONCILE_ATTEMPTS_CAP)
-                    .await?;
+                repo::record_miss(tenant_pool, orphan.id, cap).await?;
                 report.still_pending += 1;
             }
         }

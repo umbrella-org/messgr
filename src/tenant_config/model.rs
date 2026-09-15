@@ -15,6 +15,13 @@ pub struct TenantConfig {
     /// `tenant_config` row has no value here at all (T-007 decision 4);
     /// `messgr-dispatcher` falls back to this column's own SQL default.
     pub kill_switch_release_rate: i32,
+    /// How many reconcile passes a pending `orphan_event` row survives
+    /// before `orphan_reconcile::reconcile::run` ages it out and deletes it
+    /// (DESIGN.md §4.4/§10 correction note, T-033) — default 5, matching
+    /// this column's own SQL default; a fresh tenant with no `tenant_config`
+    /// row falls back to that same default via the consumer, not
+    /// auto-seeding.
+    pub reconcile_attempts_cap: i16,
 }
 
 /// The values `repo::upsert` writes. Kept distinct from `TenantConfig`
@@ -30,6 +37,7 @@ pub struct TenantConfigInput {
     pub quota_day_boundary_tz: String,
     pub verification_mode: String,
     pub kill_switch_release_rate: i32,
+    pub reconcile_attempts_cap: i16,
 }
 
 impl TenantConfigInput {
@@ -44,6 +52,7 @@ impl TenantConfigInput {
             && self.quota_day_boundary_tz == existing.quota_day_boundary_tz
             && self.verification_mode == existing.verification_mode
             && self.kill_switch_release_rate == existing.kill_switch_release_rate
+            && self.reconcile_attempts_cap == existing.reconcile_attempts_cap
     }
 }
 

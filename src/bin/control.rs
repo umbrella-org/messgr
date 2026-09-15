@@ -233,6 +233,11 @@ enum TenantConfigCommand {
         /// own SQL default) when omitted.
         #[arg(long = "kill-switch-release-rate", value_parser = clap::value_parser!(i32).range(0..))]
         kill_switch_release_rate: Option<i32>,
+        /// How many reconcile passes a pending `orphan_event` row survives
+        /// before it's aged out and deleted (DESIGN.md §4.4/§10). Defaults
+        /// to 5 (the column's own SQL default) when omitted.
+        #[arg(long = "reconcile-attempts-cap", value_parser = clap::value_parser!(i16).range(1..))]
+        reconcile_attempts_cap: Option<i16>,
         /// Operator identity recorded on the platform_audit row.
         #[arg(long)]
         actor: String,
@@ -651,6 +656,7 @@ async fn run(
                     quota_day_boundary_tz,
                     verification_mode: verification_mode_arg,
                     kill_switch_release_rate,
+                    reconcile_attempts_cap,
                     actor,
                 } => {
                     let input = TenantConfigInput {
@@ -663,6 +669,7 @@ async fn run(
                             .unwrap_or_else(|| verification_mode::OBSERVE.to_string()),
                         kill_switch_release_rate: kill_switch_release_rate
                             .unwrap_or(500),
+                        reconcile_attempts_cap: reconcile_attempts_cap.unwrap_or(5),
                     };
 
                     let outcome = set_tenant_config(
@@ -694,7 +701,7 @@ async fn run(
                         Some(config_row) => println!(
                             "retention_years={} default_timezone={} default_locale={} \
                          schedule_horizon_days={} quota_day_boundary_tz={} verification_mode={} \
-                         kill_switch_release_rate={}",
+                         kill_switch_release_rate={} reconcile_attempts_cap={}",
                             config_row.retention_years,
                             config_row.default_timezone,
                             config_row.default_locale,
@@ -702,6 +709,7 @@ async fn run(
                             config_row.quota_day_boundary_tz,
                             config_row.verification_mode,
                             config_row.kill_switch_release_rate,
+                            config_row.reconcile_attempts_cap,
                         ),
                         None => println!("not configured"),
                     }
@@ -1341,6 +1349,34 @@ mod tests {
         assert!(
             result.is_err(),
             "a negative --kill-switch-release-rate must fail to parse"
+        );
+    }
+
+    #[test]
+    fn tenant_config_set_rejects_a_zero_reconcile_attempts_cap() {
+        let result = Cli::try_parse_from([
+            "messgr-control",
+            "tenant-config",
+            "set",
+            "--tenant-slug",
+            "acme",
+            "--retention-years",
+            "7",
+            "--default-timezone",
+            "Europe/London",
+            "--default-locale",
+            "en-GB",
+            "--quota-day-boundary-tz",
+            "Europe/London",
+            "--reconcile-attempts-cap",
+            "0",
+            "--actor",
+            "operator@example.com",
+        ]);
+
+        assert!(
+            result.is_err(),
+            "a zero --reconcile-attempts-cap must fail to parse"
         );
     }
 }
