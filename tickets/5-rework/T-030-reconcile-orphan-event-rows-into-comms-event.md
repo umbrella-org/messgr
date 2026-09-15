@@ -326,7 +326,56 @@ just docs-check
 
 ## Review
 
-<!-- empty until IN REVIEW -->
+**Reviewer independence (step 0):** delegated. The reviewing agent authored this branch in the
+same session, so the audits (steps 2–4a) were run by an independent, freshly spawned agent,
+briefed adversarially (find defects, not confirm), with no memory of writing the code. Every
+delegated finding below was re-verified by hand before being recorded, per step 0's "delegation
+buys independence, not accuracy" — F1 was independently reproduced with a throwaway test
+(inserted, run, confirmed the cross-customer mismatch, then discarded — repo left clean); F2/F3's
+`DESIGN.md` citation was independently grepped and confirmed verbatim; F2's "no alerting" claim
+was independently confirmed by `grep -rn "tracing::" src/orphan_reconcile/` (no matches).
+
+**Implementation audit (step 2):** all 5 confirmed design decisions and all 4 tasks implemented,
+in the files the plan names. Acceptance test re-run verbatim: `cargo test --test
+orphan_reconcile` — 4/4 pass. `just build` / `just test` (full suite, 60+ tests) / `just lint`
+clean. Mutation-tested the four acceptance-test assertions (flip `should_advance` to always
+`true`, no-op `record_miss`, skip encryption in `promote_match`) — each went red on the
+mechanism it claims to cover; none is tautological. AGENTS.md's ten hard invariants swept in
+full: invariant 7 (per-customer DEKs from first write) is this ticket's central claim and holds
+— the `comms_event` INSERT and `orphan_event` DELETE happen in one transaction
+(`src/orphan_reconcile/repo.rs:88-127`), so there is no window where the plaintext orphan row
+outlives the encrypted copy. Invariant 2 (ledger self-contained) holds — `customer_id` is
+written directly from the match, no join-dependent read. Invariant 6 (erasure coverage) is a
+no-op — no new table; `comms_event`'s existing erasure statement already covers a promoted row,
+and `orphan_event`'s exemption text already names T-030.
+
+**Quality / consistency audits (steps 3–4):** idiomatic, correctly avoids reusing
+`dispatcher::repo::write_terminal` as-is (confirmed its `NULL`-ciphertext/no-DEK-lookup bug is
+not duplicated, `src/dispatcher/repo.rs:216-264` vs `src/orphan_reconcile/repo.rs:81-128`);
+`run_for_tenant`'s resolve/connect/close shape faithfully mirrors
+`src/idempotency_sweep.rs:39-64`; `src/lib.rs` module registration correctly alphabetical. No
+`justfile`/CI workflow changes in this diff (addendum step 2 item 8 not applicable).
+
+**Documentation audit (step 4a):** new `== Orphan-event reconciliation` section in
+`docs/user-manual/control-plane-cli.adoc`, matching the idempotency-sweep section's structure,
+content verified accurate against the code. `just docs-check` passes.
+
+**Docs-readability pass (step 4b):** conscious skip — no docs-readability reviewer configured
+in this host session.
+
+| id | severity | class | disposition | description | evidence | suggestion |
+|---|---|---|---|---|---|---|
+| F1 | blocking | correctness | — | `find_match` has no guard against `provider_ref = ''`, the sentinel every dispatch-internal `comms_event` row carries by default (`migrations/tenant/0004_ledger_outbox_schema.sql:72`); an `orphan_event` row with an empty `provider_ref` matches an arbitrary unrelated `comms_request`/`comms_event` row, causing that stranger's `final_status` to be mutated and the orphan's third-party payload to be encrypted under the stranger's DEK | `src/orphan_reconcile/repo.rs:44-59`; independently reproduced: an orphan row with `provider_ref = ''` alongside an unrelated victim's dispatch-internal `comms_event` row (also `provider_ref = ''`) flipped the victim's `comms_request.final_status` from `NULL` to `"delivered"` | add `AND ce.provider_ref <> ''` to `find_match`'s WHERE clause; add a regression test inserting a dispatch-internal `''` `comms_event` row alongside an unrelated orphan and asserting no match |
+| F2 | non-blocking | design | new ticket (T-033) | cap-exhaustion deletes the `orphan_event` row with zero alerting, contradicting `DESIGN.md`'s own stated rationale that `reconcile_attempts` exists so an exhausted row "pages someone" | `development/design/03-data-model.md:196`; `grep -rn "tracing::" src/orphan_reconcile/` → no matches; cf. `src/partition_lifecycle/lifecycle.rs:160`'s `tracing::warn!` precedent for an analogous silent-loss condition | emit `tracing::warn!` when a row ages out — batched with F3 into T-033 |
+| F3 | non-blocking | plan-wrong | new ticket (T-033) | `RECONCILE_ATTEMPTS_CAP` is a hardcoded Rust constant; `DESIGN.md` explicitly requires it be "config, not hardcoded" | `development/design/03-data-model.md:196`; `src/orphan_reconcile/reconcile.rs:24` `pub const RECONCILE_ATTEMPTS_CAP: i16 = 5` | move the cap into `tenant_config` (the existing `kill_switch_release_rate` pattern) — batched with F2 into T-033 |
+| F4 | non-blocking | spec-unclear | new ticket (T-034) | `orphan.event_type` is written verbatim into `comms_request.final_status` with no validation it is a recognized status/event value — the first path where that value can originate from third-party (future webhook) input | `src/orphan_reconcile/reconcile.rs:46` (`should_advance`'s `None => true` arm); `src/orphan_reconcile/repo.rs:114` (`promote` binds `orphan.event_type` directly); no `CHECK` constraint on either table's `event_type` (`migrations/tenant/0004_ledger_outbox_schema.sql`) | validate `orphan.event_type` against the documented set before promoting; treat an unrecognized value as a non-match — batched with F5 into T-034 |
+| F5 | non-blocking | test-gap | new ticket (T-034) | `find_match`'s `LIMIT 1` has no `ORDER BY`, so its row choice is nondeterministic and untested when multiple `comms_event` rows share a `provider_ref` | `src/orphan_reconcile/repo.rs:44-59` | add `ORDER BY occurred_at DESC` and a test pinning multi-match behavior — batched with F4 into T-034 |
+
+Disposition summary: 1 blocking (F1 — fixed via rework, not dispositioned); 4 non-blocking, all
+`new ticket` — F2+F3 batched into T-033 (orphan-reconcile cap alerting + configurability), F4+F5
+batched into T-034 (orphan-reconcile input validation + match determinism).
+
+cost: estimated M, actual M
 
 ## History
 
@@ -334,3 +383,4 @@ just docs-check
 - 2026-09-15 — TO DO → READY: plan complete
 - 2026-09-15 — READY → IN DEVELOPMENT: picked up
 - 2026-09-15 — IN DEVELOPMENT → IN REVIEW: acceptance green
+- 2026-09-15 — IN REVIEW → REWORK: F1 blocking: find_match has no guard against the provider_ref='' sentinel

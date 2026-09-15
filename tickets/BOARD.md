@@ -20,11 +20,10 @@ Last updated: 2026-09-15
 
 ## IN REVIEW
 
-### messgr (1/1)
+### messgr (0/1)
 
 | id | title | depends-on |
 |---|---|---|
-| T-030 | Reconcile orphan_event rows into comms_event | [] |
 
 ## REWORK
 
@@ -32,6 +31,7 @@ Last updated: 2026-09-15
 
 | id | title | open findings |
 |---|---|---|
+| T-030 | Reconcile orphan_event rows into comms_event | F1 blocking: find_match has no guard against the provider_ref='' sentinel |
 
 ## READY (impact order, per child)
 
@@ -46,6 +46,8 @@ Last updated: 2026-09-15
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
+| T-034 | Validate orphan-reconcile event_type before promoting and make find_match deterministic | medium | low | S | [] |  |
+| T-033 | Alert and make configurable the orphan-reconcile attempts cap | low-medium | low | S | [] |  |
 
 ## DONE
 
