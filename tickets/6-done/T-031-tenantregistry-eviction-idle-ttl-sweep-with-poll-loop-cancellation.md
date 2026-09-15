@@ -315,3 +315,4 @@ Verdict: **clean, no blocking findings** — proceeds to `6-done/`.
 - 2026-09-07 — IN DEVELOPMENT → IN REVIEW: acceptance green
 - 2026-09-07 — IN REVIEW → DONE: review clean, 1 non-blocking finding fixed inline (F1)
 - 2026-09-07 — IN REVIEW → DONE: review clean, 1 non-blocking finding fixed inline
+- 2026-09-15 — MERGED: PR #40 merged to `main` (`ec2caae`)

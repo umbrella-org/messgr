@@ -327,3 +327,4 @@ No new findings. Verdict: **F1 closed, clean.** Proceeding to `6-done/`.
 ## History
 
 - 2026-09-14 — IN REVIEW → DONE: scoped re-review clean, F1 closed
+- 2026-09-15 — MERGED: PR #46 merged to `main` (`3cd8b15`)
