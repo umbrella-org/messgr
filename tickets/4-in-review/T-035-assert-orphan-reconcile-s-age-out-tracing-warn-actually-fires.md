@@ -215,6 +215,43 @@ cost: estimated S, actual S
 **Disposition summary:** 1 blocking (F1, correctness) — ticket moves to `5-rework/` for a
 scoped fix. No non-blocking findings.
 
+### Rework fix record — round 1 (commit 45edd45)
+
+Fixed F1 by replacing the per-test `tracing::subscriber::set_default` capture mechanism
+entirely with a single process-wide global subscriber (`tracing::subscriber::set_global_default`,
+installed once via `std::sync::Once`) writing into a `thread_local!` `RefCell<Vec<...>>` instead
+of an `Arc<Mutex<...>>`. `reset_warn_capture()` (was `capture_warn_events()`) clears the calling
+thread's buffer and ensures the global subscriber is installed; `captured_warn_events()` (was the
+returned `Arc<Mutex<...>>`) snapshots it. No more `DefaultGuard`, no more held-lock-across-await
+scoping.
+
+Root cause, pinned down precisely by reading `tracing-core` 0.1.36 source (not guessed): every
+call to `tracing::subscriber::set_default` constructs a fresh `Dispatch`, and `Dispatch::new()`
+unconditionally triggers `tracing_core::callsite::register_dispatch`, which rebuilds the
+*process-wide* per-callsite `Interest` cache for **every** registered callsite —
+`rebuild_callsite_interest` folds `Interest::and` (in `subscriber.rs`) over whatever the rebuild
+considers "currently active" dispatchers. When only one scoped `Dispatch` is alive at that instant
+(`Dispatchers::has_just_one`, the common case here since the two touched tests rarely overlap),
+the rebuild takes the `JustOne` fast path and queries `dispatcher::get_default()` on the *calling
+thread* — but this happens *before* the new `Dispatch` is installed into that thread's slot, so it
+reads the *old* (pre-install) default: the global no-op, whose `register_callsite` returns
+`never()`. This can poison the shared `reconcile.rs:210` call site's cached interest to `never`
+moments before that same test's own warn fires, independent of which test runs first — confirmed
+by re-reading `tracing-core-0.1.36/src/{dispatcher,callsite,subscriber}.rs` directly against the
+observed diagnostic (guard-install thread and warn-callsite thread identical, yet `on_event` never
+ran). A single, permanently-installed global subscriber sidesteps this: the shared callsite's own
+one-time, lazily-triggered self-registration (on its first-ever hit, from any test) sees the
+already-installed, never-changing subscriber, and no later `Dispatch::new()` call ever occurs
+again to rebuild (and potentially re-poison) it.
+
+Verified: `just build`/`just lint` clean. Full `cargo test --test orphan_reconcile` green (9/9).
+Stress-tested the direct compiled binary (bypassing cargo's per-invocation overhead) 250 times
+with **0 failures** (100 + 150 runs), against a pre-fix baseline that reproduced roughly 1-in-6 to
+1-in-25 direct-binary runs. Re-ran the addendum's mutation check: temporarily deleted the
+`tracing::warn!` call in `src/orphan_reconcile/reconcile.rs` (reverted after, `git diff` confirms
+clean) — both touched tests correctly went red (`expected the age-out warn to fire`), confirming
+the assertion still can fail.
+
 ## History
 
 - 2026-09-15 — created (TO DO). source: review: T-033's review (finding F6) found the age-out
@@ -228,3 +265,4 @@ scoped fix. No non-blocking findings.
   under the default parallel test harness (tracing per-callsite interest-cache race with
   `set_default`); reproduced live, root-caused, one candidate fix tried and found insufficient.
   See `## Review` for full detail.
+- 2026-09-15 — REWORK → IN REVIEW: F1 fixed
