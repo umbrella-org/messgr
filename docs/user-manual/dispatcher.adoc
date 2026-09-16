@@ -29,17 +29,25 @@ whose `expires_at` has already passed by the time it's drained is written `expir
 Engaging a `discard` switch immediately terminal-writes (`discarded`) everything it already
 matches. See "Kill switches" for the operator runbook.
 
-`T-036` adds the verification gate (DESIGN.md §5): for `transactional` and `marketing` class
-messages, the dispatcher checks `customer_address.verified_at` before decrypting -- the first
-in-line gate check this send path runs (kill switches, above, are checked before a row is even
-claimed, not inside this path). Per-tenant `tenant_config.verification_mode` controls the
-outcome for an unverified address: `enforce` blocks the send and writes a terminal
-`unverified_address` event/status, the same as `expired`/`discarded`; `observe` (the default)
-records the same `unverified_address` event non-terminally and lets the send proceed anyway, so
-an address that never gets verification data still gets sent and the gap stays visible in the
-ledger rather than silently blocking or silently passing. `auth` class messages skip this gate
-entirely -- consistent with AGENTS.md hard invariant 1, though in practice `auth` never reaches
-the outbox at all (T-011 decision 3). The mode is read once at dispatcher startup; changing
+`T-038` adds the suppression gate (DESIGN.md §5): the first in-line gate check this send path
+runs (kill switches, above, are checked before a row is even claimed, not inside this path),
+before any decrypt, so a blocked send never spends a DEK fetch. It runs unconditionally for
+every message class -- no exemption, unlike verification/consent below. A destination present
+in `suppression` with `review_at` still in the future terminal-writes a `suppressed_list` event
+instead of sending; an entry whose `review_at` has already passed no longer blocks -- the gate
+query itself stops matching it, no sweep job needed. See "Suppression list" (control-plane CLI)
+for managing entries.
+
+`T-036` adds the verification gate (DESIGN.md §5), checked next: for `transactional` and
+`marketing` class messages, the dispatcher checks `customer_address.verified_at` before
+decrypting. Per-tenant `tenant_config.verification_mode` controls the outcome for an unverified
+address: `enforce` blocks the send and writes a terminal `unverified_address` event/status, the
+same as `expired`/`discarded`; `observe` (the default) records the same `unverified_address`
+event non-terminally and lets the send proceed anyway, so an address that never gets
+verification data still gets sent and the gap stays visible in the ledger rather than silently
+blocking or silently passing. `auth` class messages skip this gate entirely -- consistent with
+AGENTS.md hard invariant 1, though in practice `auth` never reaches the outbox at all (T-011
+decision 3). The mode is read once at dispatcher startup; changing
 `tenant_config.verification_mode` takes effect on the next restart, not live.
 
 Requires `DISPATCHER_TENANT_SLUG` (which tenant this process serves), `VAULT_ROLE_ID` /

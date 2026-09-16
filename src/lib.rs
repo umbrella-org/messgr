@@ -20,6 +20,7 @@ pub mod profile;
 pub mod provider_config;
 pub mod sender;
 pub mod stats;
+pub mod suppression;
 pub mod template;
 pub mod tenant;
 pub mod tenant_config;

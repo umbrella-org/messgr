@@ -226,9 +226,10 @@ async fn customer_linkable_tables(pool: &PgPool) -> Vec<String> {
 
 /// Every real, top-level table in the schema (partitions collapsed to their
 /// parent, same as `customer_linkable_tables`) — used to tell "manifest
-/// entry names a table that doesn't exist yet" (fine — e.g. `suppression`,
-/// decision 5) apart from "manifest entry names a table that exists but no
-/// longer matches the detection rule" (a real staleness bug).
+/// entry names a table that doesn't exist yet" (fine — e.g. `suppression`
+/// before its migration landed, T-038, decision 5) apart from "manifest
+/// entry names a table that exists but no longer matches the detection
+/// rule" (a real staleness bug).
 async fn existing_tables(pool: &PgPool) -> Vec<String> {
     let rows: Vec<(String,)> = sqlx::query_as(
         r#"
@@ -268,12 +269,12 @@ async fn every_customer_linkable_table_is_covered_or_exempt() {
          or the other in tests/erasure_coverage.rs, and to DESIGN.md §7.2 if newly exempt"
     );
 
-    // A manifest entry naming a table that doesn't exist yet (e.g.
-    // `suppression`, build step 5) is not stale — decision 5. Only a table
-    // that DOES exist but wasn't returned by the detection query (renamed,
-    // or its customer-linkable column dropped/renamed) is a real staleness
-    // bug, same class as the orphan_event gap this ticket's own history
-    // records.
+    // A manifest entry naming a table that doesn't exist yet is not stale —
+    // e.g. `suppression` before its migration landed (T-038) — decision 5.
+    // Only a table that DOES exist but wasn't returned by the detection
+    // query (renamed, or its customer-linkable column dropped/renamed) is a
+    // real staleness bug, same class as the orphan_event gap this ticket's
+    // own history records.
     let present = existing_tables(&tenant.tenant_pool).await;
     let stale: Vec<&&str> = COVERED
         .iter()

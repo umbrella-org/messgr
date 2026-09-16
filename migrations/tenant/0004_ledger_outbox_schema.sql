@@ -3,7 +3,7 @@
 -- design's own CREATE TABLE statements. No tenant_id column on
 -- outbox/comms_event/idempotency and no REFERENCES clauses beyond what
 -- the design itself declares -- see T-009 decision 1. Consent (T-020),
--- suppression (T-021), and template (T-010) -- also in §4.4 -- are
+-- suppression (T-038), and template (T-010) -- also in §4.4 -- are
 -- separate tickets.
 
 CREATE TABLE comms_request (

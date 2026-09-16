@@ -170,8 +170,17 @@ CREATE TABLE consent (
 CREATE TABLE suppression (              -- hard bounces, complaints, regulatory blocks
     destination_hmac bytea PRIMARY KEY,
     reason           text  NOT NULL,
-    added_at         timestamptz NOT NULL
+    added_at         timestamptz NOT NULL,
+    review_at        timestamptz NOT NULL
 );
+
+**Correction: this snippet's `suppression` table was missing `review_at`.** `04-gate-chain.md`
+and `06-pii-retention.md`'s prose both promise entries "carry a review date rather than living
+forever" and "retire independently" once their own review date passes, but this table never had
+the column. Fixed as part of T-038: `review_at` is mandatory and auto-expiring — an entry blocks
+only while `review_at > now()`, so the gate query itself stops matching once it passes, with no
+sweep job needed, and retiring an entry early is the identical `UPDATE` as letting it expire
+naturally.
 
 CREATE TABLE template (
     template_id text NOT NULL,
