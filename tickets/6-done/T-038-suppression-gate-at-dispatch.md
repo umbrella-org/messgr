@@ -634,3 +634,4 @@ cost: estimated M, actual M
   `write_outbox_row_with_hmac` needed, rather than keeping two parallel helpers. Force-pushed the
   rebased branch (`--force-with-lease`); PR #53 clean and CI green (`clippy`/`fmt`/`test` all
   pass) as of commit `85045de`.
+- 2026-09-16 — MERGED: PR #53 (`feat/T-038-suppression-gate-at-dispatch`, `3409991`)
