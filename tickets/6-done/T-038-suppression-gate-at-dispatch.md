@@ -624,3 +624,13 @@ cost: estimated M, actual M
   caller-supplied `review_at` against one already round-tripped through storage. Fixed by
   truncating once, at the top of `add_suppression`, before the first comparison or write (commit
   `e943d70` on the same branch, pushed to re-run CI).
+- 2026-09-16 — T-036's PR #52 merged to `main` while #53 was open, giving PR #53 a real conflict
+  in `try_process` (both branches insert a gate check at the same point) and in every
+  `DispatcherContext { .. }` literal (T-036 added `verification_mode`). Rebased
+  `feat/T-038-suppression-gate-at-dispatch` onto `main`; resolved by running suppression first
+  (unconditional, no class exemption) ahead of verification (transactional/marketing only) —
+  `dispatcher.adoc` reordered to match. `tests/dispatcher.rs`'s own T-036-added
+  `write_outbox_row_with_verification` helper gained the `destination_hmac` parameter my own
+  `write_outbox_row_with_hmac` needed, rather than keeping two parallel helpers. Force-pushed the
+  rebased branch (`--force-with-lease`); PR #53 clean and CI green (`clippy`/`fmt`/`test` all
+  pass) as of commit `85045de`.
