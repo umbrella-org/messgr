@@ -239,8 +239,9 @@ where they're new.)
 
 #### Task 5 — every existing `DispatcherContext { .. }` literal in `tests/dispatcher.rs`
 
-Add `verification_mode: "observe".to_string()` (or the scenario's own mode) to each of the eight
-existing literals in `tests/dispatcher.rs` so the crate still compiles — every pre-T-036 test
+Add `verification_mode: "observe".to_string()` (or the scenario's own mode) to each of the seven
+existing literals in `tests/dispatcher.rs` (`grep -n "DispatcherContext {" tests/dispatcher.rs`)
+so the crate still compiles — every pre-T-036 test
 implicitly runs in `observe`, which is a no-op for rows whose `customer_address` was never given
 a `verified_at` (matches decision 3: no row → unverified → recorded, not blocked), so no existing
 test's assertions change.
@@ -315,3 +316,6 @@ separate registration — this is a content addition to an existing file.
   analysis — step 5 (the gate chain) is unbuilt despite steps 0-4 and 17 later hardening tickets
   being done; split into three independently-schedulable gates (this one, T-037, T-038).
 - 2026-09-16 — TO DO → READY: plan complete
+- 2026-09-16 — plan amended inline: pickup applicability audit (independent sub-agent) confirmed
+  every plan assumption against current code except Task 5's literal count — `tests/dispatcher.rs`
+  has 7 `DispatcherContext { .. }` construction sites, not 8; corrected in place, no other change.
