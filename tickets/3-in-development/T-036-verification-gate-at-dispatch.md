@@ -237,14 +237,31 @@ if matches!(row.class.as_str(), class::TRANSACTIONAL | class::MARKETING) {
 (Imports go at the file's existing `use` block, not inline — shown inline here only to mark
 where they're new.)
 
-#### Task 5 — every existing `DispatcherContext { .. }` literal in `tests/dispatcher.rs`
+#### Task 5 — every existing `DispatcherContext { .. }` literal
 
-Add `verification_mode: "observe".to_string()` (or the scenario's own mode) to each of the seven
-existing literals in `tests/dispatcher.rs` (`grep -n "DispatcherContext {" tests/dispatcher.rs`)
-so the crate still compiles — every pre-T-036 test
-implicitly runs in `observe`, which is a no-op for rows whose `customer_address` was never given
-a `verified_at` (matches decision 3: no row → unverified → recorded, not blocked), so no existing
-test's assertions change.
+Add `verification_mode: "observe".to_string()` (or the scenario's own mode) to every existing
+`DispatcherContext { .. }` literal so the crate still compiles —
+`grep -rn "DispatcherContext {" tests/` to find them all: **both** `tests/dispatcher.rs` (7
+literals) **and** `tests/kill_switch.rs` (1 literal, in
+`drain_sends_every_row_and_marks_an_already_expired_one_expired_instead`).
+
+Also: `write_ready_outbox_row`'s pre-existing rows (`tests/dispatcher.rs`) never had a
+`customer_address` row at all, so under `observe` the new gate would insert an extra
+`unverified_address` event ahead of `sent` on every one of them — silently breaking the three
+tests that assert an *exact* single-event `comms_event` list
+(`successful_send_writes_sent_event_and_final_status_and_deletes_the_outbox_row`,
+`terminal_provider_rejection_writes_failed_event_and_final_status_with_no_requeue`,
+`retries_exhausted_after_max_attempts_terminal_fails`). Fix at the source, not by patching three
+assertions: give `write_ready_outbox_row` a real, already-verified `customer_address` row by
+default (real FK to `customer(id)`, so a parent `customer` row is needed too — neither table had
+ever been touched by this suite before). Concretely: extract a lower-level
+`write_outbox_row_with_verification(tenant, vault, cache, destination, body, class,
+verified_at)` that inserts both rows and calls `insert_transactional` with the real
+`address_id`; make `write_ready_outbox_row` a thin wrapper calling it with `class =
+"transactional"`, `verified_at = Some(Utc::now())`. The four new acceptance tests below call the
+lower-level function directly to control `class`/`verified_at` themselves.
+`tests/kill_switch.rs`'s own row-writing helper does not need the same treatment — none of its
+assertions inspect `comms_event` contents, so an extra `observe`-mode event is harmless there.
 
 ### Acceptance test
 
@@ -320,3 +337,14 @@ separate registration — this is a content addition to an existing file.
   every plan assumption against current code except Task 5's literal count — `tests/dispatcher.rs`
   has 7 `DispatcherContext { .. }` construction sites, not 8; corrected in place, no other change.
 - 2026-09-16 — READY → IN DEVELOPMENT: picked up
+- 2026-09-16 — plan amended inline: Task 5 missed a second `DispatcherContext { .. }` literal in
+  `tests/kill_switch.rs` (the applicability audit and the original plan both only checked
+  `tests/dispatcher.rs`) — found via `cargo build`'s own missing-field error; added the field
+  there too. Also found mid-implementation: `write_ready_outbox_row`'s rows had no
+  `customer_address` row at all, so the new `observe`-mode gate injected an extra
+  `unverified_address` event into three tests asserting an exact single-event list, and
+  `customer_address.customer_id`'s real FK to `customer(id)` meant a parent row was needed too.
+  Fixed by giving `write_ready_outbox_row` a real, already-verified `customer_address`/`customer`
+  row by default (via a new lower-level `write_outbox_row_with_verification` helper the new
+  acceptance tests also use) rather than patching the three assertions. Task 5's plan text
+  updated to match; no scope change beyond it.
