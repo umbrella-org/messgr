@@ -348,3 +348,4 @@ separate registration — this is a content addition to an existing file.
   row by default (via a new lower-level `write_outbox_row_with_verification` helper the new
   acceptance tests also use) rather than patching the three assertions. Task 5's plan text
   updated to match; no scope change beyond it.
+- 2026-09-16 — IN DEVELOPMENT → IN REVIEW: acceptance green
