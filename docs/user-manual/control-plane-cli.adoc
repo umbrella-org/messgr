@@ -224,6 +224,35 @@ Only the highest-priority row per channel is resolved at startup -- failover-on-
 resolved out of scope for now (this ticket's own Description item 4); the ordered-list schema
 exists so a second provider is a config change later, not something this ticket wires up.
 
+== Suppression list
+
+[source,bash]
+----
+cargo run --bin messgr-control -- suppression add --tenant-slug acme \
+    --destination +15550100 --reason hard_bounce \
+    --review-at 2027-01-01T00:00:00Z --actor operator@example.com
+cargo run --bin messgr-control -- suppression list --tenant-slug acme
+cargo run --bin messgr-control -- suppression remove --tenant-slug acme \
+    --destination +15550100 --actor operator@example.com
+----
+
+`suppression` (DESIGN.md §5, §4.4, T-038) blocks every further send to a destination that hard
+bounced, complained, or is under a regulatory hold, checked by `messgr-dispatcher` at send time
+for every message class with no exemption. `add` computes `destination_hmac` from the raw
+`--destination` itself (via the tenant's own pepper, exactly as `messgr-ingest` does) and
+upserts a row keyed on that hash -- `--destination` is never stored or logged. `--reason` is a
+closed vocabulary: `hard_bounce`, `complaint`, or `regulatory_hold`. `--review-at` is a
+mandatory RFC 3339 timestamp; the entry blocks only while it is still in the future, and once it
+passes the gate query simply stops matching -- no sweep job runs to clean it up.
+
+`remove` is exactly "move `review_at` to now": the same mechanism as letting an entry expire
+naturally, so there is no separate "removed" state. It is rejected if the destination has no
+currently-active entry (already expired, or never suppressed).
+
+`list` prints every entry for a tenant with `destination_hmac` hex-encoded and a computed
+`status` (`active` or `expired`) -- the HMAC is one-way, so there is nothing to reverse it back
+to the original address.
+
 == Customer DEK pre-provisioning
 
 [source,bash]
