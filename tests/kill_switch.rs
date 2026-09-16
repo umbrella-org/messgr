@@ -519,6 +519,7 @@ async fn drain_sends_every_row_and_marks_an_already_expired_one_expired_instead(
         cache: Arc::new(cache),
         mount: tenant.mount.clone(),
         sender,
+        verification_mode: "observe".to_string(),
         kill_switches: Arc::new(KillSwitchCache::new()),
         draining: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
     });

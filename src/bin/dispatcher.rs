@@ -45,6 +45,10 @@ const DEK_CACHE_TTL: Duration = Duration::from_secs(3600);
 /// own column default -- used when a tenant has no `tenant_config` row at
 /// all (T-007 decision 4: no auto-seeding).
 const DEFAULT_KILL_SWITCH_RELEASE_RATE: i32 = 500;
+/// Matches `migrations/tenant/0002_tenant_config.sql`'s own
+/// `verification_mode` column default (T-036) -- used when a tenant has no
+/// `tenant_config` row at all (T-007 decision 4: no auto-seeding).
+const DEFAULT_VERIFICATION_MODE: &str = "observe";
 const KILL_SWITCH_POLL_INTERVAL: Duration = Duration::from_secs(30);
 
 fn env_var(name: &str) -> String {
@@ -142,11 +146,17 @@ async fn main() {
         DEK_CACHE_TTL,
     ));
 
-    let release_rate = tenant_config_repo::load(&tenant_pool)
+    let tenant_config = tenant_config_repo::load(&tenant_pool)
         .await
-        .expect("loading tenant_config failed")
+        .expect("loading tenant_config failed");
+    let release_rate = tenant_config
+        .as_ref()
         .map(|c| c.kill_switch_release_rate)
         .unwrap_or(DEFAULT_KILL_SWITCH_RELEASE_RATE) as i64;
+    let verification_mode = tenant_config
+        .as_ref()
+        .map(|c| c.verification_mode.clone())
+        .unwrap_or_else(|| DEFAULT_VERIFICATION_MODE.to_string());
 
     let kill_switches = Arc::new(KillSwitchCache::new());
     let draining = Arc::new(RwLock::new(HashMap::new()));
@@ -201,6 +211,7 @@ async fn main() {
                 cache: cache.clone(),
                 mount: tenant.vault_mount.clone(),
                 sender,
+                verification_mode: verification_mode.clone(),
                 kill_switches: kill_switches.clone(),
                 draining: draining.clone(),
             }),

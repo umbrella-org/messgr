@@ -165,6 +165,58 @@ pub async fn load_ciphertexts(
     .await
 }
 
+/// `customer_address.verified_at` for the verification gate (DESIGN.md §5,
+/// T-036) — a missing row (no FK ties `outbox.address_id` to
+/// `customer_address.id`, T-009 decision 1) collapses to the same
+/// "unverified" answer as a row with `verified_at IS NULL`, via
+/// `Option::flatten`.
+pub async fn load_verified_at(
+    pool: &PgPool,
+    address_id: Uuid,
+) -> Result<Option<DateTime<Utc>>, sqlx::Error> {
+    let result: Option<Option<DateTime<Utc>>> =
+        sqlx::query_scalar("SELECT verified_at FROM customer_address WHERE id = $1")
+            .bind(address_id)
+            .fetch_optional(pool)
+            .await?;
+
+    Ok(result.flatten())
+}
+
+/// A non-terminal `comms_event` row (T-036): unlike `write_terminal`, this
+/// touches no `outbox`/`comms_request` state — used by the verification
+/// gate's `observe` mode, which records the outcome but still lets the send
+/// proceed. `provider_ref` is bound to `''`, matching `write_terminal`'s own
+/// convention — the column is `NOT NULL DEFAULT ''` (migration 0004), so
+/// `NULL` was never actually bindable here; `''` is simply the column's own
+/// "no provider ref" value, not a dodge of the review addendum's
+/// NULL-in-`UNIQUE`/`ON CONFLICT` warning (step 2), which that `NOT NULL`
+/// constraint already forecloses.
+pub async fn record_event(
+    pool: &PgPool,
+    comms_request_id: Uuid,
+    customer_id: Uuid,
+    event_type: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        r#"
+        INSERT INTO comms_event (
+            comms_request_id, customer_id, occurred_at, event_type, provider_ref,
+            provider_status, provider_payload_ciphertext
+        ) VALUES ($1, $2, $3, $4, '', NULL, NULL)
+        ON CONFLICT (occurred_at, comms_request_id, event_type, provider_ref) DO NOTHING
+        "#,
+    )
+    .bind(comms_request_id)
+    .bind(customer_id)
+    .bind(Utc::now())
+    .bind(event_type)
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
 /// Clears the lease and reschedules a retryable failure in one statement
 /// (DESIGN.md's corrected §4.2, T-021 decision 3) — never a bare timeout
 /// race between "write a terminal state" and "explicitly clear the lease on

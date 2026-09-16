@@ -149,17 +149,65 @@ impl TestTenant {
     }
 }
 
+/// Inserts a `customer` row and a `customer_address` row under it directly
+/// (T-036) — raw SQL, not `customer::repo::insert_address` (which always
+/// writes `verified_at = NULL` and needs a transaction the dispatcher-suite
+/// callers don't have open), since these tests need to control
+/// `verified_at` explicitly. `customer_address.customer_id` has a real FK
+/// to `customer(id)` (migration 0008), so the parent row is mandatory —
+/// this suite otherwise never creates one, unlike `tests/customer.rs`.
+async fn insert_customer_address(
+    tenant: &TestTenant,
+    id: Uuid,
+    customer_id: Uuid,
+    value_ciphertext: &[u8],
+    verified_at: Option<DateTime<Utc>>,
+) {
+    let now = Utc::now();
+    sqlx::query(
+        "INSERT INTO customer (id, locale, timezone, provisional, created_at) \
+         VALUES ($1, 'en-US', 'UTC', false, $2)",
+    )
+    .bind(customer_id)
+    .bind(now)
+    .execute(&tenant.tenant_pool)
+    .await
+    .expect("inserting customer failed");
+
+    sqlx::query(
+        r#"
+        INSERT INTO customer_address (
+            id, customer_id, kind, value_ciphertext, value_hmac, rank, label,
+            verified_at, active_from, active_to, source_updated_at
+        ) VALUES ($1, $2, 'msisdn', $3, $4, 1, NULL, $5, $6, NULL, $6)
+        "#,
+    )
+    .bind(id)
+    .bind(customer_id)
+    .bind(value_ciphertext)
+    .bind(unique_name("hmac").into_bytes())
+    .bind(verified_at)
+    .bind(now)
+    .execute(&tenant.tenant_pool)
+    .await
+    .expect("inserting customer_address failed");
+}
+
 /// Writes a real, ready-to-claim `outbox` row the same way `messgr-ingest`
-/// would: a real DEK, real AES-256-GCM ciphertexts, and a single-transaction
-/// `comms_request` + `outbox` insert (`ingest::repo::insert_transactional`)
-/// — rather than standing up mTLS/axum, since this suite is about the
-/// dispatcher's read/decrypt/send/write path, not ingest's.
-async fn write_ready_outbox_row(
+/// would: a real DEK, real AES-256-GCM ciphertexts, a matching
+/// `customer_address` row (T-036 — the verification gate needs one to
+/// check), and a single-transaction `comms_request` + `outbox` insert
+/// (`ingest::repo::insert_transactional`) — rather than standing up
+/// mTLS/axum, since this suite is about the dispatcher's read/decrypt/
+/// send/write path, not ingest's.
+async fn write_outbox_row_with_verification(
     tenant: &TestTenant,
     vault: &VaultKeyStore,
     cache: &KeyCache,
     destination: &str,
     body: &str,
+    class: &str,
+    verified_at: Option<DateTime<Utc>>,
 ) -> (Uuid, DateTime<Utc>, Uuid) {
     let tenant_id =
         messgr::tenant::repo::find_by_slug(&tenant.control_pool, &tenant.slug)
@@ -186,6 +234,16 @@ async fn write_ready_outbox_row(
     let payload_ciphertext = encryption::encrypt(&dek, aad, body.as_bytes())
         .expect("encrypting payload failed");
 
+    let address_id = Uuid::new_v4();
+    insert_customer_address(
+        tenant,
+        address_id,
+        customer_id,
+        &destination_ciphertext,
+        verified_at,
+    )
+    .await;
+
     let outcome = insert_transactional(
         &tenant.tenant_pool,
         &unique_name("idempotency-key"),
@@ -193,7 +251,7 @@ async fn write_ready_outbox_row(
         tenant_id,
         customer_id,
         "sms",
-        "transactional",
+        class,
         1,
         "balance-alert",
         1,
@@ -202,7 +260,7 @@ async fn write_ready_outbox_row(
         &destination_ciphertext,
         &payload_ciphertext,
         Uuid::new_v4(),
-        Uuid::new_v4(),
+        address_id,
     )
     .await
     .expect("insert_transactional failed");
@@ -221,6 +279,29 @@ async fn write_ready_outbox_row(
     };
 
     (comms_request_id, created_at, customer_id)
+}
+
+/// Every pre-T-036 test in this file wants an ordinary, already-verified
+/// send — the verification gate is not what they're testing — so this
+/// keeps their call sites unchanged and defaults to `verified_at =
+/// Some(now)`, `class = "transactional"`.
+async fn write_ready_outbox_row(
+    tenant: &TestTenant,
+    vault: &VaultKeyStore,
+    cache: &KeyCache,
+    destination: &str,
+    body: &str,
+) -> (Uuid, DateTime<Utc>, Uuid) {
+    write_outbox_row_with_verification(
+        tenant,
+        vault,
+        cache,
+        destination,
+        body,
+        "transactional",
+        Some(Utc::now()),
+    )
+    .await
 }
 
 fn small_cache() -> KeyCache {
@@ -256,6 +337,7 @@ async fn successful_send_writes_sent_event_and_final_status_and_deletes_the_outb
         cache: Arc::new(cache),
         mount: tenant.mount.clone(),
         sender,
+        verification_mode: "observe".to_string(),
         kill_switches: Arc::new(KillSwitchCache::new()),
         draining: Arc::new(RwLock::new(HashMap::new())),
     };
@@ -343,6 +425,7 @@ async fn terminal_provider_rejection_writes_failed_event_and_final_status_with_n
         cache: Arc::new(cache),
         mount: tenant.mount.clone(),
         sender,
+        verification_mode: "observe".to_string(),
         kill_switches: Arc::new(KillSwitchCache::new()),
         draining: Arc::new(RwLock::new(HashMap::new())),
     };
@@ -429,6 +512,7 @@ async fn transient_provider_failure_requeues_with_cleared_lease_and_backoff() {
         cache: Arc::new(cache),
         mount: tenant.mount.clone(),
         sender,
+        verification_mode: "observe".to_string(),
         kill_switches: Arc::new(KillSwitchCache::new()),
         draining: Arc::new(RwLock::new(HashMap::new())),
     };
@@ -514,6 +598,7 @@ async fn transient_http_failure_requeues() {
         cache: Arc::new(cache),
         mount: tenant.mount.clone(),
         sender,
+        verification_mode: "observe".to_string(),
         kill_switches: Arc::new(KillSwitchCache::new()),
         draining: Arc::new(RwLock::new(HashMap::new())),
     };
@@ -579,6 +664,7 @@ async fn retries_exhausted_after_max_attempts_terminal_fails() {
         cache: Arc::new(cache),
         mount: tenant.mount.clone(),
         sender,
+        verification_mode: "observe".to_string(),
         kill_switches: Arc::new(KillSwitchCache::new()),
         draining: Arc::new(RwLock::new(HashMap::new())),
     };
@@ -678,6 +764,7 @@ async fn seventh_attempt_still_reschedules_one_short_of_the_cap() {
         cache: Arc::new(cache),
         mount: tenant.mount.clone(),
         sender,
+        verification_mode: "observe".to_string(),
         kill_switches: Arc::new(KillSwitchCache::new()),
         draining: Arc::new(RwLock::new(HashMap::new())),
     };
@@ -760,6 +847,7 @@ async fn attempts_past_the_cap_still_terminal_fails() {
         cache: Arc::new(cache),
         mount: tenant.mount.clone(),
         sender,
+        verification_mode: "observe".to_string(),
         kill_switches: Arc::new(KillSwitchCache::new()),
         draining: Arc::new(RwLock::new(HashMap::new())),
     };
@@ -962,6 +1050,375 @@ async fn inserting_an_outbox_row_notifies_the_channels_listener() {
 
     assert_eq!(notification.channel(), "outbox_sms");
     assert_eq!(notification.payload(), comms_request_id.to_string());
+
+    tenant.cleanup().await;
+}
+
+// --- T-036: verification gate ---
+
+#[tokio::test]
+async fn enforce_blocks_unverified_address_with_terminal_event_and_no_send() {
+    let vault = vault_keystore();
+    let tenant = provision_test_tenant(&vault).await;
+    let cache = small_cache();
+
+    let mock_server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/messages"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "message_id": "should-not-be-called",
+            "status": "queued",
+        })))
+        .expect(0)
+        .mount(&mock_server)
+        .await;
+
+    let (comms_request_id, created_at, _customer_id) =
+        write_outbox_row_with_verification(
+            &tenant,
+            &vault,
+            &cache,
+            "+15550100",
+            "hello there",
+            "transactional",
+            None,
+        )
+        .await;
+
+    let sender: Arc<dyn Sender> =
+        Arc::new(HttpSender::new(mock_server.uri(), "test-key".to_string()));
+    let ctx = DispatcherContext {
+        pool: tenant.tenant_pool.clone(),
+        keystore: Arc::new(vault_keystore()),
+        cache: Arc::new(cache),
+        mount: tenant.mount.clone(),
+        sender,
+        verification_mode: "enforce".to_string(),
+        kill_switches: Arc::new(KillSwitchCache::new()),
+        draining: Arc::new(RwLock::new(HashMap::new())),
+    };
+
+    let claimed = repo::claim(
+        &tenant.tenant_pool,
+        "sms",
+        10,
+        Utc::now() + chrono::Duration::minutes(2),
+        &no_exclusion(),
+    )
+    .await
+    .expect("claim failed");
+    assert_eq!(claimed.len(), 1);
+
+    try_process(&ctx, &claimed[0])
+        .await
+        .expect("try_process failed");
+
+    let final_status: Option<String> = sqlx::query_scalar(
+        "SELECT final_status FROM comms_request WHERE created_at = $1 AND id = $2",
+    )
+    .bind(created_at)
+    .bind(comms_request_id)
+    .fetch_one(&tenant.tenant_pool)
+    .await
+    .expect("fetching final_status failed");
+    assert_eq!(final_status.as_deref(), Some("unverified_address"));
+
+    let events: Vec<(String, Option<String>, Option<String>)> = sqlx::query_as(
+        "SELECT event_type, provider_ref, provider_status FROM comms_event \
+         WHERE comms_request_id = $1 ORDER BY occurred_at",
+    )
+    .bind(comms_request_id)
+    .fetch_all(&tenant.tenant_pool)
+    .await
+    .expect("fetching comms_event rows failed");
+    assert_eq!(
+        events,
+        vec![("unverified_address".to_string(), Some(String::new()), None)]
+    );
+
+    let outbox_count: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM outbox WHERE comms_request_id = $1")
+            .bind(comms_request_id)
+            .fetch_one(&tenant.tenant_pool)
+            .await
+            .expect("counting outbox rows failed");
+    assert_eq!(
+        outbox_count, 0,
+        "a terminal row must be removed from the queue"
+    );
+
+    tenant.cleanup().await;
+}
+
+#[tokio::test]
+async fn observe_records_unverified_address_and_still_sends() {
+    let vault = vault_keystore();
+    let tenant = provision_test_tenant(&vault).await;
+    let cache = small_cache();
+
+    let mock_server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/messages"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "message_id": "msg-observe-1",
+            "status": "queued",
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let (comms_request_id, created_at, _customer_id) =
+        write_outbox_row_with_verification(
+            &tenant,
+            &vault,
+            &cache,
+            "+15550100",
+            "hello there",
+            "transactional",
+            None,
+        )
+        .await;
+
+    let sender: Arc<dyn Sender> =
+        Arc::new(HttpSender::new(mock_server.uri(), "test-key".to_string()));
+    let ctx = DispatcherContext {
+        pool: tenant.tenant_pool.clone(),
+        keystore: Arc::new(vault_keystore()),
+        cache: Arc::new(cache),
+        mount: tenant.mount.clone(),
+        sender,
+        verification_mode: "observe".to_string(),
+        kill_switches: Arc::new(KillSwitchCache::new()),
+        draining: Arc::new(RwLock::new(HashMap::new())),
+    };
+
+    let claimed = repo::claim(
+        &tenant.tenant_pool,
+        "sms",
+        10,
+        Utc::now() + chrono::Duration::minutes(2),
+        &no_exclusion(),
+    )
+    .await
+    .expect("claim failed");
+    assert_eq!(claimed.len(), 1);
+
+    try_process(&ctx, &claimed[0])
+        .await
+        .expect("try_process failed");
+
+    let final_status: Option<String> = sqlx::query_scalar(
+        "SELECT final_status FROM comms_request WHERE created_at = $1 AND id = $2",
+    )
+    .bind(created_at)
+    .bind(comms_request_id)
+    .fetch_one(&tenant.tenant_pool)
+    .await
+    .expect("fetching final_status failed");
+    assert_eq!(final_status.as_deref(), Some("sent"));
+
+    let events: Vec<(String, Option<String>, Option<String>)> = sqlx::query_as(
+        "SELECT event_type, provider_ref, provider_status FROM comms_event \
+         WHERE comms_request_id = $1 ORDER BY occurred_at",
+    )
+    .bind(comms_request_id)
+    .fetch_all(&tenant.tenant_pool)
+    .await
+    .expect("fetching comms_event rows failed");
+    assert_eq!(
+        events,
+        vec![
+            ("unverified_address".to_string(), Some(String::new()), None),
+            (
+                "sent".to_string(),
+                Some("msg-observe-1".to_string()),
+                Some("queued".to_string())
+            ),
+        ],
+        "observe must record the outcome and still let the send through"
+    );
+
+    let outbox_count: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM outbox WHERE comms_request_id = $1")
+            .bind(comms_request_id)
+            .fetch_one(&tenant.tenant_pool)
+            .await
+            .expect("counting outbox rows failed");
+    assert_eq!(outbox_count, 0);
+
+    tenant.cleanup().await;
+}
+
+#[tokio::test]
+async fn verified_address_sends_normally_under_enforce() {
+    let vault = vault_keystore();
+    let tenant = provision_test_tenant(&vault).await;
+    let cache = small_cache();
+
+    let mock_server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/messages"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "message_id": "msg-verified-1",
+            "status": "queued",
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let (comms_request_id, created_at, _customer_id) =
+        write_outbox_row_with_verification(
+            &tenant,
+            &vault,
+            &cache,
+            "+15550100",
+            "hello there",
+            "transactional",
+            Some(Utc::now()),
+        )
+        .await;
+
+    let sender: Arc<dyn Sender> =
+        Arc::new(HttpSender::new(mock_server.uri(), "test-key".to_string()));
+    let ctx = DispatcherContext {
+        pool: tenant.tenant_pool.clone(),
+        keystore: Arc::new(vault_keystore()),
+        cache: Arc::new(cache),
+        mount: tenant.mount.clone(),
+        sender,
+        verification_mode: "enforce".to_string(),
+        kill_switches: Arc::new(KillSwitchCache::new()),
+        draining: Arc::new(RwLock::new(HashMap::new())),
+    };
+
+    let claimed = repo::claim(
+        &tenant.tenant_pool,
+        "sms",
+        10,
+        Utc::now() + chrono::Duration::minutes(2),
+        &no_exclusion(),
+    )
+    .await
+    .expect("claim failed");
+    assert_eq!(claimed.len(), 1);
+
+    try_process(&ctx, &claimed[0])
+        .await
+        .expect("try_process failed");
+
+    let final_status: Option<String> = sqlx::query_scalar(
+        "SELECT final_status FROM comms_request WHERE created_at = $1 AND id = $2",
+    )
+    .bind(created_at)
+    .bind(comms_request_id)
+    .fetch_one(&tenant.tenant_pool)
+    .await
+    .expect("fetching final_status failed");
+    assert_eq!(final_status.as_deref(), Some("sent"));
+
+    let events: Vec<(String, Option<String>, Option<String>)> = sqlx::query_as(
+        "SELECT event_type, provider_ref, provider_status FROM comms_event WHERE comms_request_id = $1",
+    )
+    .bind(comms_request_id)
+    .fetch_all(&tenant.tenant_pool)
+    .await
+    .expect("fetching comms_event rows failed");
+    assert_eq!(
+        events,
+        vec![(
+            "sent".to_string(),
+            Some("msg-verified-1".to_string()),
+            Some("queued".to_string())
+        )],
+        "enforce must not block a verified address"
+    );
+
+    tenant.cleanup().await;
+}
+
+#[tokio::test]
+async fn auth_class_skips_the_gate_even_when_unverified() {
+    let vault = vault_keystore();
+    let tenant = provision_test_tenant(&vault).await;
+    let cache = small_cache();
+
+    let mock_server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/messages"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "message_id": "msg-auth-1",
+            "status": "queued",
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let (comms_request_id, created_at, _customer_id) =
+        write_outbox_row_with_verification(
+            &tenant,
+            &vault,
+            &cache,
+            "+15550100",
+            "your code is 123456",
+            "auth",
+            None,
+        )
+        .await;
+
+    let sender: Arc<dyn Sender> =
+        Arc::new(HttpSender::new(mock_server.uri(), "test-key".to_string()));
+    let ctx = DispatcherContext {
+        pool: tenant.tenant_pool.clone(),
+        keystore: Arc::new(vault_keystore()),
+        cache: Arc::new(cache),
+        mount: tenant.mount.clone(),
+        sender,
+        verification_mode: "enforce".to_string(),
+        kill_switches: Arc::new(KillSwitchCache::new()),
+        draining: Arc::new(RwLock::new(HashMap::new())),
+    };
+
+    let claimed = repo::claim(
+        &tenant.tenant_pool,
+        "sms",
+        10,
+        Utc::now() + chrono::Duration::minutes(2),
+        &no_exclusion(),
+    )
+    .await
+    .expect("claim failed");
+    assert_eq!(claimed.len(), 1);
+
+    try_process(&ctx, &claimed[0])
+        .await
+        .expect("try_process failed");
+
+    let final_status: Option<String> = sqlx::query_scalar(
+        "SELECT final_status FROM comms_request WHERE created_at = $1 AND id = $2",
+    )
+    .bind(created_at)
+    .bind(comms_request_id)
+    .fetch_one(&tenant.tenant_pool)
+    .await
+    .expect("fetching final_status failed");
+    assert_eq!(final_status.as_deref(), Some("sent"));
+
+    let events: Vec<(String, Option<String>, Option<String>)> = sqlx::query_as(
+        "SELECT event_type, provider_ref, provider_status FROM comms_event WHERE comms_request_id = $1",
+    )
+    .bind(comms_request_id)
+    .fetch_all(&tenant.tenant_pool)
+    .await
+    .expect("fetching comms_event rows failed");
+    assert_eq!(
+        events,
+        vec![(
+            "sent".to_string(),
+            Some("msg-auth-1".to_string()),
+            Some("queued".to_string())
+        )],
+        "auth class must skip the verification gate entirely, even unverified under enforce"
+    );
 
     tenant.cleanup().await;
 }

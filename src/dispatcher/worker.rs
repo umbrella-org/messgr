@@ -11,11 +11,13 @@ use uuid::Uuid;
 
 use crate::customer_dek::lifecycle::{self, CustomerDekError};
 use crate::encryption::{self, EncryptionError};
+use crate::ingest::model::class;
 use crate::key_cache::KeyCache;
 use crate::keystore::KeyStore;
 use crate::kill_switch::cache::{self, ChannelExclusion, KillSwitchCache};
 use crate::kill_switch::model::KillSwitch;
 use crate::sender::{Sender, SenderError};
+use crate::tenant_config::model::verification_mode;
 
 use super::model::ClaimedOutbox;
 use super::repo;
@@ -53,6 +55,10 @@ pub struct DispatcherContext {
     pub cache: Arc<KeyCache>,
     pub mount: String,
     pub sender: Arc<dyn Sender>,
+    /// `tenant_config.verification_mode` (`enforce`|`observe`, DESIGN.md §5,
+    /// T-036) — loaded once at `messgr-dispatcher` startup, like every other
+    /// `tenant_config` field except kill switches, and never hot-reloaded.
+    pub verification_mode: String,
     pub kill_switches: Arc<KillSwitchCache>,
     /// Released switches whose backlog hasn't finished the release-drain
     /// ramp yet (T-016 decision 4). Kept separate from `kill_switches`
@@ -190,6 +196,38 @@ pub async fn try_process(
     ctx: &DispatcherContext,
     row: &ClaimedOutbox,
 ) -> Result<(), DispatchError> {
+    // Verification gate (DESIGN.md §5, T-036) — first in-line gate check in
+    // this function; runs before decrypt so a blocked `enforce` send spends
+    // no Vault/DEK work. `auth` falls through untouched (defense in depth;
+    // it never reaches the outbox at all per T-011 decision 3).
+    if matches!(row.class.as_str(), class::TRANSACTIONAL | class::MARKETING)
+        && repo::load_verified_at(&ctx.pool, row.address_id)
+            .await?
+            .is_none()
+    {
+        if ctx.verification_mode == verification_mode::ENFORCE {
+            repo::write_terminal(
+                &ctx.pool,
+                row.created_at,
+                row.comms_request_id,
+                row.customer_id,
+                "unverified_address",
+                None,
+                None,
+                "unverified_address",
+            )
+            .await?;
+            return Ok(());
+        }
+        repo::record_event(
+            &ctx.pool,
+            row.comms_request_id,
+            row.customer_id,
+            "unverified_address",
+        )
+        .await?;
+    }
+
     let ciphertexts =
         repo::load_ciphertexts(&ctx.pool, row.created_at, row.comms_request_id)
             .await?
