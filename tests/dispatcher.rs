@@ -200,6 +200,7 @@ async fn insert_customer_address(
 /// (`ingest::repo::insert_transactional`) — rather than standing up
 /// mTLS/axum, since this suite is about the dispatcher's read/decrypt/
 /// send/write path, not ingest's.
+#[allow(clippy::too_many_arguments)]
 async fn write_outbox_row_with_verification(
     tenant: &TestTenant,
     vault: &VaultKeyStore,
@@ -1454,7 +1455,11 @@ async fn auth_class_skips_the_gate_even_when_unverified() {
     tenant.cleanup().await;
 }
 
-async fn insert_suppression_row(pool: &PgPool, destination_hmac: &[u8], review_at: DateTime<Utc>) {
+async fn insert_suppression_row(
+    pool: &PgPool,
+    destination_hmac: &[u8],
+    review_at: DateTime<Utc>,
+) {
     sqlx::query(
         "INSERT INTO suppression (destination_hmac, reason, added_at, review_at) \
          VALUES ($1, 'hard_bounce', now(), $2)",
