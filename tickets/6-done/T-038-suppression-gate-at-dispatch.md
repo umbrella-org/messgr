@@ -616,3 +616,4 @@ cost: estimated M, actual M
 - 2026-09-16 — READY → IN DEVELOPMENT: picked up
 - 2026-09-16 — IN DEVELOPMENT → IN REVIEW: acceptance green
 - 2026-09-16 — IN REVIEW → DONE: review clean, no blocking findings
+- 2026-09-16 — PR #53 opened (`feat/T-038-suppression-gate-at-dispatch` → `main`)
