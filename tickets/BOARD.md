@@ -9,7 +9,7 @@ hand — edit the tickets. Hand-written planning notes live in [`NOTES.md`](NOTE
 **WIP limits (per child-project):**
 - `messgr`: `3-in-development/` ≤ 1 · `4-in-review/` ≤ 1
 
-Last updated: 2026-09-15
+Last updated: 2026-09-16
 
 ## IN DEVELOPMENT
 
@@ -38,6 +38,7 @@ Last updated: 2026-09-15
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
+| T-036 | Verification gate at dispatch | critical | medium | M | [] |  |
 
 ## TO DO (impact order, per child)
 
@@ -45,7 +46,6 @@ Last updated: 2026-09-15
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
-| T-036 | Verification gate at dispatch | critical | medium | M | [] |  |
 | T-038 | Suppression gate at dispatch | critical | medium | M | [] |  |
 | T-039 | Dispatcher leader election (HA) | critical | medium | M | [] |  |
 | T-040 | Wire scheduled delivery and expiry into the outbox | critical | medium | M | [] |  |
