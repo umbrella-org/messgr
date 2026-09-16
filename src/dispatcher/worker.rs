@@ -196,10 +196,29 @@ pub async fn try_process(
     ctx: &DispatcherContext,
     row: &ClaimedOutbox,
 ) -> Result<(), DispatchError> {
-    // Verification gate (DESIGN.md §5, T-036) — first in-line gate check in
-    // this function; runs before decrypt so a blocked `enforce` send spends
-    // no Vault/DEK work. `auth` falls through untouched (defense in depth;
-    // it never reaches the outbox at all per T-011 decision 3).
+    // Suppression gate (DESIGN.md §5, T-038) — unconditional, no class
+    // exemption, so it runs ahead of verification below (T-036, which only
+    // applies to transactional/marketing): a suppressed destination never
+    // spends a verification-state lookup, let alone a decrypt.
+    if repo::is_suppressed(&ctx.pool, row.created_at, row.comms_request_id).await? {
+        repo::write_terminal(
+            &ctx.pool,
+            row.created_at,
+            row.comms_request_id,
+            row.customer_id,
+            "suppressed_list",
+            None,
+            None,
+            "suppressed_list",
+        )
+        .await?;
+        return Ok(());
+    }
+
+    // Verification gate (DESIGN.md §5, T-036) — runs before decrypt so a
+    // blocked `enforce` send spends no Vault/DEK work. `auth` falls through
+    // untouched (defense in depth; it never reaches the outbox at all per
+    // T-011 decision 3).
     if matches!(row.class.as_str(), class::TRANSACTIONAL | class::MARKETING)
         && repo::load_verified_at(&ctx.pool, row.address_id)
             .await?

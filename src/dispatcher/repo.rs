@@ -314,3 +314,28 @@ pub async fn write_terminal(
 
     tx.commit().await
 }
+
+/// One round trip: joins the claimed row's own `comms_request.destination_hmac`
+/// against `suppression`, so `try_process` never needs the raw HMAC bytes
+/// itself (DESIGN.md §5, T-038). `review_at > now()` is the entire "still
+/// blocking" condition -- an expired entry simply stops matching, no sweep
+/// job needed (decision 2).
+pub async fn is_suppressed(
+    pool: &PgPool,
+    created_at: DateTime<Utc>,
+    comms_request_id: Uuid,
+) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar(
+        r#"
+        SELECT EXISTS (
+            SELECT 1 FROM comms_request cr
+            JOIN suppression s ON s.destination_hmac = cr.destination_hmac
+            WHERE cr.created_at = $1 AND cr.id = $2 AND s.review_at > now()
+        )
+        "#,
+    )
+    .bind(created_at)
+    .bind(comms_request_id)
+    .fetch_one(pool)
+    .await
+}
