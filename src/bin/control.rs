@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use chrono::{DateTime, Utc};
 use clap::{Parser, Subcommand};
 
 use messgr::config::Config;
@@ -14,6 +15,10 @@ use messgr::producer::register::{disable_producer, list_producers, register_prod
 use messgr::provider_config::configure::{list_provider_config, set_provider_config};
 use messgr::provider_config::model::ProviderConfigInput;
 use messgr::stats::tenant_message_stats;
+use messgr::suppression::configure::{
+    add_suppression, list_suppression, remove_suppression,
+};
+use messgr::suppression::model::reason;
 use messgr::template::approve::{
     approve_template, list_template_versions, render_preview, show_template,
 };
@@ -95,6 +100,13 @@ enum Command {
     ProviderConfig {
         #[command(subcommand)]
         command: ProviderConfigCommand,
+    },
+    /// Add, list, or remove suppression entries (hard bounce, complaint,
+    /// regulatory hold) that block a destination at dispatch (DESIGN.md §5,
+    /// T-038).
+    Suppression {
+        #[command(subcommand)]
+        command: SuppressionCommand,
     },
     /// Keep comms_request/comms_event partitions self-managing (DESIGN.md
     /// §4.1, §7.2, §7.5, T-014): create-ahead, move to slow tablespace,
@@ -387,6 +399,46 @@ enum ProviderConfigCommand {
             ])
         )]
         channel: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum SuppressionCommand {
+    /// Add a new entry, or update an existing one's reason/review date.
+    Add {
+        #[arg(long = "tenant-slug")]
+        tenant_slug: String,
+        #[arg(long)]
+        destination: String,
+        #[arg(
+            long,
+            value_parser = clap::builder::PossibleValuesParser::new([
+                reason::HARD_BOUNCE,
+                reason::COMPLAINT,
+                reason::REGULATORY_HOLD,
+            ])
+        )]
+        reason: String,
+        /// RFC 3339 timestamp; the entry stops blocking once this passes.
+        #[arg(long = "review-at")]
+        review_at: String,
+        #[arg(long)]
+        actor: String,
+    },
+    /// List every suppression entry for a tenant. destination_hmac is
+    /// hex-printed -- it cannot be reversed to the original address.
+    List {
+        #[arg(long = "tenant-slug")]
+        tenant_slug: String,
+    },
+    /// Retire an entry early (sets review_at to now).
+    Remove {
+        #[arg(long = "tenant-slug")]
+        tenant_slug: String,
+        #[arg(long)]
+        destination: String,
+        #[arg(long)]
+        actor: String,
     },
 }
 
@@ -952,6 +1004,89 @@ async fn run(
                 }
             }
         },
+        Command::Suppression { command } => {
+            let vault_keystore = VaultKeyStore::connect(config.profile).expect(
+                "failed to connect to Vault (has VAULT_ADDR/VAULT_TOKEN been set?)",
+            );
+
+            match command {
+                SuppressionCommand::Add {
+                    tenant_slug,
+                    destination,
+                    reason,
+                    review_at,
+                    actor,
+                } => {
+                    let review_at = DateTime::parse_from_rfc3339(&review_at)
+                        .map(|dt| dt.with_timezone(&Utc))
+                        .map_err(|err| format!(
+                            "invalid --review-at {review_at:?} (expected RFC 3339): {err}"
+                        ))?;
+                    let outcome = add_suppression(
+                        &control_pool,
+                        &config.control_database_url,
+                        &tenant_slug,
+                        &vault_keystore,
+                        &destination,
+                        &reason,
+                        review_at,
+                        &actor,
+                    )
+                    .await
+                    .map_err(|err| format!(
+                        "failed to add suppression entry for tenant {tenant_slug:?}: {err}"
+                    ))?;
+                    println!("outcome={}", outcome.outcome);
+                }
+                SuppressionCommand::List { tenant_slug } => {
+                    let rows = list_suppression(&control_pool, &config.control_database_url, &tenant_slug)
+                        .await
+                        .map_err(|err| format!(
+                            "failed to list suppression entries for tenant {tenant_slug:?}: {err}"
+                        ))?;
+                    if rows.is_empty() {
+                        println!("no suppression entries for tenant {tenant_slug}");
+                    } else {
+                        let now = Utc::now();
+                        for row in rows {
+                            let status = if row.review_at > now {
+                                "active"
+                            } else {
+                                "expired"
+                            };
+                            let hmac_hex: String = row
+                                .destination_hmac
+                                .iter()
+                                .map(|b| format!("{b:02x}"))
+                                .collect();
+                            println!(
+                                "destination_hmac={hmac_hex} reason={} added_at={} review_at={} status={status}",
+                                row.reason, row.added_at, row.review_at,
+                            );
+                        }
+                    }
+                }
+                SuppressionCommand::Remove {
+                    tenant_slug,
+                    destination,
+                    actor,
+                } => {
+                    remove_suppression(
+                        &control_pool,
+                        &config.control_database_url,
+                        &tenant_slug,
+                        &vault_keystore,
+                        &destination,
+                        &actor,
+                    )
+                    .await
+                    .map_err(|err| format!(
+                        "failed to remove suppression entry for tenant {tenant_slug:?}: {err}"
+                    ))?;
+                    println!("outcome=retired");
+                }
+            }
+        }
         // No Vault client is connected here either — partition-lifecycle
         // touches neither Transit nor AppRole.
         Command::PartitionLifecycle { command } => match command {
@@ -1268,6 +1403,123 @@ mod tests {
             result.is_err(),
             "an invalid --channel value must fail to parse"
         );
+    }
+
+    #[test]
+    fn suppression_add_parses_every_flag() {
+        let cli = Cli::try_parse_from([
+            "messgr-control",
+            "suppression",
+            "add",
+            "--tenant-slug",
+            "acme",
+            "--destination",
+            "+15550100",
+            "--reason",
+            "hard_bounce",
+            "--review-at",
+            "2027-01-01T00:00:00Z",
+            "--actor",
+            "operator@example.com",
+        ])
+        .expect("parsing suppression add must succeed");
+
+        let Command::Suppression {
+            command:
+                SuppressionCommand::Add {
+                    tenant_slug,
+                    destination,
+                    reason,
+                    review_at,
+                    actor,
+                },
+        } = cli.command
+        else {
+            panic!("expected Suppression::Add");
+        };
+
+        assert_eq!(tenant_slug, "acme");
+        assert_eq!(destination, "+15550100");
+        assert_eq!(reason, "hard_bounce");
+        assert_eq!(review_at, "2027-01-01T00:00:00Z");
+        assert_eq!(actor, "operator@example.com");
+    }
+
+    #[test]
+    fn suppression_add_rejects_an_invalid_reason() {
+        let result = Cli::try_parse_from([
+            "messgr-control",
+            "suppression",
+            "add",
+            "--tenant-slug",
+            "acme",
+            "--destination",
+            "+15550100",
+            "--reason",
+            "annoyed",
+            "--review-at",
+            "2027-01-01T00:00:00Z",
+            "--actor",
+            "operator@example.com",
+        ]);
+
+        assert!(
+            result.is_err(),
+            "an invalid --reason value must fail to parse"
+        );
+    }
+
+    #[test]
+    fn suppression_list_parses() {
+        let cli = Cli::try_parse_from([
+            "messgr-control",
+            "suppression",
+            "list",
+            "--tenant-slug",
+            "acme",
+        ])
+        .expect("parsing suppression list must succeed");
+
+        let Command::Suppression {
+            command: SuppressionCommand::List { tenant_slug },
+        } = cli.command
+        else {
+            panic!("expected Suppression::List");
+        };
+
+        assert_eq!(tenant_slug, "acme");
+    }
+
+    #[test]
+    fn suppression_remove_parses() {
+        let cli = Cli::try_parse_from([
+            "messgr-control",
+            "suppression",
+            "remove",
+            "--tenant-slug",
+            "acme",
+            "--destination",
+            "+15550100",
+            "--actor",
+            "operator@example.com",
+        ])
+        .expect("parsing suppression remove must succeed");
+
+        let Command::Suppression {
+            command:
+                SuppressionCommand::Remove {
+                    tenant_slug,
+                    destination,
+                    actor,
+                },
+        } = cli.command
+        else {
+            panic!("expected Suppression::Remove");
+        };
+
+        assert_eq!(tenant_slug, "acme");
+        assert_eq!(destination, "+15550100");
+        assert_eq!(actor, "operator@example.com");
     }
 
     #[test]
