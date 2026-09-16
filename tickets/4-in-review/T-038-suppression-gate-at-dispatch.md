@@ -565,3 +565,4 @@ Run: `just build && just test && just lint`.
   0-4 and 17 later hardening tickets being done.
 - 2026-09-16 — TO DO → READY: plan complete
 - 2026-09-16 — READY → IN DEVELOPMENT: picked up
+- 2026-09-16 — IN DEVELOPMENT → IN REVIEW: acceptance green
