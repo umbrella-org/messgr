@@ -32,8 +32,13 @@ fn unique_name(prefix: &str) -> String {
     format!("{prefix}_{}", Uuid::new_v4().simple())
 }
 
+/// Truncated to microsecond precision, matching what a Postgres `timestamptz`
+/// round-trip returns -- `add_suppression` truncates internally too, but a
+/// value compared against a freshly-inserted row must already match, since
+/// nothing here re-reads it through that truncation first.
 fn far_future() -> DateTime<Utc> {
-    Utc::now() + chrono::Duration::days(30)
+    let dt = Utc::now() + chrono::Duration::days(30);
+    DateTime::from_timestamp_micros(dt.timestamp_micros()).expect("valid instant")
 }
 
 async fn drop_test_tenant(control_pool: &PgPool, database_name: &str, slug: &str) {

@@ -67,6 +67,11 @@ fn rejected(message: String) -> ConfigureError {
     sqlx::Error::Configuration(message.into()).into()
 }
 
+fn truncate_to_micros(dt: DateTime<Utc>) -> DateTime<Utc> {
+    DateTime::from_timestamp_micros(dt.timestamp_micros())
+        .expect("timestamp_micros() output is always a valid instant")
+}
+
 #[derive(Debug)]
 pub struct ConfigureOutcome {
     /// "created" | "updated" | "idempotent" -- never "rejected", which is
@@ -95,6 +100,12 @@ pub async fn add_suppression(
     review_at: DateTime<Utc>,
     actor: &str,
 ) -> Result<ConfigureOutcome, ConfigureError> {
+    // Postgres `timestamptz` stores microsecond precision; `DateTime<Utc>`
+    // carries nanoseconds. Truncate here, before the first comparison or
+    // write, so `matches` (below) never compares a full-precision caller
+    // value against a microsecond-truncated one read back from storage.
+    let review_at = truncate_to_micros(review_at);
+
     let tenant = match tenant_repo::find_by_slug(control_pool, tenant_slug).await? {
         Some(tenant) => tenant,
         None => {
