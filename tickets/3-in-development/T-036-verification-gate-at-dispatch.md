@@ -319,3 +319,4 @@ separate registration — this is a content addition to an existing file.
 - 2026-09-16 — plan amended inline: pickup applicability audit (independent sub-agent) confirmed
   every plan assumption against current code except Task 5's literal count — `tests/dispatcher.rs`
   has 7 `DispatcherContext { .. }` construction sites, not 8; corrected in place, no other change.
+- 2026-09-16 — READY → IN DEVELOPMENT: picked up
