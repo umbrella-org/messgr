@@ -556,7 +556,56 @@ Run: `just build && just test && just lint`.
 
 ## Review
 
-<!-- empty until IN REVIEW -->
+- [x] Reviewer independence settled (step 0): **delegated** — the orchestrating reviewer
+  authored this branch in this same session, so steps 2-4a's audits ran in a fresh sub-agent with
+  no memory of writing the code, briefed adversarially. Every finding it reported was re-verified
+  by hand (source read directly, or command re-run) before being recorded below.
+- [x] Implementation audit — acceptance test re-run (`an_active_suppression_entry_blocks_the_send`,
+  `an_expired_suppression_entry_no_longer_blocks`, all 7 of `tests/suppression.rs`), all green.
+  All 7 Implementation Plan tasks verified done in the files they name; all 8 confirmed design
+  decisions verified against the code, not the plan's prose (steps 1, 2).
+- [x] Quality audit (step 3) — idiomatic, mirrors `provider_config`'s shape as intended; sound
+  secret handling (HMAC one-way, never stored/logged raw); no injection risk (`sqlx` bind params
+  throughout). Mutation-tested the two dispatcher-gate tests and the T-005/F1 audit-on-rejection
+  test by describing the exact deletion/inversion that would flip each red — all three are
+  falsifiable, none tautological.
+- [x] Consistency audit (step 4) — project-wide grep for stale `T-021`/ticket-number references
+  to `suppression` found only the one already fixed by Task 2. `tenant_id` naming unaffected
+  (`suppression` has none, consistent with §2.1). Hard invariants 1 and 3 hold (gate runs at
+  dispatch, in `try_process`, never at ingest; no auth-class exemption logic added because none
+  was needed).
+- [x] Documentation audit — coverage, whole-tree sweep, docs build clean (step 4a). New CLI
+  surface and dispatcher behavior both documented and verified accurate against the code.
+  `just docs-check` passes. Whole-tree sweep (beyond the two pages the ticket itself touched)
+  turned up three places this branch's own migration made prose false — see F1/F3/F4 below.
+- [ ] Docs-readability pass — no docs-readability reviewer configured in this environment;
+  conscious skip (step 4b, optional, never blocks).
+- [x] Findings recorded below with severity, class, and disposition; disposition summary and
+  cost line present (step 5).
+- [x] Ticket moved to `tickets/6-done/`; `## History` appended (step 6).
+- [x] Other references updated; `03-data-model.md`'s `review_at` correction (Task 1) already
+  reconciled the one governing-document gap this ticket's own filing found. The impact sweep
+  (step 8) found and patched one more, in T-037 — see below (step 7).
+- [x] Remaining-tickets impact sweep done (step 8) — `T-037`'s Description assumed suppression
+  would land *after* it; T-038 landed first instead. Patched T-037's Description and History to
+  say so — no other `1-to-do/`/`2-ready/` ticket references T-038.
+- [x] Summary + child-project commit message & MR attributes presented for approval; remote-base
+  check and overarching-repo bookkeeping to follow approval (step 9).
+
+| id | severity | class | disposition | description | evidence | suggestion |
+|---|---|---|---|---|---|---|
+| F1 | non-blocking | stale-xref | `tests/erasure_coverage.rs`'s own comments (x2) used `suppression` as their running example of a table that "doesn't exist yet" — false as of this branch's migration. | `tests/erasure_coverage.rs:227-231`, `:271-276` | Fixed inline: reworded both to past tense ("before its migration landed, T-038"), commit `bfe43c5`. |
+| F2 | non-blocking | correctness | `suppression::configure::add_suppression`/`remove_suppression` leak the tenant `PgPool` if `ensure_tenant_pepper` fails after `connect_tenant_pool` already succeeded — no `.close()` on that error path, unlike `list_suppression` in the same file. No test exercises a Vault failure mid-call. Impact bounded: `messgr-control` is a short-lived CLI process, so the OS reclaims the sockets on exit. | `src/suppression/configure.rs:118-127` (add), `:197-206` (remove); contrast `:243-256` (list, correctly closes) | Bind `ensure_tenant_pepper`'s result before the `?`, close the pool, then propagate — same shape `add_suppression_inner`'s own call site already uses for its downstream `Result`. Not fixed inline: a functional change, not a prose/idiom one. |
+| F3 | non-blocking | stale-xref | `docs/user-manual/ingest.adoc` said "Consent, quotas, and suppression (§5, §5.1) are still unbuilt" — false for suppression as of this branch (it's enforced, at dispatch time, not at ingest). | `docs/user-manual/ingest.adoc:10` (pre-fix) | Fixed inline: reworded to split consent/quotas (still unbuilt) from suppression (enforced at dispatch — cross-referenced to "messgr-dispatcher" rather than duplicated), commit `bfe43c5`. |
+| F4 | non-blocking | stale-xref | `docs/user-manual/introduction.adoc`'s Status section listed `suppression` as part of "no gate chain ... yet" — false as of this branch. | `docs/user-manual/introduction.adoc:16-17` (pre-fix) | Fixed inline: split out the suppression clause as already enforced, commit `bfe43c5`. |
+| F5 | non-blocking | stale-xref | The same sentence also lists `kill switches` as part of "no gate chain ... yet" — also false, but pre-existing (kill switches shipped in `T-016`, well before this branch): found during the same whole-tree sweep but not this branch's causation, so out of this ticket's inline-fix bar. | `docs/user-manual/introduction.adoc:16` | Leave for whoever next touches that page's Status section, or a documentation-accuracy sweep ticket if one is ever filed; not promoted alone — doesn't clear the batching bar by itself. |
+
+Disposition summary: 5 non-blocking findings — 3 `fixed inline` (F1, F3, F4, commit `bfe43c5` on
+`feat/T-038-suppression-gate-at-dispatch`), 2 `noted` (F2, F5). No blocking findings. No new
+tickets spawned; one existing ticket (T-037) patched by the impact sweep (step 8), recorded in
+its own History.
+
+cost: estimated M, actual M
 
 ## History
 
@@ -566,3 +615,4 @@ Run: `just build && just test && just lint`.
 - 2026-09-16 — TO DO → READY: plan complete
 - 2026-09-16 — READY → IN DEVELOPMENT: picked up
 - 2026-09-16 — IN DEVELOPMENT → IN REVIEW: acceptance green
+- 2026-09-16 — IN REVIEW → DONE: review clean, no blocking findings

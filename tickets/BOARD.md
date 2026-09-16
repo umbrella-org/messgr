@@ -20,11 +20,10 @@ Last updated: 2026-09-16
 
 ## IN REVIEW
 
-### messgr (1/1)
+### messgr (0/1)
 
 | id | title | depends-on |
 |---|---|---|
-| T-038 | Suppression gate at dispatch | [] |
 
 ## REWORK
 
@@ -94,6 +93,7 @@ Last updated: 2026-09-16
 | T-034 | Validate orphan-reconcile event_type before promoting and make find_match deterministic | yes — merged to main (PR #49, adab8bc) |
 | T-035 | Assert orphan-reconcile's age-out tracing::warn! actually fires | yes — MERGED: PR #51 merged to `main` (`b7d5bae`). |
 | T-036 | Verification gate at dispatch | no — publish-gated |
+| T-038 | Suppression gate at dispatch | no — publish-gated |
 
 ## DROPPED
 
