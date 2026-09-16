@@ -564,3 +564,4 @@ Run: `just build && just test && just lint`.
   build-order-vs-shipped-tickets gap analysis — step 5 (the gate chain) is unbuilt despite steps
   0-4 and 17 later hardening tickets being done.
 - 2026-09-16 — TO DO → READY: plan complete
+- 2026-09-16 — READY → IN DEVELOPMENT: picked up
