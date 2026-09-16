@@ -13,8 +13,9 @@ to operate what has actually been built against that design.
 binaries exist today: `messgr-control` (the control-plane CLI — tenant provisioning, the
 producer registry, tenant/provider configuration, templates, and a dev-only internal PKI),
 `messgr-ingest` (`POST /comms`, the first end-to-end send path), and `messgr-dispatcher` (the
-per-tenant claim loop that actually calls a provider). There is no gate chain (consent, quotas,
-kill switches, suppression) and no query API/UI yet — those are later tickets.
+per-tenant claim loop that actually calls a provider). There is no full gate chain (consent,
+quotas, kill switches) and no query API/UI yet — those are later tickets; the suppression gate
+(`T-038`) is already enforced, at dispatch time — see "messgr-dispatcher".
 
 Each binary also accepts a `version` subcommand that prints its name and version, then exits
 without reading any configuration (`messgr-control version`, `messgr-dispatcher version`,
