@@ -186,10 +186,12 @@ pub async fn load_verified_at(
 /// A non-terminal `comms_event` row (T-036): unlike `write_terminal`, this
 /// touches no `outbox`/`comms_request` state — used by the verification
 /// gate's `observe` mode, which records the outcome but still lets the send
-/// proceed. `provider_ref` is bound to `''`, not `NULL`, matching
-/// `write_terminal`'s own convention (review addendum step 2: a nullable
-/// column in a `UNIQUE`/`ON CONFLICT` target defeats dedup, since Postgres
-/// treats NULLs as distinct).
+/// proceed. `provider_ref` is bound to `''`, matching `write_terminal`'s own
+/// convention — the column is `NOT NULL DEFAULT ''` (migration 0004), so
+/// `NULL` was never actually bindable here; `''` is simply the column's own
+/// "no provider ref" value, not a dodge of the review addendum's
+/// NULL-in-`UNIQUE`/`ON CONFLICT` warning (step 2), which that `NOT NULL`
+/// constraint already forecloses.
 pub async fn record_event(
     pool: &PgPool,
     comms_request_id: Uuid,
