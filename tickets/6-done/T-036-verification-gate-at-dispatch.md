@@ -325,7 +325,86 @@ separate registration — this is a content addition to an existing file.
 
 ## Review
 
-<!-- empty until IN REVIEW -->
+- [x] Reviewer independence settled (step 0): **delegated**. The implementing agent authored
+  `feat/T-036-verification-gate-at-dispatch` in this same session, so steps 2-4a (implementation,
+  quality, consistency, documentation audits) were run by a fresh sub-agent with no memory of
+  writing the code, briefed adversarially and pointed at the branch, `main`'s copy of this
+  ticket, `AGENTS.md`, the review addendum, and DESIGN.md §5. Every delegated finding below was
+  independently re-verified by hand before being recorded here, per step 0's "delegation buys
+  independence, not accuracy."
+- [x] Implementation audit — all 5 confirmed design decisions and all 5 tasks verified done, in
+  the files named, by the independent reviewer (file:line evidence for each — see its full
+  report, condensed below). **Acceptance test**: initially blocked — the independent reviewer's
+  first run hit a Postgres auth failure (`28P01`, `password authentication failed for user
+  "messgr"`) that also broke an unrelated pre-existing unit test; re-verified by hand
+  (reproduced the identical error independently). Root cause: the local dev stack (Postgres role
+  password + dev-mode Vault, both external to this branch — the diff touches no `.env`,
+  `compose.yml`, migration, or credential file) was reset mid-session, unrelated to this ticket.
+  After the user restarted the stack: ran `messgr-control migrate` (fresh `control` DB had no
+  schema), `just vault-dev-init` (dev-mode Vault doesn't persist the AppRole auth mount across a
+  restart), `just tablespace-init` (`messgr_cold` tablespace lost with the volume — needed by
+  `tests/partition_lifecycle.rs`, unrelated to this ticket but part of getting `just test` fully
+  green). Final clean run, by hand: `cargo test --test dispatcher --test kill_switch` → **21/21
+  pass** (all 4 new acceptance tests plus the 17 pre-existing ones this branch touches);
+  `just test` → **27/27 binaries pass** (full repo suite, no regressions); `just build` → clean;
+  `just lint` (`cargo fmt --check` + `cargo clippy -D warnings`) → clean; `just docs-check`
+  (`snowball check`) → clean.
+- [x] Quality audit (step 3) — SQL in both new `repo.rs` functions verified correct by hand
+  (parameter bind order, the `Option<Option<DateTime<Utc>>>` → `.flatten()` logic for
+  "missing row" vs "`verified_at IS NULL`", the `ON CONFLICT` target matching the table's actual
+  `UNIQUE` constraint verbatim). Mutation-testability of the 4 new acceptance tests confirmed,
+  not assumed: traced `wiremock` 0.6's `MockServer::drop` → `verify()` to confirm `.expect(0)`/
+  `.expect(1)` genuinely panics the test on a call-count mismatch, and 3 of the 4 tests assert an
+  explicit negative control. No `unwrap()`/`expect()` on a production code path; clippy clean
+  under `-D warnings`; no new secret handling; every bind parameterized.
+- [x] Consistency audit (step 4) — grepped against AGENTS.md hard invariants 1 and 3: invariant 1
+  (auth/OTP never through the queue) not violated — the gate's `matches!` allowlist excludes
+  `class::AUTH`, and independently re-verified against `tickets/6-done/T-011-*.md`'s own text
+  that `class = "auth"` is rejected at ingest (`422`) and never reaches the outbox, so the
+  in-gate skip is defense-in-depth for an already-unreachable state, not a workaround for a
+  reachable one. Invariant 3 (gates run at dispatch, not ingest) not violated — the check reads
+  `customer_address.verified_at` fresh inside `try_process`, no ingest-time caching. No dead
+  imports (clippy would have caught them under `-D warnings`), no stale `§`-references, no scope
+  creep (diff touches exactly the files the plan named).
+- [x] Documentation audit (step 4a) — `docs/user-manual/dispatcher.adoc`'s new paragraph checked
+  sentence-by-sentence against the code; no inaccuracies found. `just docs-check` clean (covered
+  above). No other doc needed a T-036 mention (no new CLI flag or HTTP route shipped).
+- [x] Docs-readability pass (step 4b) — **conscious skip**: no docs-readability reviewer/tool is
+  configured in this environment.
+- [x] Findings recorded below with severity, class, and disposition; disposition summary + cost
+  line present (step 5).
+- [x] Ticket moved to `tickets/6-done/` (step 6b — no blocking findings).
+- [x] Other references / governing documents reconciled (step 7): checked
+  `development/design/14-decisions-and-open-questions.md` — item 6 of "Still open" (whether the
+  master system publishes per-address verification state) is **not** resolved by this ticket
+  (it wires the enforcement mechanics for whichever mode is configured; it doesn't answer whether
+  the feed exists) and correctly remains open, no edit needed. No decisions-table row claims the
+  gate chain is or isn't built, so nothing there was made false. `AGENTS.md`'s "Step 5, the gate
+  chain... is not yet built" line remains accurate as written — it names the three-gate chain
+  collectively, and T-037/T-038 are still unbuilt, so the sentence doesn't go false until all
+  three ship; left as-is rather than edited into an intermediate state that would need editing
+  again twice more.
+- [x] Remaining-tickets impact sweep done (step 8): re-read `T-037` and `T-038` (both
+  `tickets/1-to-do/`, both reference T-036 by id, neither has a hard `depends-on:` on it). Both
+  already describe T-036 correctly — "runs after verification (T-036)... per §5's ordering
+  table" — which matches what actually got built (T-036's check is first, inline, in
+  `try_process`); no correction needed to either.
+- [x] Summary + commit message & MR attributes presented for approval; overarching-repo
+  bookkeeping committed per policy; remote-base check to run before push (step 9) — see below.
+
+### Findings
+
+| id | severity | class | disposition | description | evidence | suggestion |
+|---|---|---|---|---|---|---|
+| F1 | non-blocking | docs-gap | fixed inline | Comment on `record_event` framed `provider_ref: ''` as avoiding a live NULL-in-`UNIQUE`/`ON CONFLICT` dedup hole; `comms_event.provider_ref` has been `NOT NULL DEFAULT ''` since migration 0004 (predates this ticket), so `NULL` was never actually bindable there — the comment overstated the risk it was avoiding. No behavior impact. | `src/dispatcher/repo.rs:186-192` (pre-fix) | Reword to state the column is `NOT NULL`, not implying an active NULL hole. |
+| F2 | non-blocking | test-gap | noted | `tests/kill_switch.rs`'s own `write_outbox_row` helper never creates a `customer_address` row and hardcodes `class = "transactional"`, so under the new gate every row that suite creates is "unverified" by construction (harmless today — no assertion in that file inspects `comms_event` contents — but untested kill-switch × verification-gate interaction, and a footgun if that file's `verification_mode` is ever set to `"enforce"`). | `tests/kill_switch.rs:196-249` | If T-037/T-038 end up touching this helper, consider giving it the same treatment `write_ready_outbox_row` got in `tests/dispatcher.rs` (T-036 plan Task 5). Not promoted to a ticket now — doesn't clear the promotion test on its own. |
+
+Disposition summary: 2 non-blocking findings — 1 `fixed inline` (F1, committed `a31e7a9` on
+`feat/T-036-verification-gate-at-dispatch` during this review — not a rework round, since no
+blocking finding sent the ticket to `5-rework/`), 1 `noted` (F2). No blocking findings. No new
+tickets spawned.
+
+cost: estimated M, actual M
 
 ## History
 
@@ -349,3 +428,4 @@ separate registration — this is a content addition to an existing file.
   acceptance tests also use) rather than patching the three assertions. Task 5's plan text
   updated to match; no scope change beyond it.
 - 2026-09-16 — IN DEVELOPMENT → IN REVIEW: acceptance green
+- 2026-09-16 — IN REVIEW → DONE: review clean; 2 non-blocking (1 fixed inline, 1 noted)
