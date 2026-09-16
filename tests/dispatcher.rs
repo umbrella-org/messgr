@@ -208,6 +208,7 @@ async fn write_outbox_row_with_verification(
     body: &str,
     class: &str,
     verified_at: Option<DateTime<Utc>>,
+    destination_hmac: &[u8],
 ) -> (Uuid, DateTime<Utc>, Uuid) {
     let tenant_id =
         messgr::tenant::repo::find_by_slug(&tenant.control_pool, &tenant.slug)
@@ -256,7 +257,7 @@ async fn write_outbox_row_with_verification(
         "balance-alert",
         1,
         None,
-        b"unused-hmac",
+        destination_hmac,
         &destination_ciphertext,
         &payload_ciphertext,
         Uuid::new_v4(),
@@ -300,6 +301,32 @@ async fn write_ready_outbox_row(
         body,
         "transactional",
         Some(Utc::now()),
+        b"unused-hmac",
+    )
+    .await
+}
+
+/// Same as `write_ready_outbox_row`, but takes `destination_hmac` as a
+/// parameter instead of the hardcoded `b"unused-hmac"` literal, so the
+/// suppression-gate tests (T-038) can write a row whose `comms_request`
+/// joins a `suppression` row on that exact hash.
+async fn write_outbox_row_with_hmac(
+    tenant: &TestTenant,
+    vault: &VaultKeyStore,
+    cache: &KeyCache,
+    destination: &str,
+    body: &str,
+    destination_hmac: &[u8],
+) -> (Uuid, DateTime<Utc>, Uuid) {
+    write_outbox_row_with_verification(
+        tenant,
+        vault,
+        cache,
+        destination,
+        body,
+        "transactional",
+        Some(Utc::now()),
+        destination_hmac,
     )
     .await
 }
@@ -1082,6 +1109,7 @@ async fn enforce_blocks_unverified_address_with_terminal_event_and_no_send() {
             "hello there",
             "transactional",
             None,
+            b"unused-hmac",
         )
         .await;
 
@@ -1176,6 +1204,7 @@ async fn observe_records_unverified_address_and_still_sends() {
             "hello there",
             "transactional",
             None,
+            b"unused-hmac",
         )
         .await;
 
@@ -1275,6 +1304,7 @@ async fn verified_address_sends_normally_under_enforce() {
             "hello there",
             "transactional",
             Some(Utc::now()),
+            b"unused-hmac",
         )
         .await;
 
@@ -1362,6 +1392,7 @@ async fn auth_class_skips_the_gate_even_when_unverified() {
             "your code is 123456",
             "auth",
             None,
+            b"unused-hmac",
         )
         .await;
 
@@ -1419,6 +1450,198 @@ async fn auth_class_skips_the_gate_even_when_unverified() {
         )],
         "auth class must skip the verification gate entirely, even unverified under enforce"
     );
+
+    tenant.cleanup().await;
+}
+
+async fn insert_suppression_row(pool: &PgPool, destination_hmac: &[u8], review_at: DateTime<Utc>) {
+    sqlx::query(
+        "INSERT INTO suppression (destination_hmac, reason, added_at, review_at) \
+         VALUES ($1, 'hard_bounce', now(), $2)",
+    )
+    .bind(destination_hmac)
+    .bind(review_at)
+    .execute(pool)
+    .await
+    .expect("inserting suppression row failed");
+}
+
+#[tokio::test]
+async fn an_active_suppression_entry_blocks_the_send() {
+    let vault = vault_keystore();
+    let tenant = provision_test_tenant(&vault).await;
+    let cache = small_cache();
+
+    let mock_server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/messages"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "message_id": "msg-should-not-send",
+            "status": "queued",
+        })))
+        .expect(0)
+        .mount(&mock_server)
+        .await;
+
+    insert_suppression_row(
+        &tenant.tenant_pool,
+        b"suppressed-address",
+        Utc::now() + chrono::Duration::days(1),
+    )
+    .await;
+
+    let (comms_request_id, created_at, _customer_id) = write_outbox_row_with_hmac(
+        &tenant,
+        &vault,
+        &cache,
+        "+15550100",
+        "hello there",
+        b"suppressed-address",
+    )
+    .await;
+
+    let sender: Arc<dyn Sender> =
+        Arc::new(HttpSender::new(mock_server.uri(), "test-key".to_string()));
+    let ctx = DispatcherContext {
+        pool: tenant.tenant_pool.clone(),
+        keystore: Arc::new(vault_keystore()),
+        cache: Arc::new(cache),
+        mount: tenant.mount.clone(),
+        sender,
+        verification_mode: "observe".to_string(),
+        kill_switches: Arc::new(KillSwitchCache::new()),
+        draining: Arc::new(RwLock::new(HashMap::new())),
+    };
+
+    let claimed = repo::claim(
+        &tenant.tenant_pool,
+        "sms",
+        10,
+        Utc::now() + chrono::Duration::minutes(2),
+        &no_exclusion(),
+    )
+    .await
+    .expect("claim failed");
+    assert_eq!(claimed.len(), 1);
+    assert_eq!(claimed[0].comms_request_id, comms_request_id);
+
+    try_process(&ctx, &claimed[0])
+        .await
+        .expect("try_process failed");
+
+    let final_status: Option<String> = sqlx::query_scalar(
+        "SELECT final_status FROM comms_request WHERE created_at = $1 AND id = $2",
+    )
+    .bind(created_at)
+    .bind(comms_request_id)
+    .fetch_one(&tenant.tenant_pool)
+    .await
+    .expect("fetching final_status failed");
+    assert_eq!(final_status.as_deref(), Some("suppressed_list"));
+
+    let events: Vec<(String, Option<String>, Option<String>)> = sqlx::query_as(
+        "SELECT event_type, provider_ref, provider_status FROM comms_event WHERE comms_request_id = $1",
+    )
+    .bind(comms_request_id)
+    .fetch_all(&tenant.tenant_pool)
+    .await
+    .expect("fetching comms_event rows failed");
+    assert_eq!(
+        events,
+        vec![("suppressed_list".to_string(), Some(String::new()), None)]
+    );
+
+    let outbox_count: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM outbox WHERE comms_request_id = $1")
+            .bind(comms_request_id)
+            .fetch_one(&tenant.tenant_pool)
+            .await
+            .expect("counting outbox rows failed");
+    assert_eq!(outbox_count, 0);
+
+    tenant.cleanup().await;
+}
+
+#[tokio::test]
+async fn an_expired_suppression_entry_no_longer_blocks() {
+    let vault = vault_keystore();
+    let tenant = provision_test_tenant(&vault).await;
+    let cache = small_cache();
+
+    let mock_server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/messages"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "message_id": "msg-sent-after-expiry",
+            "status": "queued",
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    insert_suppression_row(
+        &tenant.tenant_pool,
+        b"suppressed-address",
+        Utc::now() - chrono::Duration::hours(1),
+    )
+    .await;
+
+    let (comms_request_id, created_at, _customer_id) = write_outbox_row_with_hmac(
+        &tenant,
+        &vault,
+        &cache,
+        "+15550100",
+        "hello there",
+        b"suppressed-address",
+    )
+    .await;
+
+    let sender: Arc<dyn Sender> =
+        Arc::new(HttpSender::new(mock_server.uri(), "test-key".to_string()));
+    let ctx = DispatcherContext {
+        pool: tenant.tenant_pool.clone(),
+        keystore: Arc::new(vault_keystore()),
+        cache: Arc::new(cache),
+        mount: tenant.mount.clone(),
+        sender,
+        verification_mode: "observe".to_string(),
+        kill_switches: Arc::new(KillSwitchCache::new()),
+        draining: Arc::new(RwLock::new(HashMap::new())),
+    };
+
+    let claimed = repo::claim(
+        &tenant.tenant_pool,
+        "sms",
+        10,
+        Utc::now() + chrono::Duration::minutes(2),
+        &no_exclusion(),
+    )
+    .await
+    .expect("claim failed");
+    assert_eq!(claimed.len(), 1);
+    assert_eq!(claimed[0].comms_request_id, comms_request_id);
+
+    try_process(&ctx, &claimed[0])
+        .await
+        .expect("try_process failed");
+
+    let final_status: Option<String> = sqlx::query_scalar(
+        "SELECT final_status FROM comms_request WHERE created_at = $1 AND id = $2",
+    )
+    .bind(created_at)
+    .bind(comms_request_id)
+    .fetch_one(&tenant.tenant_pool)
+    .await
+    .expect("fetching final_status failed");
+    assert_eq!(final_status.as_deref(), Some("sent"));
+
+    let outbox_count: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM outbox WHERE comms_request_id = $1")
+            .bind(comms_request_id)
+            .fetch_one(&tenant.tenant_pool)
+            .await
+            .expect("counting outbox rows failed");
+    assert_eq!(outbox_count, 0);
 
     tenant.cleanup().await;
 }
