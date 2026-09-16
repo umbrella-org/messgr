@@ -429,3 +429,5 @@ cost: estimated M, actual M
   updated to match; no scope change beyond it.
 - 2026-09-16 — IN DEVELOPMENT → IN REVIEW: acceptance green
 - 2026-09-16 — IN REVIEW → DONE: review clean; 2 non-blocking (1 fixed inline, 1 noted)
+- 2026-09-16 — PR #52 opened: `feat/T-036-verification-gate-at-dispatch` → `main`
+  (https://github.com/umbrella-org/messgr/pull/52)
