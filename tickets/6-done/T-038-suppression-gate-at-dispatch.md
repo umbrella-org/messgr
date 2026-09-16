@@ -617,3 +617,10 @@ cost: estimated M, actual M
 - 2026-09-16 — IN DEVELOPMENT → IN REVIEW: acceptance green
 - 2026-09-16 — IN REVIEW → DONE: review clean, no blocking findings
 - 2026-09-16 — PR #53 opened (`feat/T-038-suppression-gate-at-dispatch` → `main`)
+- 2026-09-16 — CI (`just test`) red on PR #53: `tests/suppression.rs`'s
+  `adding_and_listing_round_trips_every_typed_field`/`resetting_with_identical_inputs_is_idempotent`
+  failed on the Linux runner (passed locally on macOS) — Postgres `timestamptz` truncates to
+  microsecond precision, `DateTime<Utc>` carries nanoseconds; `add_suppression` compared a
+  caller-supplied `review_at` against one already round-tripped through storage. Fixed by
+  truncating once, at the top of `add_suppression`, before the first comparison or write (commit
+  `e943d70` on the same branch, pushed to re-run CI).
