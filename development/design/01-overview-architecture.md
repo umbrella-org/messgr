@@ -239,14 +239,12 @@ one claim loop per channel, `UPDATE ... SET leased_until ... FOR UPDATE SKIP LOC
 priority, next_attempt_at`, so transactional rows are always claimed ahead of marketing ones
 (§4.2, §8). **Correction (T-021 review): there is no time-based lease expiry.** The claim
 predicate is `leased_until IS NULL`, never a comparison against `now()`, so a lease does not
-"simply expire" on any clock. Until leader election ships (§9, still open), a crashed
-dispatcher's rows are reclaimed by that same tenant's `messgr-dispatcher` sweeping every stale
-lease at process startup, before any claim loop runs — safe only because exactly one instance
-runs per tenant today, so a fresh start cannot be racing a still-live claimant. This is revisited
-once leader election exists and a restart is no longer guaranteed to be the sole claimant; at
-that point a genuine time-based expiry (or an equivalent reclaim tied to the standby's takeover)
-becomes necessary, since two live processes could otherwise both consider themselves entitled to
-sweep.
+"simply expire" on any clock. Leader election (T-039, §9) shipped this the way this section
+anticipated it would need to: rather than a fresh process sweeping stale leases at raw startup
+(safe only when exactly one instance could ever exist per tenant), the sweep now runs once,
+immediately after a process wins the advisory lock — winning it is what guarantees the previous
+leader's session, and therefore its leases, are actually gone, which is what makes the sweep safe
+now that two processes can be live at once.
 
 **5. Gate chain.** Every claimed row is evaluated against the full chain **at this moment**, not
 against the state that existed at ingest: expiry, kill switch, producer quota, verification,

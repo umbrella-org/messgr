@@ -4,8 +4,12 @@
 LOCKED` leases, `LISTEN`/`NOTIFY` wakeup via a trigger on `outbox` inserts with a 1s poll
 fallback) that calls the `Sender` trait (`T-012`) and writes exactly one `comms_event` row plus
 one `comms_request.final_status` update per outbox row, deleting it on completion (DESIGN.md
-§4.1, §4.2, §4.4, §9). One process per tenant; leader election (`pg_try_advisory_lock`-based HA)
-is still a later build-order step.
+§4.1, §4.2, §4.4, §9). Two processes may run per tenant for HA (`T-039`): each tries
+`pg_try_advisory_lock` on a direct (non-pooled) connection, exactly one wins and becomes active,
+and the standby retries every 3 seconds until the leader's process or connection ends, at which
+point it takes over within seconds. Each replica needs its own `VAULT_ROLE_ID`/
+`VAULT_WRAPPED_SECRET_ID` pair -- a wrapped secret id is single-use, so two replicas sharing one
+pair would fail the second login outright.
 
 `T-021` adds retry with backoff for retryable send failures (DESIGN.md §2.4 step 6, §12.2): a
 5xx-equivalent provider status or a transport-level failure clears the row's lease and
@@ -14,11 +18,11 @@ reschedules `next_attempt_at` with exponential backoff and jitter (30s base, dou
 terminal-fails. A 4xx-equivalent provider rejection still fails immediately -- it is a
 permanent rejection, not a transient one. A transient `repo::claim` database error now retries
 (logged, 1s delay) instead of panicking that channel's task. `messgr-dispatcher` also sweeps
-every stale lease for its tenant at startup, before any claim loop runs, so a row left leased by
-a killed-and-restarted process (a crash before any terminal write or reschedule ran) is
-reclaimed immediately rather than staying stuck -- safe only because exactly one dispatcher
-instance runs per tenant today; this sweep is revisited once leader election ships and a
-restart is no longer guaranteed to be the sole claimant.
+every stale lease for its tenant once, immediately after a process wins leadership (`T-039`) and
+before any claim loop runs, so a row left leased by a killed-and-restarted leader (a crash before
+any terminal write or reschedule ran) is reclaimed immediately rather than staying stuck --
+winning the advisory lock is what guarantees the previous leader's session, and therefore its
+leases, are truly gone.
 
 `T-016` adds kill-switch enforcement (DESIGN.md §5.2): a shared, in-process cache of currently
 engaged switches, refreshed by a dedicated `LISTEN kill_switch` connection with a 30-second poll

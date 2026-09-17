@@ -240,15 +240,15 @@ pub async fn reschedule_retry(
     Ok(())
 }
 
-/// Clears every stale lease for this tenant (T-021 decision 4) — called once
-/// at `messgr-dispatcher` startup, before any claim loop runs. Safe because
-/// exactly one dispatcher instance runs per tenant today (no leader
-/// election yet, T-013 decision 3): a fresh process start cannot be racing
-/// a still-live claimant, so any lease still set belongs to a run that is
-/// no longer around to finish it. `repo::claim`'s own predicate never
-/// compares `leased_until` to `now()`, so without this sweep a row left
-/// leased by a crash (or any pre-terminal-write failure) would stay leased
-/// forever rather than for the nominal lease duration.
+/// Clears every stale lease for this tenant (T-021 decision 4) — called once,
+/// immediately after a process wins tenant leadership (`leader::acquire`,
+/// T-039), before any claim loop runs. Safe because winning the advisory lock
+/// means Postgres has already ended the previous leader's session: any lease
+/// still set at that moment belongs to a run that is no longer around to
+/// finish it. `repo::claim`'s own predicate never compares `leased_until` to
+/// `now()`, so without this sweep a row left leased by a crash (or any
+/// pre-terminal-write failure) would stay leased forever rather than for the
+/// nominal lease duration.
 pub async fn clear_stale_leases(pool: &PgPool) -> Result<u64, sqlx::Error> {
     let result = sqlx::query(
         "UPDATE outbox SET leased_until = NULL WHERE leased_until IS NOT NULL",
