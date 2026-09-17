@@ -274,7 +274,45 @@ one with `"expires_at":"<a time already past>"` and no `scheduled_for`, start
 
 ## Review
 
-<!-- empty until IN REVIEW -->
+- [x] Reviewer independence settled (step 0): **independent** — fresh session (post-`/clear`),
+  no memory of authoring this branch. Audits (steps 2-4a) additionally delegated to a spawned,
+  briefed-adversarially sub-agent for extra rigor; every delegated finding re-verified by hand
+  before being recorded here.
+- [x] Implementation audit — all 6 tasks verified met, in the files named, against the actual
+  tree (not the plan prose); acceptance test re-run verbatim: `just build`, `just test` (full
+  suite green, incl. the 5 new named tests), `just lint`, `just docs-check` — all clean.
+- [x] Quality audit — idiomatic; mutation-tested the Task 4 gate reasoning (deleting it would
+  flip `expired_row_is_terminal_written_and_not_sent` red two ways: wrong `final_status` and the
+  wiremock `.expect(0)` firing) confirming it isn't tautological. One test-gap found (F1).
+- [x] Consistency audit — all 6 confirmed decisions verified against shipped code. One
+  governing-document staleness found and fixed inline (F2, per the review-addendum's step 5:
+  design corrections are not deferred).
+- [x] Documentation audit — `just docs-check` clean; `ingest.adoc`/`dispatcher.adoc` coverage
+  spot-checked sentence-by-sentence against shipped behaviour; whole-tree grep for stale
+  gate-order/scheduling claims found nothing else new.
+- [x] Docs-readability pass — conscious skip: no docs-readability reviewer configured in this
+  host/session.
+- [x] Findings recorded below with severity, class, and disposition; disposition summary and
+  cost line present.
+- [x] Ticket moved to `tickets/6-done/`; `## History` appended.
+- [x] Other references updated; governing documents reconciled — `DESIGN.md` bumped to Version 8
+  and `development/design/14-decisions-and-open-questions.md` item 8 narrowed (F2's fix, commit
+  `6b460bf` on the ticket branch).
+- [x] Remaining-tickets impact sweep done: `T-041` and `T-043` (the only `1-to-do/` tickets
+  mentioning T-040, both soft couplings, no `depends-on:`) re-read — both descriptions remain
+  accurate to what shipped; no patch needed.
+- [ ] Summary + commit message & MR attributes presented for approval; overarching bookkeeping
+  committed per policy; next-ticket suggestion — pending, below.
+
+| id | severity | class | disposition | description | evidence | suggestion |
+|---|---|---|---|---|---|---|
+| F1 | non-blocking | test-gap | noted | No ingest-level (`POST /comms`) test asserts decision 2 — a past `expires_at` is accepted, not rejected, at ingest. The only past-`expires_at` coverage (`expired_row_is_terminal_written_and_not_sent`) writes the row via `insert_transactional` directly, bypassing `validate_schedule`/the handler entirely. | `tests/ingest.rs` has no such case; handler has no `expires_at` validation at all (by design, decision 2) | Add `create_comms_accepts_past_expires_at`: POST with `expires_at` in the past, assert `201` and the value lands unchanged in `comms_request`/`outbox`. Small enough to fold into the next ticket touching `tests/ingest.rs`'s scheduling cases, not worth its own ticket. |
+| F2 | non-blocking | stale-xref | fixed inline | `development/design/14-decisions-and-open-questions.md` Still-open item 8 said the 90-day scheduling horizon default needed "confirming" — T-040 ships it as the enforced, hard-rejecting default (decision 6), resolving that half of the question; only the override sub-question remains open. | `development/design/14-decisions-and-open-questions.md:49` (pre-fix) | Fixed inline (review-addendum step 5): item 8 reworded, `DESIGN.md` version bumped 7→8, commit `6b460bf` on `feat/T-040-wire-scheduled-delivery-and-expiry`. |
+| F3 | non-blocking | stale-xref | noted | `development/design/05-send-timing.md`'s §6.2 "two forms" table still describes `scheduled_local` as accepted alongside `scheduled_for`; only `scheduled_for` exists in the schema/API. Pre-existing (predates this branch) and explicitly out of scope per this ticket's own Description — not this branch's defect, so not eligible for `fixed inline`, but surfaced here since the consistency audit's whole-tree sweep found it in the exact section this ticket touches. | `development/design/05-send-timing.md:26-31` | Leave for whichever ticket implements `scheduled_local` (flagged in T-043's Description as sharing tz machinery) to correct the doc alongside the code, or a design-scoped audit pass (review-addendum step 8) to pick up independently. |
+
+Disposition summary: 3 findings — 1 fixed inline (F2), 2 noted (F1, F3). 0 folded, 0 new tickets.
+
+cost: estimated L, actual L
 
 ## History
 
@@ -285,3 +323,4 @@ one with `"expires_at":"<a time already past>"` and no `scheduled_for`, start
 - 2026-09-17 — TO DO → READY: plan complete
 - 2026-09-17 — READY → IN DEVELOPMENT: picked up
 - 2026-09-17 — IN DEVELOPMENT → IN REVIEW: acceptance green
+- 2026-09-17 — IN REVIEW → DONE: no blocking findings; 1 fixed inline, 2 noted
