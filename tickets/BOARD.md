@@ -9,7 +9,7 @@ hand — edit the tickets. Hand-written planning notes live in [`NOTES.md`](NOTE
 **WIP limits (per child-project):**
 - `messgr`: `3-in-development/` ≤ 1 · `4-in-review/` ≤ 1
 
-Last updated: 2026-09-16
+Last updated: 2026-09-17
 
 ## IN DEVELOPMENT
 
@@ -92,7 +92,7 @@ Last updated: 2026-09-16
 | T-033 | Alert and make configurable the orphan-reconcile attempts cap | yes — MERGED: PR #50 merged to `main` (`06ef25b`). |
 | T-034 | Validate orphan-reconcile event_type before promoting and make find_match deterministic | yes — merged to main (PR #49, adab8bc) |
 | T-035 | Assert orphan-reconcile's age-out tracing::warn! actually fires | yes — MERGED: PR #51 merged to `main` (`b7d5bae`). |
-| T-036 | Verification gate at dispatch | no — publish-gated |
+| T-036 | Verification gate at dispatch | yes — MERGED: PR #52 (`feat/T-036-verification-gate-at-dispatch`, `5243a78`) |
 | T-038 | Suppression gate at dispatch | yes — MERGED: PR #53 (`feat/T-038-suppression-gate-at-dispatch`, `3409991`) |
 
 ## DROPPED
