@@ -324,3 +324,4 @@ cost: estimated L, actual L
 - 2026-09-17 — READY → IN DEVELOPMENT: picked up
 - 2026-09-17 — IN DEVELOPMENT → IN REVIEW: acceptance green
 - 2026-09-17 — IN REVIEW → DONE: no blocking findings; 1 fixed inline, 2 noted
+- 2026-09-17 — MERGED: PR #55 merged to `main` (`590f284`)
