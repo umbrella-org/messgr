@@ -714,3 +714,4 @@ Run: `just build && just test && just lint`.
 - 2026-09-17 — TO DO → READY: plan complete. Refinement re-graded complexity/cost from
   medium-high/M-L to medium/M, in line with sibling gates T-036/T-038 — see Description for
   what refinement found (erasure gap, detection-query fix, no-mint decision).
+- 2026-09-17 — READY → IN DEVELOPMENT: picked up
