@@ -1,6 +1,6 @@
 # messgr — Design
 
-**Version 6** · 2026-09-15 · T-033 review: §4.10's `tenant_config` DDL and field-count prose were missing `kill_switch_release_rate` (T-016) and `reconcile_attempts_cap` (T-033)
+**Version 7** · 2026-09-17 · T-039 review: §2.3/§4.2/§9/§12 no longer describe leader election as unshipped or "still open" — `pg_try_advisory_lock`-based HA shipped in T-039, and the stale-lease sweep is now tied to acquiring leadership, resolving the §2.3 correction's own anticipated follow-up
 
 Centralized communications orchestration and audit ledger for customer messaging across SMS, email, and WhatsApp.
 
