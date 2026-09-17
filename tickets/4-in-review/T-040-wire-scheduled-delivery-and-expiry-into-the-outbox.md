@@ -284,3 +284,4 @@ one with `"expires_at":"<a time already past>"` and no `scheduled_for`, start
   is hardcoded NULL at ingest today.
 - 2026-09-17 — TO DO → READY: plan complete
 - 2026-09-17 — READY → IN DEVELOPMENT: picked up
+- 2026-09-17 — IN DEVELOPMENT → IN REVIEW: acceptance green
