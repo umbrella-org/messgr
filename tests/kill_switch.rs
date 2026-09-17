@@ -245,6 +245,8 @@ async fn write_outbox_row(
         &payload_ciphertext,
         producer_id,
         Uuid::new_v4(),
+        None,
+        None,
     )
     .await
     .expect("insert_transactional failed");

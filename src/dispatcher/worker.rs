@@ -196,6 +196,29 @@ pub async fn try_process(
     ctx: &DispatcherContext,
     row: &ClaimedOutbox,
 ) -> Result<(), DispatchError> {
+    // Expiry gate (DESIGN.md §5, T-040) — checked first: cheapest, and avoids
+    // spending any other gate's work on a dead message. `src/dispatcher/drain.rs`
+    // runs the equivalent check ahead of this for the kill-switch drain path
+    // specifically (decision 5) — this covers the ordinary claim loop, which had
+    // no expiry check at all before this ticket.
+    if row
+        .expires_at
+        .is_some_and(|expires_at| expires_at <= Utc::now())
+    {
+        repo::write_terminal(
+            &ctx.pool,
+            row.created_at,
+            row.comms_request_id,
+            row.customer_id,
+            "expired",
+            None,
+            None,
+            "expired",
+        )
+        .await?;
+        return Ok(());
+    }
+
     // Suppression gate (DESIGN.md §5, T-038) — unconditional, no class
     // exemption, so it runs ahead of verification below (T-036, which only
     // applies to transactional/marketing): a suppressed destination never

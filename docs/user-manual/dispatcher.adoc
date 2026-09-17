@@ -33,7 +33,15 @@ whose `expires_at` has already passed by the time it's drained is written `expir
 Engaging a `discard` switch immediately terminal-writes (`discarded`) everything it already
 matches. See "Kill switches" for the operator runbook.
 
-`T-038` adds the suppression gate (DESIGN.md §5): the first in-line gate check this send path
+`T-040` adds the Expiry gate (DESIGN.md §5): the first in-line gate check this send path runs
+(kill switches, above, are checked before a row is even claimed, not inside this path) -- an
+outbox row whose `expires_at` has already passed is terminal-written `expired`, not sent, before
+any other gate or decrypt runs, since it's the cheapest check and a dead message shouldn't spend
+any other gate's work. `messgr-ingest` populates `expires_at` from the request's own `expires_at`
+field, if any (see "messgr-ingest"); an expired row that is never claimed at all is instead caught
+by the release-drain path's own equivalent pre-check during a kill-switch drain (above).
+
+`T-038` adds the suppression gate (DESIGN.md §5): the next in-line gate check this send path
 runs (kill switches, above, are checked before a row is even claimed, not inside this path),
 before any decrypt, so a blocked send never spends a DEK fetch. It runs unconditionally for
 every message class -- no exemption, unlike verification/consent below. A destination present

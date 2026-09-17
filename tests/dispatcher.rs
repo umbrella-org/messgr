@@ -210,6 +210,7 @@ async fn write_outbox_row_with_verification(
     class: &str,
     verified_at: Option<DateTime<Utc>>,
     destination_hmac: &[u8],
+    expires_at: Option<DateTime<Utc>>,
 ) -> (Uuid, DateTime<Utc>, Uuid) {
     let tenant_id =
         messgr::tenant::repo::find_by_slug(&tenant.control_pool, &tenant.slug)
@@ -263,6 +264,8 @@ async fn write_outbox_row_with_verification(
         &payload_ciphertext,
         Uuid::new_v4(),
         address_id,
+        None,
+        expires_at,
     )
     .await
     .expect("insert_transactional failed");
@@ -303,6 +306,7 @@ async fn write_ready_outbox_row(
         "transactional",
         Some(Utc::now()),
         b"unused-hmac",
+        None,
     )
     .await
 }
@@ -328,6 +332,7 @@ async fn write_outbox_row_with_hmac(
         "transactional",
         Some(Utc::now()),
         destination_hmac,
+        None,
     )
     .await
 }
@@ -1111,6 +1116,7 @@ async fn enforce_blocks_unverified_address_with_terminal_event_and_no_send() {
             "transactional",
             None,
             b"unused-hmac",
+            None,
         )
         .await;
 
@@ -1206,6 +1212,7 @@ async fn observe_records_unverified_address_and_still_sends() {
             "transactional",
             None,
             b"unused-hmac",
+            None,
         )
         .await;
 
@@ -1306,6 +1313,7 @@ async fn verified_address_sends_normally_under_enforce() {
             "transactional",
             Some(Utc::now()),
             b"unused-hmac",
+            None,
         )
         .await;
 
@@ -1394,6 +1402,7 @@ async fn auth_class_skips_the_gate_even_when_unverified() {
             "auth",
             None,
             b"unused-hmac",
+            None,
         )
         .await;
 
@@ -1647,6 +1656,89 @@ async fn an_expired_suppression_entry_no_longer_blocks() {
             .await
             .expect("counting outbox rows failed");
     assert_eq!(outbox_count, 0);
+
+    tenant.cleanup().await;
+}
+
+#[tokio::test]
+async fn expired_row_is_terminal_written_and_not_sent() {
+    let vault = vault_keystore();
+    let tenant = provision_test_tenant(&vault).await;
+    let cache = small_cache();
+
+    let mock_server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/messages"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "message_id": "should-not-be-called",
+            "status": "queued",
+        })))
+        .expect(0)
+        .mount(&mock_server)
+        .await;
+
+    let (comms_request_id, created_at, _customer_id) =
+        write_outbox_row_with_verification(
+            &tenant,
+            &vault,
+            &cache,
+            "+15550100",
+            "hello there",
+            "transactional",
+            Some(Utc::now()),
+            b"unused-hmac",
+            Some(Utc::now() - chrono::Duration::minutes(5)),
+        )
+        .await;
+
+    let sender: Arc<dyn Sender> =
+        Arc::new(HttpSender::new(mock_server.uri(), "test-key".to_string()));
+    let ctx = DispatcherContext {
+        pool: tenant.tenant_pool.clone(),
+        keystore: Arc::new(vault_keystore()),
+        cache: Arc::new(cache),
+        mount: tenant.mount.clone(),
+        sender,
+        verification_mode: "enforce".to_string(),
+        kill_switches: Arc::new(KillSwitchCache::new()),
+        draining: Arc::new(RwLock::new(HashMap::new())),
+    };
+
+    let claimed = repo::claim(
+        &tenant.tenant_pool,
+        "sms",
+        10,
+        Utc::now() + chrono::Duration::minutes(2),
+        &no_exclusion(),
+    )
+    .await
+    .expect("claim failed");
+    assert_eq!(claimed.len(), 1);
+
+    try_process(&ctx, &claimed[0])
+        .await
+        .expect("try_process failed");
+
+    let final_status: Option<String> = sqlx::query_scalar(
+        "SELECT final_status FROM comms_request WHERE created_at = $1 AND id = $2",
+    )
+    .bind(created_at)
+    .bind(comms_request_id)
+    .fetch_one(&tenant.tenant_pool)
+    .await
+    .expect("fetching final_status failed");
+    assert_eq!(final_status.as_deref(), Some("expired"));
+
+    let outbox_count: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM outbox WHERE comms_request_id = $1")
+            .bind(comms_request_id)
+            .fetch_one(&tenant.tenant_pool)
+            .await
+            .expect("counting outbox rows failed");
+    assert_eq!(
+        outbox_count, 0,
+        "a terminal row must be removed from the queue"
+    );
 
     tenant.cleanup().await;
 }
