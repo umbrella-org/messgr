@@ -1,13 +1,14 @@
 //! `messgr-dispatcher` (T-013): a per-tenant, per-channel claim loop that
-//! turns an `outbox` row into a `comms_event` + `final_status` write. One
-//! process per tenant (DESIGN.md §9) -- leader election
-//! (`pg_try_advisory_lock`) is still a later ticket (build order step 7's
-//! other half); this binary runs exactly one instance per tenant.
+//! turns an `outbox` row into a `comms_event` + `final_status` write. Two
+//! processes may run per tenant for HA (DESIGN.md §9); `pg_try_advisory_lock`
+//! on a direct connection (T-039) elects exactly one as active, and the
+//! standby idles and retries every few seconds until it can take over.
 //!
-//! T-021 adds retry with backoff for retryable send failures and a
-//! startup sweep that clears any stale lease left by a crashed prior run
-//! (safe only because exactly one instance runs per tenant -- revisit once
-//! leader election ships).
+//! T-021 adds retry with backoff for retryable send failures and a sweep
+//! that clears any stale lease left by a crashed prior run, now run once per
+//! acquired leadership (T-039) rather than once at raw process start --
+//! winning the advisory lock is what guarantees the previous leader's
+//! session, and therefore its leases, are truly gone.
 //!
 //! T-016 adds kill-switch enforcement: a shared `KillSwitchCache`, refreshed
 //! by a dedicated `LISTEN kill_switch` connection with a 30-second poll
@@ -114,18 +115,6 @@ async fn main() {
     .await
     .expect("failed to connect to the tenant database")
     .pool;
-
-    // T-021 decision 4: clear every stale lease before any claim loop
-    // starts. Safe because exactly one dispatcher instance runs per tenant
-    // today (no leader election yet, T-013 decision 3) -- a fresh process
-    // start cannot be racing a still-live claimant.
-    let cleared_leases = repo::clear_stale_leases(&tenant_pool)
-        .await
-        .expect("clearing stale outbox leases failed");
-    tracing::info!(
-        cleared_leases,
-        "messgr-dispatcher: cleared stale outbox leases on startup"
-    );
 
     // Per-tenant AppRole login (T-013 decision 7) -- this is the
     // single-tenant-per-process case `connect_as_tenant`'s own doc comment
@@ -294,6 +283,26 @@ async fn main() {
         )
         .await;
     }));
+
+    // T-039: block here, after everything that runs regardless of
+    // leadership (health listener, kill-switch refresh loop, Vault login,
+    // credential/config loads) is already up, and only before the sweep and
+    // claim loops that a standby must not run. `_leadership` stays bound for
+    // the rest of `main` -- dropping it early would release the lock out
+    // from under an otherwise-healthy leader.
+    let leader_options =
+        db::with_database_name(&config.control_database_url, &tenant.database_name)
+            .expect("deriving the leader-lock connection options failed");
+    let _leadership = messgr::dispatcher::leader::acquire(leader_options).await;
+    tracing::info!("messgr-dispatcher: acquired tenant leadership");
+
+    let cleared_leases = repo::clear_stale_leases(&tenant_pool)
+        .await
+        .expect("clearing stale outbox leases failed");
+    tracing::info!(
+        cleared_leases,
+        "messgr-dispatcher: cleared stale outbox leases after acquiring leadership"
+    );
 
     for (channel, ctx) in contexts {
         tracing::info!(%channel, "messgr-dispatcher: starting claim loop");
