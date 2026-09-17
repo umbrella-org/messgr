@@ -38,6 +38,7 @@ Last updated: 2026-09-17
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
+| T-040 | Wire scheduled delivery and expiry into the outbox | critical | high | L | [] |  |
 
 ## TO DO (impact order, per child)
 
@@ -45,7 +46,6 @@ Last updated: 2026-09-17
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
-| T-040 | Wire scheduled delivery and expiry into the outbox | critical | medium | M | [] |  |
 | T-037 | Consent gate at dispatch | critical | medium-high | M-L | [] |  |
 | T-041 | Cancellation endpoint with dispatch-time race check | high | low-medium | S-M | [] |  |
 | T-042 | Producer quotas and producer_usage enforcement | high | high | L | [] |  |
