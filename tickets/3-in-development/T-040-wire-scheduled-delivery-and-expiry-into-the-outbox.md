@@ -283,3 +283,4 @@ one with `"expires_at":"<a time already past>"` and no `scheduled_for`, start
   verification/consent/suppression gates) cannot fire until this ships, since `outbox.expires_at`
   is hardcoded NULL at ingest today.
 - 2026-09-17 — TO DO → READY: plan complete
+- 2026-09-17 — READY → IN DEVELOPMENT: picked up
