@@ -246,3 +246,4 @@ secret-id operational requirement from decision 4: each replica needs its own
 - 2026-09-17 — TO DO → READY: implementation plan complete
 - 2026-09-17 — TO DO → READY: plan complete
 - 2026-09-17 — READY → IN DEVELOPMENT: picked up
+- 2026-09-17 — IN DEVELOPMENT → IN REVIEW: acceptance green
