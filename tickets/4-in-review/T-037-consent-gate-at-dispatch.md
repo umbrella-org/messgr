@@ -715,3 +715,4 @@ Run: `just build && just test && just lint`.
   medium-high/M-L to medium/M, in line with sibling gates T-036/T-038 — see Description for
   what refinement found (erasure gap, detection-query fix, no-mint decision).
 - 2026-09-17 — READY → IN DEVELOPMENT: picked up
+- 2026-09-17 — IN DEVELOPMENT → IN REVIEW: acceptance green
