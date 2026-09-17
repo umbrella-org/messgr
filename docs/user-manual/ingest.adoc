@@ -13,6 +13,15 @@ combination is rejected (`422`). Consent and quotas (§5, §5.1) are still unbui
 `class = "auth"` is rejected outright (`422`) -- OTP has its own path (`sms-sender`/`otp-api`,
 `T-047`), never this one.
 
+The request body also takes two optional RFC3339 timestamps, both absolute UTC (`T-040`):
+`scheduled_for` delays claim eligibility until that time instead of immediately (a past value
+collapses to "send immediately", the same as omitting it); `expires_at` is written straight
+through to the outbox and checked by the dispatcher's Expiry gate the first time the row would
+be claimed (§5), never rejected here even if already in the past -- one code path handles both
+"expired before dispatch" and "expired while queued". A `scheduled_for` further out than the
+tenant's `schedule_horizon_days` (`messgr-control tenant-config show`, default 90) is rejected
+(`422`), alongside the other validation `422`s above -- `expires_at` carries no such horizon.
+
 `T-016` adds the first two ingest-side rejections ahead of the full gate chain: a client
 certificate belonging to a tenant whose `tenant.status` isn't `active` (suspended or
 offboarding) gets `403`, distinct from an unregistered or disabled producer certificate's own

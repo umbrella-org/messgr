@@ -1,6 +1,6 @@
 # messgr — Design
 
-**Version 7** · 2026-09-17 · T-039 review: §2.3/§4.2/§9/§12 no longer describe leader election as unshipped or "still open" — `pg_try_advisory_lock`-based HA shipped in T-039, and the stale-lease sweep is now tied to acquiring leadership, resolving the §2.3 correction's own anticipated follow-up
+**Version 8** · 2026-09-17 · T-040 review: §14 "still open" item 8 narrowed — the 90-day scheduling horizon default is confirmed and enforced (hard-rejecting, no override) as of T-040; only whether an override mechanism is ever needed remains open
 
 Centralized communications orchestration and audit ledger for customer messaging across SMS, email, and WhatsApp.
 

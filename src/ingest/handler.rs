@@ -1,6 +1,7 @@
 use axum::Json;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
+use chrono::{DateTime, Duration, Utc};
 use uuid::Uuid;
 
 use crate::customer::resolve::{ResolutionInput, resolve};
@@ -33,6 +34,10 @@ pub async fn create_comms(
     validate_channel(&body.channel)?;
     validate_class(&body.class, body.campaign_id.as_deref())?;
     let resolution_input = build_resolution_input(&body)?;
+    validate_schedule(
+        body.scheduled_for,
+        producer.tenant.config.schedule_horizon_days,
+    )?;
 
     let tenant = producer.tenant;
 
@@ -137,6 +142,8 @@ pub async fn create_comms(
         &payload_ciphertext,
         producer.producer_id,
         resolved.address_id,
+        body.scheduled_for,
+        body.expires_at,
     )
     .await?;
 
@@ -189,4 +196,19 @@ fn validate_class(value: &str, campaign_id: Option<&str>) -> Result<(), IngestEr
         class::TRANSACTIONAL | class::MARKETING => Ok(()),
         other => Err(IngestError::InvalidClass(other.to_string())),
     }
+}
+
+/// T-040 decision 1: only a `scheduled_for` beyond the tenant's horizon is
+/// rejected; a past one collapses to "send immediately" via
+/// `next_attempt_at = scheduled_for.unwrap_or(now)`, no special-casing here.
+fn validate_schedule(
+    scheduled_for: Option<DateTime<Utc>>,
+    horizon_days: i32,
+) -> Result<(), IngestError> {
+    if let Some(scheduled_for) = scheduled_for
+        && scheduled_for > Utc::now() + Duration::days(horizon_days.into())
+    {
+        return Err(IngestError::ScheduleHorizonExceeded { horizon_days });
+    }
+    Ok(())
 }

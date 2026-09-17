@@ -53,9 +53,12 @@ pub async fn insert_transactional(
     payload_ciphertext: &[u8],
     producer_id: Uuid,
     address_id: Uuid,
+    scheduled_for: Option<DateTime<Utc>>,
+    expires_at: Option<DateTime<Utc>>,
 ) -> Result<InsertOutcome, sqlx::Error> {
     let now: DateTime<Utc> = Utc::now();
     let idempotency_expires_at = now + Duration::days(IDEMPOTENCY_TTL_DAYS);
+    let next_attempt_at = scheduled_for.unwrap_or(now);
 
     let mut tx = pool.begin().await?;
 
@@ -90,7 +93,7 @@ pub async fn insert_transactional(
             payload_ciphertext, producer_id, scheduled_for, expires_at,
             final_status, finalized_at
         ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NULL, NULL, NULL, NULL
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NULL, NULL
         )
         "#,
     )
@@ -107,6 +110,8 @@ pub async fn insert_transactional(
     .bind(destination_ciphertext)
     .bind(payload_ciphertext)
     .bind(producer_id)
+    .bind(scheduled_for)
+    .bind(expires_at)
     .execute(&mut *tx)
     .await?;
 
@@ -117,7 +122,7 @@ pub async fn insert_transactional(
             address_id, producer_id, campaign_id, next_attempt_at, expires_at,
             cancelled_at, attempts, leased_until
         ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NULL, NULL, 0, NULL
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NULL, 0, NULL
         )
         "#,
     )
@@ -130,7 +135,8 @@ pub async fn insert_transactional(
     .bind(address_id)
     .bind(producer_id)
     .bind(campaign_id)
-    .bind(now)
+    .bind(next_attempt_at)
+    .bind(expires_at)
     .execute(&mut *tx)
     .await?;
 

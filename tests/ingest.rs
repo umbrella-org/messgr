@@ -12,6 +12,7 @@ use axum::Router;
 use axum::routing::post;
 use axum_server::Handle;
 use axum_server::tls_rustls::{RustlsAcceptor, RustlsConfig};
+use chrono::{DateTime, Duration, SubsecRound, Utc};
 use reqwest::{Certificate, Identity};
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -1125,6 +1126,254 @@ async fn same_destination_under_two_customer_ids_resolves_to_the_first() {
     assert_eq!(
         resolved_customer_id, customer_a,
         "the second send must resolve to the first (winning) customer, not its own asserted id"
+    );
+
+    tenant_pool.close().await;
+    teardown(&fixture, Some(&_cert_subject)).await;
+}
+
+#[tokio::test]
+async fn create_comms_honours_scheduled_for() {
+    let fixture = setup("en-US").await;
+    let vault = vault_keystore();
+    let (identity_pem, _cert_subject) =
+        register_test_producer(&fixture, &vault, "scheduler-caller").await;
+    let client = mtls_client(
+        &fixture.server_common_name,
+        fixture.server.addr,
+        &identity_pem,
+        &fixture.server_ca_pem,
+    );
+    let url = format!(
+        "https://{}:{}/comms",
+        fixture.server_common_name,
+        fixture.server.addr.port()
+    );
+
+    // Truncated to whole seconds so the round trip through JSON and
+    // postgres timestamptz can be compared for exact equality.
+    let scheduled_for = (Utc::now() + Duration::days(3)).round_subsecs(0);
+    let mut body = sample_body(Uuid::new_v4());
+    body["scheduled_for"] = serde_json::json!(scheduled_for.to_rfc3339());
+
+    let response = client
+        .post(&url)
+        .header("Idempotency-Key", unique_name("idem"))
+        .json(&body)
+        .send()
+        .await
+        .expect("request failed");
+    assert_eq!(response.status(), 201);
+    let response_body: serde_json::Value =
+        response.json().await.expect("parsing response failed");
+    let comms_request_id: Uuid = response_body["comms_request_id"]
+        .as_str()
+        .expect("comms_request_id must be a string")
+        .parse()
+        .expect("comms_request_id must be a uuid");
+
+    let tenant_pool = connect_tenant_pool(
+        &fixture.control_pool,
+        &fixture.control_url,
+        fixture.tenant_id,
+        &fixture.database_name,
+        5,
+    )
+    .await
+    .expect("connecting to tenant pool failed")
+    .pool;
+
+    let ledger_scheduled_for: DateTime<Utc> =
+        sqlx::query_scalar("SELECT scheduled_for FROM comms_request WHERE id = $1")
+            .bind(comms_request_id)
+            .fetch_one(&tenant_pool)
+            .await
+            .expect("ledger row must exist");
+    assert_eq!(ledger_scheduled_for, scheduled_for);
+
+    let outbox_next_attempt_at: DateTime<Utc> = sqlx::query_scalar(
+        "SELECT next_attempt_at FROM outbox WHERE comms_request_id = $1",
+    )
+    .bind(comms_request_id)
+    .fetch_one(&tenant_pool)
+    .await
+    .expect("outbox row must exist");
+    assert_eq!(
+        outbox_next_attempt_at, scheduled_for,
+        "next_attempt_at must be the scheduled time, not now"
+    );
+
+    tenant_pool.close().await;
+    teardown(&fixture, Some(&_cert_subject)).await;
+}
+
+#[tokio::test]
+async fn create_comms_rejects_scheduled_for_beyond_horizon() {
+    let fixture = setup("en-US").await;
+    let vault = vault_keystore();
+    let (identity_pem, _cert_subject) =
+        register_test_producer(&fixture, &vault, "horizon-caller").await;
+    let client = mtls_client(
+        &fixture.server_common_name,
+        fixture.server.addr,
+        &identity_pem,
+        &fixture.server_ca_pem,
+    );
+    let url = format!(
+        "https://{}:{}/comms",
+        fixture.server_common_name,
+        fixture.server.addr.port()
+    );
+
+    // sample_tenant_config sets schedule_horizon_days = 90.
+    let scheduled_for = Utc::now() + Duration::days(91);
+    let mut body = sample_body(Uuid::new_v4());
+    body["scheduled_for"] = serde_json::json!(scheduled_for.to_rfc3339());
+
+    let response = client
+        .post(&url)
+        .header("Idempotency-Key", unique_name("idem"))
+        .json(&body)
+        .send()
+        .await
+        .expect("request failed");
+    assert_eq!(response.status(), 422);
+
+    teardown(&fixture, Some(&_cert_subject)).await;
+}
+
+#[tokio::test]
+async fn create_comms_writes_expires_at_to_outbox() {
+    let fixture = setup("en-US").await;
+    let vault = vault_keystore();
+    let (identity_pem, _cert_subject) =
+        register_test_producer(&fixture, &vault, "expiry-caller").await;
+    let client = mtls_client(
+        &fixture.server_common_name,
+        fixture.server.addr,
+        &identity_pem,
+        &fixture.server_ca_pem,
+    );
+    let url = format!(
+        "https://{}:{}/comms",
+        fixture.server_common_name,
+        fixture.server.addr.port()
+    );
+
+    let expires_at = (Utc::now() + Duration::days(1)).round_subsecs(0);
+    let mut body = sample_body(Uuid::new_v4());
+    body["expires_at"] = serde_json::json!(expires_at.to_rfc3339());
+
+    let response = client
+        .post(&url)
+        .header("Idempotency-Key", unique_name("idem"))
+        .json(&body)
+        .send()
+        .await
+        .expect("request failed");
+    assert_eq!(response.status(), 201);
+    let response_body: serde_json::Value =
+        response.json().await.expect("parsing response failed");
+    let comms_request_id: Uuid = response_body["comms_request_id"]
+        .as_str()
+        .expect("comms_request_id must be a string")
+        .parse()
+        .expect("comms_request_id must be a uuid");
+
+    let tenant_pool = connect_tenant_pool(
+        &fixture.control_pool,
+        &fixture.control_url,
+        fixture.tenant_id,
+        &fixture.database_name,
+        5,
+    )
+    .await
+    .expect("connecting to tenant pool failed")
+    .pool;
+
+    let ledger_expires_at: DateTime<Utc> =
+        sqlx::query_scalar("SELECT expires_at FROM comms_request WHERE id = $1")
+            .bind(comms_request_id)
+            .fetch_one(&tenant_pool)
+            .await
+            .expect("ledger row must exist");
+    assert_eq!(ledger_expires_at, expires_at);
+
+    let outbox_expires_at: DateTime<Utc> =
+        sqlx::query_scalar("SELECT expires_at FROM outbox WHERE comms_request_id = $1")
+            .bind(comms_request_id)
+            .fetch_one(&tenant_pool)
+            .await
+            .expect("outbox row must exist");
+    assert_eq!(outbox_expires_at, expires_at);
+
+    tenant_pool.close().await;
+    teardown(&fixture, Some(&_cert_subject)).await;
+}
+
+#[tokio::test]
+async fn create_comms_omits_scheduling_fields_by_default() {
+    let fixture = setup("en-US").await;
+    let vault = vault_keystore();
+    let (identity_pem, _cert_subject) =
+        register_test_producer(&fixture, &vault, "default-caller").await;
+    let client = mtls_client(
+        &fixture.server_common_name,
+        fixture.server.addr,
+        &identity_pem,
+        &fixture.server_ca_pem,
+    );
+    let url = format!(
+        "https://{}:{}/comms",
+        fixture.server_common_name,
+        fixture.server.addr.port()
+    );
+
+    let before = Utc::now();
+    let response = client
+        .post(&url)
+        .header("Idempotency-Key", unique_name("idem"))
+        .json(&sample_body(Uuid::new_v4()))
+        .send()
+        .await
+        .expect("request failed");
+    assert_eq!(response.status(), 201);
+    let response_body: serde_json::Value =
+        response.json().await.expect("parsing response failed");
+    let comms_request_id: Uuid = response_body["comms_request_id"]
+        .as_str()
+        .expect("comms_request_id must be a string")
+        .parse()
+        .expect("comms_request_id must be a uuid");
+
+    let tenant_pool = connect_tenant_pool(
+        &fixture.control_pool,
+        &fixture.control_url,
+        fixture.tenant_id,
+        &fixture.database_name,
+        5,
+    )
+    .await
+    .expect("connecting to tenant pool failed")
+    .pool;
+
+    let (outbox_expires_at, outbox_next_attempt_at): (
+        Option<DateTime<Utc>>,
+        DateTime<Utc>,
+    ) = sqlx::query_as(
+        "SELECT expires_at, next_attempt_at FROM outbox WHERE comms_request_id = $1",
+    )
+    .bind(comms_request_id)
+    .fetch_one(&tenant_pool)
+    .await
+    .expect("outbox row must exist");
+    assert_eq!(
+        outbox_expires_at, None,
+        "expires_at must stay NULL when omitted"
+    );
+    assert!(
+        outbox_next_attempt_at >= before && outbox_next_attempt_at <= Utc::now(),
+        "next_attempt_at must be close to now when scheduled_for is omitted"
     );
 
     tenant_pool.close().await;

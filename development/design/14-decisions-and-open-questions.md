@@ -46,7 +46,7 @@
 5. **Identifier systems** — which upstream systems (core banking CIF, CRM, digital, cards) will appear in `customer_external_id.system`, and which is canonical for the event feed. (§4.6)
 6. **Verification semantics** — does the master system publish per-address verification state on the feed? Until answered, the launch tenant runs `verification_mode = 'observe'`, which is now explicit rather than an accidental always-pass (§5).
 7. **Initial quota values** per producer, and the day-boundary timezone for the daily window. Needs the producer list and their expected volumes. (§5.1)
-8. **Maximum scheduling horizon** — 90 days is the proposed default. Confirm, and decide who may hold an override. (§6.2)
+8. **Scheduling horizon override** — the 90-day default is confirmed and enforced (hard-rejecting, no override) as of T-040. Still open: whether an override mechanism is ever needed, and who would hold one. (§6.2)
 9. ~~Two-person approval mechanism for the auth kill switch~~ — resolved for build-order step 4 (T-016, decision 29): out-of-band, recorded in `platform_audit`, not tool-enforced. Still open for step 14: should the admin panel enforce dual control mechanically, or continue to just record an off-tool process? (§5.2)
 10. **Launch regions** and their jurisdictions — determines how many independent stacks, Vault clusters, and keyholder sets exist on day one. (§2.2)
 11. **Vault edition** — confirm open-source with per-tenant mounts is acceptable, or whether an Enterprise licence is already held and namespaces are preferred. (§7.6)

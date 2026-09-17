@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -43,6 +44,8 @@ pub struct CreateCommsRequest {
     pub template_version: i32,
     pub locale: Option<String>,
     pub campaign_id: Option<String>,
+    pub scheduled_for: Option<DateTime<Utc>>,
+    pub expires_at: Option<DateTime<Utc>>,
     #[serde(default)]
     pub variables: HashMap<String, String>,
 }
@@ -80,6 +83,11 @@ pub enum IngestError {
     /// together, nor all three unset (decision 4) — checked before any DB
     /// or Vault call.
     InvalidResolutionInput,
+    /// `scheduled_for` is further out than `tenant_config.schedule_horizon_days`
+    /// allows (§6.2, T-040 decision 1) — checked before any DB or Vault call.
+    ScheduleHorizonExceeded {
+        horizon_days: i32,
+    },
     TemplateNotFound,
     Render(RenderError),
     Database(sqlx::Error),
@@ -177,6 +185,10 @@ impl std::fmt::Display for IngestError {
                 f,
                 "exactly one of customer_id, (external_id + external_id_system), or neither must be set"
             ),
+            Self::ScheduleHorizonExceeded { horizon_days } => write!(
+                f,
+                "scheduled_for exceeds the tenant's {horizon_days}-day scheduling horizon"
+            ),
             Self::TemplateNotFound => write!(f, "template not found"),
             Self::Render(err) => write!(f, "template render failed: {err}"),
             Self::Database(err) => write!(f, "database error: {err}"),
@@ -199,7 +211,8 @@ impl IntoResponse for IngestError {
             Self::InvalidClass(_)
             | Self::InvalidChannel(_)
             | Self::CampaignIdOnTransactional
-            | Self::InvalidResolutionInput => StatusCode::UNPROCESSABLE_ENTITY,
+            | Self::InvalidResolutionInput
+            | Self::ScheduleHorizonExceeded { .. } => StatusCode::UNPROCESSABLE_ENTITY,
             Self::TemplateNotFound => StatusCode::NOT_FOUND,
             Self::TenantNotConfigured => StatusCode::FAILED_DEPENDENCY,
             Self::MissingPeerCertificate
