@@ -4,9 +4,11 @@ use chrono::{DateTime, Utc};
 use clap::{Parser, Subcommand};
 
 use messgr::config::Config;
+use messgr::consent::configure::set_consent;
 use messgr::customer_dek::lifecycle::pre_provision_for_tenant;
 use messgr::db;
 use messgr::idempotency_sweep::run_for_tenant as run_idempotency_sweep;
+use messgr::ingest::model::class;
 use messgr::keystore::VaultKeyStore;
 use messgr::orphan_reconcile::reconcile::run_for_tenant as run_orphan_reconcile;
 use messgr::partition_lifecycle::lifecycle::run_for_tenant as run_partition_lifecycle;
@@ -107,6 +109,13 @@ enum Command {
     Suppression {
         #[command(subcommand)]
         command: SuppressionCommand,
+    },
+    /// Record a customer's opt-in/opt-out for one message class on a
+    /// destination (DESIGN.md §5, T-037), enforced by `messgr-dispatcher`'s
+    /// consent gate at send time for `marketing` messages.
+    Consent {
+        #[command(subcommand)]
+        command: ConsentCommand,
     },
     /// Keep comms_request/comms_event partitions self-managing (DESIGN.md
     /// §4.1, §7.2, §7.5, T-014): create-ahead, move to slow tablespace,
@@ -437,6 +446,52 @@ enum SuppressionCommand {
         tenant_slug: String,
         #[arg(long)]
         destination: String,
+        #[arg(long)]
+        actor: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum ConsentCommand {
+    /// Record a customer's opt-in or opt-out for one message class on a
+    /// destination that has already resolved to a real address. Rejected
+    /// if no active address is on file yet -- this command never mints
+    /// one (T-037 decision 1); record consent after the customer's first
+    /// message, or via whatever event-feed consumer eventually lands
+    /// (build-order step 10).
+    Set {
+        #[arg(long = "tenant-slug")]
+        tenant_slug: String,
+        #[arg(long)]
+        destination: String,
+        #[arg(
+            long,
+            value_parser = clap::builder::PossibleValuesParser::new([
+                channel::SMS,
+                channel::EMAIL,
+                channel::WHATSAPP,
+            ])
+        )]
+        channel: String,
+        #[arg(
+            long,
+            value_parser = clap::builder::PossibleValuesParser::new([
+                class::TRANSACTIONAL,
+                class::MARKETING,
+            ])
+        )]
+        class: String,
+        #[arg(
+            long = "opted-in",
+            action = clap::ArgAction::Set,
+            value_parser = clap::value_parser!(bool)
+        )]
+        opted_in: bool,
+        /// Where this opt-in/out was captured, for evidence (e.g. web_form,
+        /// ivr_call, branch_visit, sms_stop_reply) -- not the customer's own words.
+        #[arg(long)]
+        source: String,
+        /// Operator identity recorded on the platform_audit row.
         #[arg(long)]
         actor: String,
     },
@@ -1087,6 +1142,42 @@ async fn run(
                 }
             }
         }
+        Command::Consent { command } => {
+            let vault_keystore = VaultKeyStore::connect(config.profile).expect(
+                "failed to connect to Vault (has VAULT_ADDR/VAULT_TOKEN been set?)",
+            );
+            match command {
+                ConsentCommand::Set {
+                    tenant_slug,
+                    destination,
+                    channel,
+                    class,
+                    opted_in,
+                    source,
+                    actor,
+                } => {
+                    let outcome = set_consent(
+                        &control_pool,
+                        &config.control_database_url,
+                        &tenant_slug,
+                        &vault_keystore,
+                        &destination,
+                        &channel,
+                        &class,
+                        opted_in,
+                        &source,
+                        &actor,
+                    )
+                    .await
+                    .map_err(|err| {
+                        format!(
+                            "failed to set consent for tenant {tenant_slug:?}: {err}"
+                        )
+                    })?;
+                    println!("outcome={}", outcome.outcome);
+                }
+            }
+        }
         // No Vault client is connected here either — partition-lifecycle
         // touches neither Transit nor AppRole.
         Command::PartitionLifecycle { command } => match command {
@@ -1629,6 +1720,138 @@ mod tests {
         assert!(
             result.is_err(),
             "a zero --reconcile-attempts-cap must fail to parse"
+        );
+    }
+
+    #[test]
+    fn consent_set_parses_every_flag() {
+        let cli = Cli::try_parse_from([
+            "messgr-control",
+            "consent",
+            "set",
+            "--tenant-slug",
+            "acme",
+            "--destination",
+            "+15550100",
+            "--channel",
+            "sms",
+            "--class",
+            "marketing",
+            "--opted-in",
+            "true",
+            "--source",
+            "web_form",
+            "--actor",
+            "operator@example.com",
+        ])
+        .expect("parsing consent set must succeed");
+
+        let Command::Consent {
+            command:
+                ConsentCommand::Set {
+                    tenant_slug,
+                    destination,
+                    channel,
+                    class,
+                    opted_in,
+                    source,
+                    actor,
+                },
+        } = cli.command
+        else {
+            panic!("expected Consent::Set");
+        };
+
+        assert_eq!(tenant_slug, "acme");
+        assert_eq!(destination, "+15550100");
+        assert_eq!(channel, "sms");
+        assert_eq!(class, "marketing");
+        assert!(opted_in);
+        assert_eq!(source, "web_form");
+        assert_eq!(actor, "operator@example.com");
+    }
+
+    #[test]
+    fn consent_set_rejects_an_invalid_class() {
+        let result = Cli::try_parse_from([
+            "messgr-control",
+            "consent",
+            "set",
+            "--tenant-slug",
+            "acme",
+            "--destination",
+            "+15550100",
+            "--channel",
+            "sms",
+            "--class",
+            "auth",
+            "--opted-in",
+            "true",
+            "--source",
+            "web_form",
+            "--actor",
+            "operator@example.com",
+        ]);
+
+        assert!(
+            result.is_err(),
+            "an invalid --class value must fail to parse"
+        );
+    }
+
+    #[test]
+    fn consent_set_rejects_an_invalid_channel() {
+        let result = Cli::try_parse_from([
+            "messgr-control",
+            "consent",
+            "set",
+            "--tenant-slug",
+            "acme",
+            "--destination",
+            "+15550100",
+            "--channel",
+            "carrier-pigeon",
+            "--class",
+            "marketing",
+            "--opted-in",
+            "true",
+            "--source",
+            "web_form",
+            "--actor",
+            "operator@example.com",
+        ]);
+
+        assert!(
+            result.is_err(),
+            "an invalid --channel value must fail to parse"
+        );
+    }
+
+    #[test]
+    fn consent_set_rejects_a_non_boolean_opted_in() {
+        let result = Cli::try_parse_from([
+            "messgr-control",
+            "consent",
+            "set",
+            "--tenant-slug",
+            "acme",
+            "--destination",
+            "+15550100",
+            "--channel",
+            "sms",
+            "--class",
+            "marketing",
+            "--opted-in",
+            "sometimes",
+            "--source",
+            "web_form",
+            "--actor",
+            "operator@example.com",
+        ]);
+
+        assert!(
+            result.is_err(),
+            "a non-boolean --opted-in value must fail to parse"
         );
     }
 }

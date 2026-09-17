@@ -1742,3 +1742,405 @@ async fn expired_row_is_terminal_written_and_not_sent() {
 
     tenant.cleanup().await;
 }
+
+async fn insert_consent_row(
+    pool: &PgPool,
+    address_id: Uuid,
+    class: &str,
+    opted_in: bool,
+) {
+    sqlx::query(
+        "INSERT INTO consent (address_id, class, opted_in, source, updated_at) \
+         VALUES ($1, $2, $3, 'test', now())",
+    )
+    .bind(address_id)
+    .bind(class)
+    .bind(opted_in)
+    .execute(pool)
+    .await
+    .expect("inserting consent row failed");
+}
+
+#[tokio::test]
+async fn marketing_without_any_consent_row_is_blocked_with_suppressed_consent() {
+    let vault = vault_keystore();
+    let tenant = provision_test_tenant(&vault).await;
+    let cache = small_cache();
+
+    let mock_server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/messages"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "message_id": "msg-should-not-send",
+            "status": "queued",
+        })))
+        .expect(0)
+        .mount(&mock_server)
+        .await;
+
+    let (comms_request_id, created_at, _customer_id) =
+        write_outbox_row_with_verification(
+            &tenant,
+            &vault,
+            &cache,
+            "+15550100",
+            "hello there",
+            "marketing",
+            Some(Utc::now()),
+            unique_name("hmac").as_bytes(),
+            None,
+        )
+        .await;
+
+    let sender: Arc<dyn Sender> =
+        Arc::new(HttpSender::new(mock_server.uri(), "test-key".to_string()));
+    let ctx = DispatcherContext {
+        pool: tenant.tenant_pool.clone(),
+        keystore: Arc::new(vault_keystore()),
+        cache: Arc::new(cache),
+        mount: tenant.mount.clone(),
+        sender,
+        verification_mode: "observe".to_string(),
+        kill_switches: Arc::new(KillSwitchCache::new()),
+        draining: Arc::new(RwLock::new(HashMap::new())),
+    };
+
+    let claimed = repo::claim(
+        &tenant.tenant_pool,
+        "sms",
+        10,
+        Utc::now() + chrono::Duration::minutes(2),
+        &no_exclusion(),
+    )
+    .await
+    .expect("claim failed");
+    assert_eq!(claimed.len(), 1);
+    assert_eq!(claimed[0].comms_request_id, comms_request_id);
+
+    try_process(&ctx, &claimed[0])
+        .await
+        .expect("try_process failed");
+
+    let final_status: Option<String> = sqlx::query_scalar(
+        "SELECT final_status FROM comms_request WHERE created_at = $1 AND id = $2",
+    )
+    .bind(created_at)
+    .bind(comms_request_id)
+    .fetch_one(&tenant.tenant_pool)
+    .await
+    .expect("fetching final_status failed");
+    assert_eq!(final_status.as_deref(), Some("suppressed_consent"));
+
+    let events: Vec<(String, Option<String>, Option<String>)> = sqlx::query_as(
+        "SELECT event_type, provider_ref, provider_status FROM comms_event WHERE comms_request_id = $1",
+    )
+    .bind(comms_request_id)
+    .fetch_all(&tenant.tenant_pool)
+    .await
+    .expect("fetching comms_event rows failed");
+    assert_eq!(
+        events,
+        vec![("suppressed_consent".to_string(), Some(String::new()), None)]
+    );
+
+    let outbox_count: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM outbox WHERE comms_request_id = $1")
+            .bind(comms_request_id)
+            .fetch_one(&tenant.tenant_pool)
+            .await
+            .expect("counting outbox rows failed");
+    assert_eq!(outbox_count, 0);
+
+    tenant.cleanup().await;
+}
+
+#[tokio::test]
+async fn marketing_with_an_explicit_opt_out_is_blocked() {
+    let vault = vault_keystore();
+    let tenant = provision_test_tenant(&vault).await;
+    let cache = small_cache();
+
+    let mock_server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/messages"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "message_id": "msg-should-not-send",
+            "status": "queued",
+        })))
+        .expect(0)
+        .mount(&mock_server)
+        .await;
+
+    let (comms_request_id, created_at, _customer_id) =
+        write_outbox_row_with_verification(
+            &tenant,
+            &vault,
+            &cache,
+            "+15550100",
+            "hello there",
+            "marketing",
+            Some(Utc::now()),
+            unique_name("hmac").as_bytes(),
+            None,
+        )
+        .await;
+
+    let sender: Arc<dyn Sender> =
+        Arc::new(HttpSender::new(mock_server.uri(), "test-key".to_string()));
+    let ctx = DispatcherContext {
+        pool: tenant.tenant_pool.clone(),
+        keystore: Arc::new(vault_keystore()),
+        cache: Arc::new(cache),
+        mount: tenant.mount.clone(),
+        sender,
+        verification_mode: "observe".to_string(),
+        kill_switches: Arc::new(KillSwitchCache::new()),
+        draining: Arc::new(RwLock::new(HashMap::new())),
+    };
+
+    let claimed = repo::claim(
+        &tenant.tenant_pool,
+        "sms",
+        10,
+        Utc::now() + chrono::Duration::minutes(2),
+        &no_exclusion(),
+    )
+    .await
+    .expect("claim failed");
+    assert_eq!(claimed.len(), 1);
+    assert_eq!(claimed[0].comms_request_id, comms_request_id);
+
+    insert_consent_row(
+        &tenant.tenant_pool,
+        claimed[0].address_id,
+        "marketing",
+        false,
+    )
+    .await;
+
+    try_process(&ctx, &claimed[0])
+        .await
+        .expect("try_process failed");
+
+    let final_status: Option<String> = sqlx::query_scalar(
+        "SELECT final_status FROM comms_request WHERE created_at = $1 AND id = $2",
+    )
+    .bind(created_at)
+    .bind(comms_request_id)
+    .fetch_one(&tenant.tenant_pool)
+    .await
+    .expect("fetching final_status failed");
+    assert_eq!(final_status.as_deref(), Some("suppressed_consent"));
+
+    let events: Vec<(String, Option<String>, Option<String>)> = sqlx::query_as(
+        "SELECT event_type, provider_ref, provider_status FROM comms_event WHERE comms_request_id = $1",
+    )
+    .bind(comms_request_id)
+    .fetch_all(&tenant.tenant_pool)
+    .await
+    .expect("fetching comms_event rows failed");
+    assert_eq!(
+        events,
+        vec![("suppressed_consent".to_string(), Some(String::new()), None)]
+    );
+
+    let outbox_count: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM outbox WHERE comms_request_id = $1")
+            .bind(comms_request_id)
+            .fetch_one(&tenant.tenant_pool)
+            .await
+            .expect("counting outbox rows failed");
+    assert_eq!(outbox_count, 0);
+
+    tenant.cleanup().await;
+}
+
+#[tokio::test]
+async fn marketing_with_an_explicit_opt_in_sends() {
+    let vault = vault_keystore();
+    let tenant = provision_test_tenant(&vault).await;
+    let cache = small_cache();
+
+    let mock_server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/messages"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "message_id": "msg-opted-in",
+            "status": "queued",
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let (comms_request_id, created_at, _customer_id) =
+        write_outbox_row_with_verification(
+            &tenant,
+            &vault,
+            &cache,
+            "+15550100",
+            "hello there",
+            "marketing",
+            Some(Utc::now()),
+            unique_name("hmac").as_bytes(),
+            None,
+        )
+        .await;
+
+    let sender: Arc<dyn Sender> =
+        Arc::new(HttpSender::new(mock_server.uri(), "test-key".to_string()));
+    let ctx = DispatcherContext {
+        pool: tenant.tenant_pool.clone(),
+        keystore: Arc::new(vault_keystore()),
+        cache: Arc::new(cache),
+        mount: tenant.mount.clone(),
+        sender,
+        verification_mode: "observe".to_string(),
+        kill_switches: Arc::new(KillSwitchCache::new()),
+        draining: Arc::new(RwLock::new(HashMap::new())),
+    };
+
+    let claimed = repo::claim(
+        &tenant.tenant_pool,
+        "sms",
+        10,
+        Utc::now() + chrono::Duration::minutes(2),
+        &no_exclusion(),
+    )
+    .await
+    .expect("claim failed");
+    assert_eq!(claimed.len(), 1);
+    assert_eq!(claimed[0].comms_request_id, comms_request_id);
+
+    insert_consent_row(
+        &tenant.tenant_pool,
+        claimed[0].address_id,
+        "marketing",
+        true,
+    )
+    .await;
+
+    try_process(&ctx, &claimed[0])
+        .await
+        .expect("try_process failed");
+
+    let final_status: Option<String> = sqlx::query_scalar(
+        "SELECT final_status FROM comms_request WHERE created_at = $1 AND id = $2",
+    )
+    .bind(created_at)
+    .bind(comms_request_id)
+    .fetch_one(&tenant.tenant_pool)
+    .await
+    .expect("fetching final_status failed");
+    assert_eq!(final_status.as_deref(), Some("sent"));
+
+    let events: Vec<(String, Option<String>, Option<String>)> = sqlx::query_as(
+        "SELECT event_type, provider_ref, provider_status FROM comms_event WHERE comms_request_id = $1",
+    )
+    .bind(comms_request_id)
+    .fetch_all(&tenant.tenant_pool)
+    .await
+    .expect("fetching comms_event rows failed");
+    assert_eq!(
+        events,
+        vec![(
+            "sent".to_string(),
+            Some("msg-opted-in".to_string()),
+            Some("queued".to_string())
+        )]
+    );
+
+    tenant.cleanup().await;
+}
+
+#[tokio::test]
+async fn transactional_sends_without_any_consent_row() {
+    let vault = vault_keystore();
+    let tenant = provision_test_tenant(&vault).await;
+    let cache = small_cache();
+
+    let mock_server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/messages"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "message_id": "msg-transactional",
+            "status": "queued",
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let (comms_request_id, created_at, _customer_id) =
+        write_outbox_row_with_verification(
+            &tenant,
+            &vault,
+            &cache,
+            "+15550100",
+            "hello there",
+            "transactional",
+            Some(Utc::now()),
+            unique_name("hmac").as_bytes(),
+            None,
+        )
+        .await;
+
+    let sender: Arc<dyn Sender> =
+        Arc::new(HttpSender::new(mock_server.uri(), "test-key".to_string()));
+    let ctx = DispatcherContext {
+        pool: tenant.tenant_pool.clone(),
+        keystore: Arc::new(vault_keystore()),
+        cache: Arc::new(cache),
+        mount: tenant.mount.clone(),
+        sender,
+        verification_mode: "observe".to_string(),
+        kill_switches: Arc::new(KillSwitchCache::new()),
+        draining: Arc::new(RwLock::new(HashMap::new())),
+    };
+
+    let claimed = repo::claim(
+        &tenant.tenant_pool,
+        "sms",
+        10,
+        Utc::now() + chrono::Duration::minutes(2),
+        &no_exclusion(),
+    )
+    .await
+    .expect("claim failed");
+    assert_eq!(claimed.len(), 1);
+    assert_eq!(claimed[0].comms_request_id, comms_request_id);
+
+    try_process(&ctx, &claimed[0])
+        .await
+        .expect("try_process failed");
+
+    let final_status: Option<String> = sqlx::query_scalar(
+        "SELECT final_status FROM comms_request WHERE created_at = $1 AND id = $2",
+    )
+    .bind(created_at)
+    .bind(comms_request_id)
+    .fetch_one(&tenant.tenant_pool)
+    .await
+    .expect("fetching final_status failed");
+    assert_eq!(
+        final_status.as_deref(),
+        Some("sent"),
+        "transactional must not require opt-in (§5)"
+    );
+
+    let events: Vec<(String, Option<String>, Option<String>)> = sqlx::query_as(
+        "SELECT event_type, provider_ref, provider_status FROM comms_event WHERE comms_request_id = $1",
+    )
+    .bind(comms_request_id)
+    .fetch_all(&tenant.tenant_pool)
+    .await
+    .expect("fetching comms_event rows failed");
+    assert_eq!(
+        events,
+        vec![(
+            "sent".to_string(),
+            Some("msg-transactional".to_string()),
+            Some("queued".to_string())
+        )]
+    );
+
+    tenant.cleanup().await;
+}

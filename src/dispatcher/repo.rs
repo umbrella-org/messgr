@@ -339,3 +339,21 @@ pub async fn is_suppressed(
     .fetch_one(pool)
     .await
 }
+
+/// The dispatcher's own consent check (DESIGN.md §5, T-037): absence of a
+/// row means "not opted in," identical to an explicit `opted_in = false`
+/// row (decision 4) -- callers never need to distinguish the two.
+pub async fn is_consented(
+    pool: &PgPool,
+    address_id: Uuid,
+    class: &str,
+) -> Result<bool, sqlx::Error> {
+    let opted_in: Option<bool> = sqlx::query_scalar(
+        "SELECT opted_in FROM consent WHERE address_id = $1 AND class = $2",
+    )
+    .bind(address_id)
+    .bind(class)
+    .fetch_optional(pool)
+    .await?;
+    Ok(opted_in.unwrap_or(false))
+}
