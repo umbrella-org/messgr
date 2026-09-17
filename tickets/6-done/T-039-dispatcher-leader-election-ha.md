@@ -236,7 +236,52 @@ secret-id operational requirement from decision 4: each replica needs its own
 
 ## Review
 
-<!-- empty until IN REVIEW -->
+- [x] Reviewer independence settled (step 0): **independent** — this review session has no
+  memory of authoring `feat/T-039-dispatcher-leader-election-ha` (all commits are the user's
+  own, from a prior session); no delegation needed.
+- [x] Implementation audit — acceptance test re-run, tasks & criteria verified (steps 1, 2).
+  `cargo test --test dispatcher_leader_election` (2/2 passed), `just test` (full suite, green),
+  `just lint` (`cargo fmt --all -- --check` + `cargo clippy --all-targets --all-features -- -D
+  warnings`, clean), `just docs-check` (clean). Every task (leader.rs, repo.rs doc comment,
+  dispatcher.rs wiring, the new test file) matches the plan exactly; every confirmed design
+  decision (1–6) honoured — verified `_leadership`'s binding scope directly (`src/bin/dispatcher.rs:294-304`),
+  confirmed the leader-lock connection derivation is the same `db::with_database_name` base-URL
+  parity `connect_tenant_pool` (`src/tenant/pool.rs:36`) already relies on.
+- [x] Quality audit (step 3). Idiomatic; matches surrounding tracing/error-handling
+  conventions. Both new tests are mutation-sound: `two_processes_contend...` would fail if the
+  lock weren't real (the loser resolving early, or a fresh connection observing it free);
+  `standby_takes_over...` would fail if failover took longer than the retry window or never
+  happened. No secrets, no new tables, no SQL built from external input.
+- [x] Consistency audit (step 4). Project-wide grep for "leader election"/"advisory lock"/"one
+  process per tenant" found three governing-document lines this branch made false (F1) — none
+  elsewhere in `src/`, `tests/`, or `docs/`.
+- [x] Documentation audit (step 4a). `docs/user-manual/dispatcher.adoc` coverage confirmed
+  correct and complete for the shipped behaviour, including the per-replica
+  `VAULT_WRAPPED_SECRET_ID` operational note. `just docs-check` clean. No other file in `docs/`
+  mentions leader election.
+- [x] Docs-readability pass (step 4b) — **conscious skip**, no docs-readability reviewer
+  configured in this session.
+- [x] Findings recorded below (step 5).
+- [x] Ticket moved (step 6) — see History.
+- [x] Governing documents reconciled (step 7) — F1, fixed inline on the feature branch (commit
+  `9e76a66`, same branch as the code per the review protocol's box: this is child-project
+  content, not ticket/board bookkeeping).
+- [x] Remaining-tickets impact sweep (step 8). T-042 and T-043 (both `1-to-do/`) reference
+  T-039; T-042's soft coupling ("flag this explicitly if picked up before T-039 is done") is a
+  guard against picking it up early, not an assumption T-039 invalidated — it is now simply
+  satisfied. No patch needed to either ticket.
+- [x] Summary, commit message, MR attributes presented for approval; overarching-repo
+  bookkeeping committed per policy; next-ticket suggestion given (step 9).
+
+| id | severity | class | disposition | description | evidence | suggestion |
+|---|---|---|---|---|---|---|
+| F1 | non-blocking | stale-xref | fixed inline | Three `development/design/*.md` lines described leader election as unshipped or "still open" after this branch shipped it; `01-overview-architecture.md`'s failure-modes-adjacent §4.2 correction and `11-failure-modes.md`'s own table directly contradicted each other (line 15 said standby takeover "does not apply", line 17 already assumed it) | `development/design/01-overview-architecture.md:242-249`, `development/design/03-data-model.md:107`, `development/design/11-failure-modes.md:15` (pre-fix) | Fixed inline, same review: updated all three plus `DESIGN.md`'s version stamp (commit `9e76a66` on the feature branch) |
+| F2 | non-blocking | design | noted | New test hardcodes `pg_try_advisory_lock(1)` as a literal instead of `leader::LEADER_LOCK_KEY`, duplicating the constant it means to test against | `tests/dispatcher_leader_election.rs:143` | Bind `leader::LEADER_LOCK_KEY` instead of the literal `1` if this test is touched again; not worth a standalone pass today |
+
+Disposition summary: 1 fixed inline (F1), 1 noted (F2). No findings folded or spawned as new
+tickets.
+
+cost: estimated M, actual M
 
 ## History
 
@@ -247,3 +292,4 @@ secret-id operational requirement from decision 4: each replica needs its own
 - 2026-09-17 — TO DO → READY: plan complete
 - 2026-09-17 — READY → IN DEVELOPMENT: picked up
 - 2026-09-17 — IN DEVELOPMENT → IN REVIEW: acceptance green
+- 2026-09-17 — IN REVIEW → DONE: verified: acceptance test green, full suite/lint/docs-check clean; 1 fixed-inline (governing-doc staleness), 1 noted
