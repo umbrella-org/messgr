@@ -5,7 +5,7 @@
 # its own alignment and quoting style do not. `pickle project add|remove`
 # re-render this file to the canonical layout below and drop comments entirely.
 
-payload_version = "0.17.0"
+payload_version = "0.18.0"
 layout = "in-tree"
 
 [commit]
