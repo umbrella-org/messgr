@@ -93,7 +93,7 @@ Last updated: 2026-09-17
 | T-035 | Assert orphan-reconcile's age-out tracing::warn! actually fires | yes — MERGED: PR #51 merged to `main` (`b7d5bae`). |
 | T-036 | Verification gate at dispatch | yes — MERGED: PR #52 (`feat/T-036-verification-gate-at-dispatch`, `5243a78`) |
 | T-038 | Suppression gate at dispatch | yes — MERGED: PR #53 (`feat/T-038-suppression-gate-at-dispatch`, `3409991`) |
-| T-039 | Dispatcher leader election (HA) | no — publish-gated |
+| T-039 | Dispatcher leader election (HA) | yes — MERGED: PR #54 (`0b67787`) merged to `main`. |
 
 ## DROPPED
 

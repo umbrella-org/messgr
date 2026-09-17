@@ -294,3 +294,4 @@ cost: estimated M, actual M
 - 2026-09-17 — IN DEVELOPMENT → IN REVIEW: acceptance green
 - 2026-09-17 — IN REVIEW → DONE: verified: acceptance test green, full suite/lint/docs-check clean; 1 fixed-inline (governing-doc staleness), 1 noted
 - 2026-09-17 — pushed `feat/T-039-dispatcher-leader-election-ha`, opened PR #54 to `main`. Not yet merged — human's to merge.
+- 2026-09-17 — MERGED: PR #54 (`0b67787`) merged to `main`.
