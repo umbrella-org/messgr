@@ -13,10 +13,11 @@ Last updated: 2026-09-17
 
 ## IN DEVELOPMENT
 
-### messgr (0/1)
+### messgr (1/1)
 
 | id | title | depends-on |
 |---|---|---|
+| T-039 | Dispatcher leader election (HA) | [] |
 
 ## IN REVIEW
 
@@ -38,7 +39,6 @@ Last updated: 2026-09-17
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
-| T-039 | Dispatcher leader election (HA) | critical | medium | M | [] |  |
 
 ## TO DO (impact order, per child)
 

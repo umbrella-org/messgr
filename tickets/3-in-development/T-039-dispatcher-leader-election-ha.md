@@ -245,3 +245,4 @@ secret-id operational requirement from decision 4: each replica needs its own
   exposure, already flagged in-code as pending.
 - 2026-09-17 — TO DO → READY: implementation plan complete
 - 2026-09-17 — TO DO → READY: plan complete
+- 2026-09-17 — READY → IN DEVELOPMENT: picked up
