@@ -1,5 +1,5 @@
 use axum::Json;
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use chrono::{DateTime, Duration, Utc};
 use uuid::Uuid;
@@ -16,7 +16,7 @@ use super::identity::ProducerContext;
 use super::model::{
     CreateCommsRequest, CreateCommsResponse, IngestError, channel, class,
 };
-use super::repo::{InsertOutcome, insert_transactional};
+use super::repo::{CancelOutcome, InsertOutcome, insert_transactional};
 
 pub async fn create_comms(
     State(app): State<AppState>,
@@ -156,6 +156,28 @@ pub async fn create_comms(
             StatusCode::OK,
             Json(CreateCommsResponse { comms_request_id }),
         )),
+    }
+}
+
+/// DESIGN.md §6.2, T-041: producer-scoped cancellation. `404` for an unknown
+/// id or one belonging to another producer (decision 1, no ownership
+/// disclosure); `409` when it already reached a non-cancelled terminal
+/// state; `204` idempotently otherwise.
+pub async fn cancel_comms(
+    State(_app): State<AppState>,
+    producer: ProducerContext,
+    Path(comms_request_id): Path<Uuid>,
+) -> Result<StatusCode, IngestError> {
+    match super::repo::cancel(
+        &producer.tenant.pool,
+        comms_request_id,
+        producer.producer_id,
+    )
+    .await?
+    {
+        CancelOutcome::Cancelled => Ok(StatusCode::NO_CONTENT),
+        CancelOutcome::AlreadySent => Err(IngestError::AlreadySent),
+        CancelOutcome::NotFound => Err(IngestError::CommsRequestNotFound),
     }
 }
 

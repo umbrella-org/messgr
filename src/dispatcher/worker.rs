@@ -315,6 +315,26 @@ pub async fn try_process(
         .ok_or(DispatchError::MissingPayload(row.comms_request_id))?;
     let body = String::from_utf8(encryption::decrypt(&dek, aad, &payload_ciphertext)?)?;
 
+    // Cancellation race check (DESIGN.md §6.2, T-041) — re-read cancelled_at
+    // immediately before the provider call, deliberately last: unlike the
+    // Expiry/Suppression/Verification/Consent gates above (which exist to skip
+    // wasted work on a message already known dead), this check exists to close
+    // the race window itself, so an earlier check would not be correct (decision 4).
+    if repo::is_cancelled(&ctx.pool, row.comms_request_id).await? {
+        repo::write_terminal(
+            &ctx.pool,
+            row.created_at,
+            row.comms_request_id,
+            row.customer_id,
+            "cancelled",
+            None,
+            None,
+            "cancelled",
+        )
+        .await?;
+        return Ok(());
+    }
+
     match ctx.sender.send(&destination, &body).await {
         Ok(outcome) => {
             repo::write_terminal(

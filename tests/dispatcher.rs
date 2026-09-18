@@ -2144,3 +2144,83 @@ async fn transactional_sends_without_any_consent_row() {
 
     tenant.cleanup().await;
 }
+
+#[tokio::test]
+async fn cancelled_row_is_terminal_written_and_not_sent() {
+    let vault = vault_keystore();
+    let tenant = provision_test_tenant(&vault).await;
+    let cache = small_cache();
+
+    let mock_server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/messages"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "message_id": "should-not-be-called",
+            "status": "queued",
+        })))
+        .expect(0)
+        .mount(&mock_server)
+        .await;
+
+    let (comms_request_id, created_at, _customer_id) =
+        write_ready_outbox_row(&tenant, &vault, &cache, "+15550100", "hello there")
+            .await;
+
+    // Simulates a cancel that landed before the dispatcher claims the row;
+    // the same is_cancelled re-check also covers a cancel landing after
+    // claim, since it reads fresh every time (T-041, DESIGN.md §6.2).
+    sqlx::query("UPDATE outbox SET cancelled_at = now() WHERE comms_request_id = $1")
+        .bind(comms_request_id)
+        .execute(&tenant.tenant_pool)
+        .await
+        .expect("setting cancelled_at failed");
+
+    let sender: Arc<dyn Sender> =
+        Arc::new(HttpSender::new(mock_server.uri(), "test-key".to_string()));
+    let ctx = DispatcherContext {
+        pool: tenant.tenant_pool.clone(),
+        keystore: Arc::new(vault_keystore()),
+        cache: Arc::new(cache),
+        mount: tenant.mount.clone(),
+        sender,
+        verification_mode: "enforce".to_string(),
+        kill_switches: Arc::new(KillSwitchCache::new()),
+        draining: Arc::new(RwLock::new(HashMap::new())),
+    };
+
+    let claimed = repo::claim(
+        &tenant.tenant_pool,
+        "sms",
+        10,
+        Utc::now() + chrono::Duration::minutes(2),
+        &no_exclusion(),
+    )
+    .await
+    .expect("claim failed");
+    assert_eq!(claimed.len(), 1);
+
+    try_process(&ctx, &claimed[0])
+        .await
+        .expect("try_process failed");
+
+    let final_status: Option<String> = sqlx::query_scalar(
+        "SELECT final_status FROM comms_request WHERE created_at = $1 AND id = $2",
+    )
+    .bind(created_at)
+    .bind(comms_request_id)
+    .fetch_one(&tenant.tenant_pool)
+    .await
+    .expect("fetching final_status failed");
+    assert_eq!(final_status.as_deref(), Some("cancelled"));
+
+    let events: Vec<String> = sqlx::query_scalar(
+        "SELECT event_type FROM comms_event WHERE comms_request_id = $1",
+    )
+    .bind(comms_request_id)
+    .fetch_all(&tenant.tenant_pool)
+    .await
+    .expect("fetching comms_event rows failed");
+    assert_eq!(events, vec!["cancelled".to_string()]);
+
+    tenant.cleanup().await;
+}

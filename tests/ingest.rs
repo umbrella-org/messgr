@@ -9,7 +9,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use axum::Router;
-use axum::routing::post;
+use axum::routing::{delete, post};
 use axum_server::Handle;
 use axum_server::tls_rustls::{RustlsAcceptor, RustlsConfig};
 use chrono::{DateTime, Duration, SubsecRound, Utc};
@@ -21,7 +21,7 @@ use messgr::customer_dek::lifecycle::get_or_create_dek;
 use messgr::db;
 use messgr::encryption;
 use messgr::ingest::AppState;
-use messgr::ingest::handler::create_comms;
+use messgr::ingest::handler::{cancel_comms, create_comms};
 use messgr::key_cache::KeyCache;
 use messgr::keystore::{KeyStore, VaultKeyStore};
 use messgr::mtls::{self, ClientCertAcceptor};
@@ -152,6 +152,7 @@ impl TestServer {
         };
         let app: Router = Router::new()
             .route("/comms", post(create_comms))
+            .route("/comms/{id}", delete(cancel_comms))
             .with_state(app_state);
 
         let tls_config = mtls::load_server_config(
@@ -1375,6 +1376,243 @@ async fn create_comms_omits_scheduling_fields_by_default() {
         outbox_next_attempt_at >= before && outbox_next_attempt_at <= Utc::now(),
         "next_attempt_at must be close to now when scheduled_for is omitted"
     );
+
+    tenant_pool.close().await;
+    teardown(&fixture, Some(&_cert_subject)).await;
+}
+
+async fn post_comms(client: &reqwest::Client, url: &str) -> Uuid {
+    let response = client
+        .post(url)
+        .header("Idempotency-Key", unique_name("idem"))
+        .json(&sample_body(Uuid::new_v4()))
+        .send()
+        .await
+        .expect("request failed");
+    assert_eq!(response.status(), 201);
+    let body: serde_json::Value =
+        response.json().await.expect("parsing response failed");
+    body["comms_request_id"]
+        .as_str()
+        .expect("comms_request_id must be a string")
+        .parse()
+        .expect("comms_request_id must be a uuid")
+}
+
+#[tokio::test]
+async fn cancel_comms_sets_cancelled_at_and_returns_204() {
+    let fixture = setup("en-US").await;
+    let vault = vault_keystore();
+    let (identity_pem, _cert_subject) =
+        register_test_producer(&fixture, &vault, "cancel-caller").await;
+    let client = mtls_client(
+        &fixture.server_common_name,
+        fixture.server.addr,
+        &identity_pem,
+        &fixture.server_ca_pem,
+    );
+    let base_url = format!(
+        "https://{}:{}/comms",
+        fixture.server_common_name,
+        fixture.server.addr.port()
+    );
+
+    let comms_request_id = post_comms(&client, &base_url).await;
+
+    let response = client
+        .delete(format!("{base_url}/{comms_request_id}"))
+        .send()
+        .await
+        .expect("delete request failed");
+    assert_eq!(response.status(), 204);
+
+    let tenant_pool = connect_tenant_pool(
+        &fixture.control_pool,
+        &fixture.control_url,
+        fixture.tenant_id,
+        &fixture.database_name,
+        5,
+    )
+    .await
+    .expect("connecting to tenant pool failed")
+    .pool;
+
+    let cancelled_at: Option<DateTime<Utc>> = sqlx::query_scalar(
+        "SELECT cancelled_at FROM outbox WHERE comms_request_id = $1",
+    )
+    .bind(comms_request_id)
+    .fetch_one(&tenant_pool)
+    .await
+    .expect("outbox row must exist");
+    assert!(cancelled_at.is_some(), "cancelled_at must be set");
+
+    tenant_pool.close().await;
+    teardown(&fixture, Some(&_cert_subject)).await;
+}
+
+#[tokio::test]
+async fn cancel_comms_is_idempotent() {
+    let fixture = setup("en-US").await;
+    let vault = vault_keystore();
+    let (identity_pem, _cert_subject) =
+        register_test_producer(&fixture, &vault, "cancel-idempotent-caller").await;
+    let client = mtls_client(
+        &fixture.server_common_name,
+        fixture.server.addr,
+        &identity_pem,
+        &fixture.server_ca_pem,
+    );
+    let base_url = format!(
+        "https://{}:{}/comms",
+        fixture.server_common_name,
+        fixture.server.addr.port()
+    );
+
+    let comms_request_id = post_comms(&client, &base_url).await;
+    let delete_url = format!("{base_url}/{comms_request_id}");
+
+    let first = client
+        .delete(&delete_url)
+        .send()
+        .await
+        .expect("first delete request failed");
+    assert_eq!(first.status(), 204);
+
+    let second = client
+        .delete(&delete_url)
+        .send()
+        .await
+        .expect("second delete request failed");
+    assert_eq!(second.status(), 204, "a repeated cancel must still be 204");
+
+    teardown(&fixture, Some(&_cert_subject)).await;
+}
+
+#[tokio::test]
+async fn cancel_comms_unknown_id_returns_404() {
+    let fixture = setup("en-US").await;
+    let vault = vault_keystore();
+    let (identity_pem, _cert_subject) =
+        register_test_producer(&fixture, &vault, "cancel-unknown-caller").await;
+    let client = mtls_client(
+        &fixture.server_common_name,
+        fixture.server.addr,
+        &identity_pem,
+        &fixture.server_ca_pem,
+    );
+    let base_url = format!(
+        "https://{}:{}/comms",
+        fixture.server_common_name,
+        fixture.server.addr.port()
+    );
+
+    let response = client
+        .delete(format!("{base_url}/{}", Uuid::new_v4()))
+        .send()
+        .await
+        .expect("delete request failed");
+    assert_eq!(response.status(), 404);
+
+    teardown(&fixture, Some(&_cert_subject)).await;
+}
+
+#[tokio::test]
+async fn cancel_comms_wrong_producer_returns_404() {
+    let fixture = setup("en-US").await;
+    let vault = vault_keystore();
+    let (identity_pem_a, cert_subject_a) =
+        register_test_producer(&fixture, &vault, "producer-a").await;
+    let (identity_pem_b, cert_subject_b) =
+        register_test_producer(&fixture, &vault, "producer-b").await;
+    let client_a = mtls_client(
+        &fixture.server_common_name,
+        fixture.server.addr,
+        &identity_pem_a,
+        &fixture.server_ca_pem,
+    );
+    let client_b = mtls_client(
+        &fixture.server_common_name,
+        fixture.server.addr,
+        &identity_pem_b,
+        &fixture.server_ca_pem,
+    );
+    let base_url = format!(
+        "https://{}:{}/comms",
+        fixture.server_common_name,
+        fixture.server.addr.port()
+    );
+
+    let comms_request_id = post_comms(&client_a, &base_url).await;
+
+    let response = client_b
+        .delete(format!("{base_url}/{comms_request_id}"))
+        .send()
+        .await
+        .expect("delete request failed");
+    assert_eq!(response.status(), 404);
+
+    cleanup_cert(&fixture.control_pool, &cert_subject_b).await;
+    teardown(&fixture, Some(&cert_subject_a)).await;
+}
+
+#[tokio::test]
+async fn cancel_comms_after_dispatch_returns_409() {
+    let fixture = setup("en-US").await;
+    let vault = vault_keystore();
+    let (identity_pem, _cert_subject) =
+        register_test_producer(&fixture, &vault, "cancel-after-dispatch-caller").await;
+    let client = mtls_client(
+        &fixture.server_common_name,
+        fixture.server.addr,
+        &identity_pem,
+        &fixture.server_ca_pem,
+    );
+    let base_url = format!(
+        "https://{}:{}/comms",
+        fixture.server_common_name,
+        fixture.server.addr.port()
+    );
+
+    let comms_request_id = post_comms(&client, &base_url).await;
+
+    let tenant_pool = connect_tenant_pool(
+        &fixture.control_pool,
+        &fixture.control_url,
+        fixture.tenant_id,
+        &fixture.database_name,
+        5,
+    )
+    .await
+    .expect("connecting to tenant pool failed")
+    .pool;
+
+    let (created_at, customer_id): (DateTime<Utc>, Uuid) = sqlx::query_as(
+        "SELECT created_at, customer_id FROM comms_request WHERE id = $1",
+    )
+    .bind(comms_request_id)
+    .fetch_one(&tenant_pool)
+    .await
+    .expect("ledger row must exist");
+
+    messgr::dispatcher::repo::write_terminal(
+        &tenant_pool,
+        created_at,
+        comms_request_id,
+        customer_id,
+        "sent",
+        Some("provider-ref"),
+        Some("provider-status"),
+        "sent",
+    )
+    .await
+    .expect("simulating dispatcher send failed");
+
+    let response = client
+        .delete(format!("{base_url}/{comms_request_id}"))
+        .send()
+        .await
+        .expect("delete request failed");
+    assert_eq!(response.status(), 409);
 
     tenant_pool.close().await;
     teardown(&fixture, Some(&_cert_subject)).await;
