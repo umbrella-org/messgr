@@ -860,3 +860,5 @@ cost: estimated L, actual L
   clause for T-042's own quota-gate mention.
 - 2026-09-18 — IN DEVELOPMENT → IN REVIEW: acceptance green
 - 2026-09-18 — IN REVIEW → DONE: reviewed: 0 blocking, 2 non-blocking (F1 new ticket T-044, F2 noted)
+- 2026-09-18 — pushed `feat/T-042-producer-quotas-and-producer-usage-enforcement`, opened PR #58
+  (`https://github.com/umbrella-org/messgr/pull/58`) — awaiting human merge.
