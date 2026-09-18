@@ -416,3 +416,4 @@ cost: estimated M, actual M
 - 2026-09-18 — IN REVIEW → DONE: 0 blocking, 1 non-blocking (F1 noted); build/test/lint/docs-check green
 - 2026-09-18 — pushed `feat/T-041-cancellation-endpoint-with-dispatch-time-race-check`, opened
   PR #57 (`https://github.com/umbrella-org/messgr/pull/57`) — merging is the human's.
+- 2026-09-18 — MERGED: PR #57 merged to `main` (`35812b4`).
