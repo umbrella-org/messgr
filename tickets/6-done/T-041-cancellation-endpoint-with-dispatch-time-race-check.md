@@ -414,3 +414,5 @@ cost: estimated M, actual M
 - 2026-09-18 — reviewed: independent (fresh session), 0 blocking findings, 1 non-blocking (F1,
   noted). `just build`/`test`/`lint`/`docs-check` all green. IN REVIEW → DONE.
 - 2026-09-18 — IN REVIEW → DONE: 0 blocking, 1 non-blocking (F1 noted); build/test/lint/docs-check green
+- 2026-09-18 — pushed `feat/T-041-cancellation-endpoint-with-dispatch-time-race-check`, opened
+  PR #57 (`https://github.com/umbrella-org/messgr/pull/57`) — merging is the human's.
