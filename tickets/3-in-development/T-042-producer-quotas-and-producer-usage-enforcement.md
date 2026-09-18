@@ -797,3 +797,4 @@ Run: `just build && just test && just lint`.
 
 - 2026-09-15 — created (TO DO). source: pickle ticket new
 - 2026-09-18 — TO DO → READY: plan complete
+- 2026-09-18 — READY → IN DEVELOPMENT: picked up
