@@ -20,11 +20,10 @@ Last updated: 2026-09-18
 
 ## IN REVIEW
 
-### messgr (1/1)
+### messgr (0/1)
 
 | id | title | depends-on |
 |---|---|---|
-| T-042 | Producer quotas and producer_usage enforcement | [] |
 
 ## REWORK
 
@@ -47,6 +46,7 @@ Last updated: 2026-09-18
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
 | T-043 | Quiet hours with jitter and DST handling | medium | medium | M | [] |  |
+| T-044 | Integration test coverage for producer_quota_override's refresh_config SQL path | low | low | S | [] |  |
 
 ## DONE
 
@@ -94,6 +94,7 @@ Last updated: 2026-09-18
 | T-039 | Dispatcher leader election (HA) | yes — MERGED: PR #54 (`0b67787`) merged to `main`. |
 | T-040 | Wire scheduled delivery and expiry into the outbox | yes — MERGED: PR #55 merged to `main` (`590f284`) |
 | T-041 | Cancellation endpoint with dispatch-time race check | yes — MERGED: PR #57 merged to `main` (`35812b4`). |
+| T-042 | Producer quotas and producer_usage enforcement | no — publish-gated |
 
 ## DROPPED
 

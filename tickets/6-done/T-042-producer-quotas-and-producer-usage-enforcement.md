@@ -791,7 +791,64 @@ Run: `just build && just test && just lint`.
 
 ## Review
 
-<!-- empty until IN REVIEW -->
+- [x] Reviewer independence settled (step 0): **independent** — the reviewing session did not
+  author this branch (the branch's commits already existed at session start); no delegation
+  needed. The implementation/quality/consistency/docs audits (steps 2–4a) were run by a forked
+  sub-agent for context economy, briefed adversarially with the full ticket and diff, and every
+  finding it returned was independently re-verified against the actual files before being
+  recorded here (step 0's "verify before recording").
+- [x] Implementation audit (steps 1, 2) — acceptance test re-run: `just build`, `just test`
+  (all suites green, including `tests/producer_quota.rs`'s 11 cases, `producer_quota::tracker`'s
+  10 unit tests, and `tests/dispatcher.rs`'s 3 new quota-gate cases), `just lint`, `just
+  docs-check` all clean. All 10 Implementation Plan tasks done in the files they name. All 15
+  confirmed design decisions independently checked against the shipped code and honoured,
+  including AGENTS.md hard invariants 3 (gate runs inside `try_process` at dispatch, never
+  ingest) and 5 (transactional/auth mechanically rejected at configure-time in `configure.rs`
+  itself, not just the CLI's arg parser). Migration SQL verified byte-for-byte against
+  `development/design/03-data-model.md` §4.9 rather than trusting the "verbatim" claim
+  (addendum step 2.1). `DispatcherContext { .. }` grep: 24 sites (not the plan's estimated 21) —
+  fully accounted for by the 3 new dispatcher tests each adding one literal; compiler-enforced,
+  not a gap.
+- [x] Quality audit (step 3) — dispatcher/tracker tests are mutation-resistant where it matters
+  (lease-clear + `next_attempt_at` + mock-call-count assertions; the flush/rebuild test uses a
+  tight limit specifically so a broken rebuild flips the decision, not just coincidentally
+  matches). `std::sync::RwLock` + `.expect("… poisoned")` diverges from `KillSwitchCache`'s
+  `tokio::sync::RwLock`, but it's decision 3's reasoned, explicit trade (gate must stay sync,
+  never held across `.await`) — not a defect. One real gap: **F1** below.
+- [x] Consistency audit (step 4) — no stale `§N` refs introduced; PK/schema style
+  (`producer_id, channel, class`, no `tenant_id` column) matches project convention. No new
+  DB-row lease/lock introduced (`QuotaTracker`'s locks are in-process only); the one existing
+  lease this branch touches (`reschedule_retry`) has a test asserting `leased_until` clears. No
+  secrets touched. New tables carry no customer-scoped column (`customer_id`,
+  `*_ciphertext`/`*_hmac`/`*_raw`) — correctly outside `tests/erasure_coverage.rs`'s detection
+  query and AGENTS.md invariant 6 / §7.2's scope (addendum step 2.5, confirmed by reading that
+  test's actual query). No orphan columns. justfile/CI untouched by this diff (addendum step
+  2.8 — moot).
+- [x] Documentation audit (step 4a) — `just docs-check` clean. Spot-checked
+  `control-plane-cli.adoc`'s new `== Producer quotas` section, `dispatcher.adoc`'s gate-order
+  paragraph and its updated T-041 gate list, `ingest.adoc`'s admission-vs-send-quota split, and
+  `introduction.adoc`'s fix (independently checked against T-038's own F5 text) — all accurate.
+  One pre-existing governance-doc staleness found, unrelated to this branch: **F2** below.
+- [ ] Docs-readability pass (step 4b) — **conscious skip**: no docs-readability reviewer
+  configured in this environment.
+- [x] Findings recorded below (step 5).
+- [x] Ticket moved to `tickets/6-done/` (step 6) — no blocking findings.
+- [x] Other references updated / governing docs reconciled (step 7) — impact sweep (step 8)
+  found no ticket in `1-to-do/` or `2-ready/` referencing T-042, so nothing to patch there.
+- [x] Remaining-tickets impact sweep (step 8) — `grep -rl "T-042" tickets/1-to-do tickets/2-ready`
+  empty; no dependent ticket's assumptions were invalidated.
+
+### Findings
+
+| id | severity | class | disposition | description | evidence | suggestion |
+|---|---|---|---|---|---|---|
+| F1 | non-blocking | test-gap | new ticket (T-044) | `QuotaTracker::refresh_config`'s real SQL override-merge path (`WHERE valid_from <= $1 AND valid_to > $1` plus the merge loop) is never exercised end-to-end. Both override-related unit tests bypass it — `an_active_override_raises_the_effective_per_day_limit` mutates `config` directly ("simulates refresh_config's override merge"), and `an_expired_override_no_longer_applies` never creates an override row at all. | `src/producer_quota/tracker.rs:532` (`an_active_override_raises_the_effective_per_day_limit`), `tracker.rs:563` (`an_expired_override_no_longer_applies`) | Add a real-DB integration case per T-044. |
+| F2 | non-blocking | stale-xref | noted | `AGENTS.md`'s Status paragraph still reads "consent (T-037) is reviewed, pending merge," predating T-037/T-039/T-040/T-041's merges and now T-042's completion of build-order step 6 — but this staleness predates T-042 (T-037 was already merged before T-042 was picked up), so it fails the "did this branch break it?" test for `fixed inline` (rules §5). | `AGENTS.md:14-16` | Fold into whichever ticket next reconciles `AGENTS.md`'s Status paragraph, or note-and-close as here. |
+
+Disposition summary: 1 `new ticket` (F1 → T-044), 1 `noted` (F2). 0 findings folded, 0 fixed
+inline.
+
+cost: estimated L, actual L
 
 ## History
 
@@ -802,3 +859,4 @@ Run: `just build && just test && just lint`.
   "kill switches" claim, flagged but left unfixed by T-038's own review) while rewording the same
   clause for T-042's own quota-gate mention.
 - 2026-09-18 — IN DEVELOPMENT → IN REVIEW: acceptance green
+- 2026-09-18 — IN REVIEW → DONE: reviewed: 0 blocking, 2 non-blocking (F1 new ticket T-044, F2 noted)
