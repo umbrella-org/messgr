@@ -140,6 +140,7 @@ const COVERED: &[&str] = &[
     "comms_event",
     "customer_address",
     "customer_external_id",
+    "consent",
 ];
 
 /// Tables that match the detection rule but are deliberately not redacted,
@@ -215,6 +216,20 @@ async fn customer_linkable_tables(pool: &PgPool) -> Vec<String> {
         JOIN pg_attribute att
           ON att.attrelid = co.conrelid AND att.attnum = ANY(co.conkey)
         WHERE co.contype = 'f' AND att.attname = 'customer_id'
+
+        -- One hop removed: a table keyed on customer_address.id rather than
+        -- customer_id directly (AGENTS.md invariant 4 -- e.g. `consent`,
+        -- T-037) is still customer-linkable, just not reachable by either
+        -- arm above. Without this, adding such a table to COVERED would trip
+        -- the *stale-entry* assertion below instead (the table exists but
+        -- this query wouldn't return it) -- this arm is what makes it
+        -- visible to the check at all. Catches any future table following
+        -- the same keying convention automatically, not just `consent`.
+        UNION
+
+        SELECT DISTINCT co.conrelid::regclass::text AS table_name
+        FROM pg_constraint co
+        WHERE co.contype = 'f' AND co.confrelid = 'customer_address'::regclass
         "#,
     )
     .fetch_all(pool)

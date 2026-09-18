@@ -270,6 +270,26 @@ pub async fn try_process(
         .await?;
     }
 
+    // Consent gate (DESIGN.md §5, T-037) — marketing only; transactional does
+    // not require opt-in (§5), and auth never reaches the outbox (T-011
+    // decision 3). Absence of a row defaults to opted-out (decision 4).
+    if row.class == class::MARKETING
+        && !repo::is_consented(&ctx.pool, row.address_id, row.class.as_str()).await?
+    {
+        repo::write_terminal(
+            &ctx.pool,
+            row.created_at,
+            row.comms_request_id,
+            row.customer_id,
+            "suppressed_consent",
+            None,
+            None,
+            "suppressed_consent",
+        )
+        .await?;
+        return Ok(());
+    }
+
     let ciphertexts =
         repo::load_ciphertexts(&ctx.pool, row.created_at, row.comms_request_id)
             .await?

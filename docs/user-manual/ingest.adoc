@@ -7,9 +7,9 @@ chapter), and writes the ledger + outbox row in one transaction, encrypting the 
 rendered template body under the customer's DEK (DESIGN.md §4.1-§4.3, §7, §11). The request body
 identifies the customer one of three ways -- exactly one of `customer_id`, `external_id` +
 `external_id_system` together, or neither (resolve by `destination` alone) -- any other
-combination is rejected (`422`). Consent and quotas (§5, §5.1) are still unbuilt; suppression
-(§5) is now enforced, but at dispatch time, not here -- gates run at send time, never at ingest
-(§6.2), so this process never checks it -- see "messgr-dispatcher" (`T-038`).
+combination is rejected (`422`). Quotas (§5.1) are still unbuilt; suppression and consent (§5)
+are now enforced, but at dispatch time, not here -- gates run at send time, never at ingest
+(§6.2), so this process never checks either -- see "messgr-dispatcher" (`T-038`, `T-037`).
 `class = "auth"` is rejected outright (`422`) -- OTP has its own path (`sms-sender`/`otp-api`,
 `T-047`), never this one.
 

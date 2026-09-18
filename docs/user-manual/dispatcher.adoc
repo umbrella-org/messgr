@@ -62,6 +62,13 @@ AGENTS.md hard invariant 1, though in practice `auth` never reaches the outbox a
 decision 3). The mode is read once at dispatcher startup; changing
 `tenant_config.verification_mode` takes effect on the next restart, not live.
 
+`T-037` adds the consent gate (DESIGN.md §5), checked right after verification, before decrypt:
+for `marketing` class messages only -- `transactional` does not require opt-in, and `auth` never
+reaches the outbox (T-011 decision 3). Absence of a `consent` row for the address/class pair
+defaults to not-opted-in, the same outcome as an explicit `opted_in = false` row; either one
+blocks the send and writes a terminal `suppressed_consent` event/status. See "Consent"
+(control-plane CLI) for recording entries.
+
 Requires `DISPATCHER_TENANT_SLUG` (which tenant this process serves), `VAULT_ROLE_ID` /
 `VAULT_WRAPPED_SECRET_ID` (this tenant's own AppRole -- printed by `just provision` on a fresh
 provisioning run), and, per channel in `DISPATCHER_CHANNELS` (default `sms`),

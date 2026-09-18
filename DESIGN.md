@@ -1,6 +1,6 @@
 # messgr — Design
 
-**Version 8** · 2026-09-17 · T-040 review: §14 "still open" item 8 narrowed — the 90-day scheduling horizon default is confirmed and enforced (hard-rejecting, no override) as of T-040; only whether an override mechanism is ever needed remains open
+**Version 9** · 2026-09-17 · T-037 review: §7.2 corrected — the new `consent` erasure statement's placement ahead of `customer_address`'s own `UPDATE` was justified by a claim that `customer_id` gets zeroed there; it never is (§7.2 already says so), so the ordering was never load-bearing and the claim is removed
 
 Centralized communications orchestration and audit ledger for customer messaging across SMS, email, and WhatsApp.
 

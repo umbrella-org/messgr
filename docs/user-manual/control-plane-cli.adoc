@@ -253,6 +253,28 @@ currently-active entry (already expired, or never suppressed).
 `status` (`active` or `expired`) -- the HMAC is one-way, so there is nothing to reverse it back
 to the original address.
 
+== Consent
+
+[source,bash]
+----
+cargo run --bin messgr-control -- consent set --tenant-slug acme \
+    --destination +15550100 --channel sms --class marketing \
+    --opted-in true --source web_form --actor operator@example.com
+----
+
+`consent` (DESIGN.md §5, §4.4, T-037) records a customer's opt-in/opt-out for one message class
+on a destination, checked by `messgr-dispatcher`'s consent gate at send time for `marketing`
+messages only -- `transactional` never requires opt-in. `set` requires a pre-existing, active
+`customer_address` for the destination (resolved the same way `messgr-ingest` resolves one, via
+the tenant's own pepper) and is rejected otherwise -- it never mints an address, unlike ingest's
+own resolution path; record consent after the customer's first message, or via whatever
+event-feed consumer eventually lands (build-order step 10). `--class` is closed to
+`transactional`/`marketing`. `--opted-in` is a plain `true`/`false`. `--source` is free-text
+evidence of where the choice was captured (e.g. `web_form`, `ivr_call`, `branch_visit`,
+`sms_stop_reply`) -- not customer-supplied content. Re-running with identical inputs is
+idempotent, same `created`/`updated`/`idempotent` outcome and `platform_audit` trail as
+`suppression add`/`tenant-config set`.
+
 == Customer DEK pre-provisioning
 
 [source,bash]
