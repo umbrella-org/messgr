@@ -16,6 +16,7 @@ use crate::key_cache::KeyCache;
 use crate::keystore::KeyStore;
 use crate::kill_switch::cache::{self, ChannelExclusion, KillSwitchCache};
 use crate::kill_switch::model::KillSwitch;
+use crate::producer_quota::tracker::{QuotaDecision, QuotaTracker};
 use crate::sender::{Sender, SenderError};
 use crate::tenant_config::model::verification_mode;
 
@@ -72,6 +73,10 @@ pub struct DispatcherContext {
     /// between the two means no window where a released scope is excluded
     /// by neither map. Never held across an `.await` point.
     pub draining: Arc<RwLock<HashMap<Uuid, KillSwitch>>>,
+    /// `tenant_config.quota_day_boundary_tz` (DESIGN.md §5.1, T-042) — loaded
+    /// once at startup, like `verification_mode`, never hot-reloaded.
+    pub quota_day_boundary_tz: String,
+    pub quota: Arc<QuotaTracker>,
 }
 
 impl DispatcherContext {
@@ -288,6 +293,31 @@ pub async fn try_process(
         )
         .await?;
         return Ok(());
+    }
+
+    // Producer quota gate (DESIGN.md §5.1, T-042) — after every terminal/consent
+    // gate above (a message already going to be blocked never spends quota
+    // budget) and before decrypt (a deferred message spends no Vault/DEK work).
+    match ctx.quota.check_and_record(
+        row.producer_id,
+        &row.channel,
+        &row.class,
+        Utc::now(),
+    ) {
+        QuotaDecision::Admit => {}
+        QuotaDecision::SoftBreach => {
+            tracing::warn!(
+                producer_id = %row.producer_id,
+                channel = %row.channel,
+                class = %row.class,
+                "messgr-dispatcher: producer over its soft quota, sending anyway"
+            );
+        }
+        QuotaDecision::Defer(next_attempt_at) => {
+            repo::reschedule_retry(&ctx.pool, row.comms_request_id, next_attempt_at)
+                .await?;
+            return Ok(());
+        }
     }
 
     let ciphertexts =

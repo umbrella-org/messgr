@@ -17,6 +17,7 @@ pub mod orphan_reconcile;
 pub mod partition_lifecycle;
 pub mod platform_audit;
 pub mod producer;
+pub mod producer_quota;
 pub mod profile;
 pub mod provider_config;
 pub mod sender;

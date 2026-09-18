@@ -20,6 +20,7 @@ use std::num::NonZeroUsize;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
+use chrono::Utc;
 use clap::{Parser, Subcommand};
 
 use messgr::config::Config;
@@ -31,6 +32,7 @@ use messgr::key_cache::KeyCache;
 use messgr::keystore::{KeyStore, VaultKeyStore, split_kv_path};
 use messgr::kill_switch::cache::{KillSwitchCache, run_refresh_loop};
 use messgr::kill_switch::model::on_queued;
+use messgr::producer_quota::tracker::QuotaTracker;
 use messgr::provider_config::repo as provider_config_repo;
 use messgr::sender::Sender;
 use messgr::sender::http::HttpSender;
@@ -51,6 +53,13 @@ const DEFAULT_KILL_SWITCH_RELEASE_RATE: i32 = 500;
 /// `tenant_config` row at all (T-007 decision 4: no auto-seeding).
 const DEFAULT_VERIFICATION_MODE: &str = "observe";
 const KILL_SWITCH_POLL_INTERVAL: Duration = Duration::from_secs(30);
+/// Used when a tenant has no `tenant_config` row at all (T-007 decision 4:
+/// no auto-seeding) -- matches `migrations/tenant/0002_tenant_config.sql`'s
+/// own `quota_day_boundary_tz` column, which has no default and is always
+/// backed by a real `tenant_config` row once one exists.
+const DEFAULT_QUOTA_DAY_BOUNDARY_TZ: &str = "UTC";
+const USAGE_FLUSH_INTERVAL: Duration = Duration::from_secs(5);
+const QUOTA_CONFIG_POLL_INTERVAL: Duration = Duration::from_secs(30);
 
 fn env_var(name: &str) -> String {
     std::env::var(name).unwrap_or_else(|_| panic!("{name} must be set"))
@@ -146,6 +155,11 @@ async fn main() {
         .as_ref()
         .map(|c| c.verification_mode.clone())
         .unwrap_or_else(|| DEFAULT_VERIFICATION_MODE.to_string());
+    let quota_day_boundary_tz = tenant_config
+        .as_ref()
+        .map(|c| c.quota_day_boundary_tz.clone())
+        .unwrap_or_else(|| DEFAULT_QUOTA_DAY_BOUNDARY_TZ.to_string());
+    let quota = Arc::new(QuotaTracker::new(&quota_day_boundary_tz));
 
     let kill_switches = Arc::new(KillSwitchCache::new());
     let draining = Arc::new(RwLock::new(HashMap::new()));
@@ -203,6 +217,8 @@ async fn main() {
                 verification_mode: verification_mode.clone(),
                 kill_switches: kill_switches.clone(),
                 draining: draining.clone(),
+                quota_day_boundary_tz: quota_day_boundary_tz.clone(),
+                quota: quota.clone(),
             }),
         );
     }
@@ -284,6 +300,24 @@ async fn main() {
         .await;
     }));
 
+    // Producer quota config/override cache refresh (DESIGN.md §5.1, T-042) --
+    // read-only and safe to run before leadership (decision 12), like the
+    // kill-switch refresh loop above. No `LISTEN` channel: config changes
+    // are rare and 30s staleness is acceptable here, unlike kill switches.
+    let quota_refresh = quota.clone();
+    let quota_refresh_pool = tenant_pool.clone();
+    handles.push(tokio::spawn(async move {
+        loop {
+            if let Err(err) = quota_refresh
+                .refresh_config(&quota_refresh_pool, Utc::now())
+                .await
+            {
+                tracing::error!(%err, "messgr-dispatcher: producer quota config refresh failed");
+            }
+            tokio::time::sleep(QUOTA_CONFIG_POLL_INTERVAL).await;
+        }
+    }));
+
     // T-039: block here, after everything that runs regardless of
     // leadership (health listener, kill-switch refresh loop, Vault login,
     // credential/config loads) is already up, and only before the sweep and
@@ -303,6 +337,26 @@ async fn main() {
         cleared_leases,
         "messgr-dispatcher: cleared stale outbox leases after acquiring leadership"
     );
+
+    // Producer quota usage counters (DESIGN.md §5.1, T-042) -- rebuilt from
+    // producer_usage only after leadership is acquired (decision 12): a
+    // standby's tracker never has real counts, and a racing flush from one
+    // would corrupt the real leader's producer_usage rows.
+    quota
+        .rebuild_from_db(&tenant_pool, Utc::now())
+        .await
+        .expect("rebuilding producer quota counters from producer_usage failed");
+
+    let quota_flush = quota.clone();
+    let quota_flush_pool = tenant_pool.clone();
+    handles.push(tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(USAGE_FLUSH_INTERVAL).await;
+            if let Err(err) = quota_flush.flush(&quota_flush_pool).await {
+                tracing::error!(%err, "messgr-dispatcher: producer quota usage flush failed");
+            }
+        }
+    }));
 
     for (channel, ctx) in contexts {
         tracing::info!(%channel, "messgr-dispatcher: starting claim loop");
