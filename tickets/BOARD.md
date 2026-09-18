@@ -38,6 +38,7 @@ Last updated: 2026-09-18
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
+| T-043 | Quiet hours with jitter and DST handling | medium | medium | M | [] |  |
 
 ## TO DO (impact order, per child)
 
@@ -45,7 +46,6 @@ Last updated: 2026-09-18
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
-| T-043 | Quiet hours with jitter and DST handling | medium | medium | M | [] |  |
 | T-044 | Integration test coverage for producer_quota_override's refresh_config SQL path | low | low | S | [] |  |
 
 ## DONE
