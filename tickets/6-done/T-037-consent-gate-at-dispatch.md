@@ -701,7 +701,76 @@ Run: `just build && just test && just lint`.
 
 ## Review
 
-<!-- empty until IN REVIEW -->
+- [x] Reviewer independence settled (step 0): **independent** — this reviewing session has no
+  hand in the branch (started cold at "validate ticket T-037"), so no delegation was needed;
+  all audits below ran directly.
+- [x] Implementation audit — acceptance test re-run: all 4 of `tests/dispatcher.rs`'s new tests
+  (`marketing_without_any_consent_row_is_blocked_with_suppressed_consent`,
+  `marketing_with_an_explicit_opt_out_is_blocked`, `marketing_with_an_explicit_opt_in_sends`,
+  `transactional_sends_without_any_consent_row`), all 5 of `tests/consent.rs`, and all 4 of
+  `src/bin/control.rs`'s new `consent_set_*` parse tests green. All 8 Implementation Plan tasks
+  verified done in the files they name; all 9 confirmed design decisions verified against the
+  code (steps 1, 2). `just build`/`just test`/`just lint`/`just docs-check` all clean. One `just
+  test` run (before any review edits) showed 2 failures —
+  `marketing_without_any_consent_row_is_blocked_with_suppressed_consent` (this ticket's own test)
+  and the pre-existing, unrelated `transient_http_failure_requeues` — both on a `claim`
+  returning 0 rows instead of 1; two immediate reruns (isolated and full-suite) were clean. See
+  F5.
+- [x] Quality audit (step 3) — idiomatic, mirrors `suppression`'s module shape as the plan
+  intended. `set_consent` closes the tenant pool on every exit path, including both new
+  rejection branches (decision 7) — the exact leak class T-038/F2 found is not repeated here.
+  No secrets touched; `address_id` audited directly is correctly reasoned as non-PII. Mutation
+  coverage is real: `marketing_with_an_explicit_opt_in_sends` and
+  `transactional_sends_without_any_consent_row` are negative controls that would catch a gate
+  that always blocks or never runs, and `tests/consent.rs`'s audit-row assertions check actual
+  field values (`assert_eq!` on the row tuple), not just `is_err()`/row-count.
+- [x] Consistency audit (step 4) — the migration's `CREATE TABLE consent` is byte-for-byte
+  verbatim against `03-data-model.md`'s own snippet (addendum step 2 item 1, independently
+  diffed, not transcribed on trust); PK `(address_id, class)` has no nullable column, so no
+  NULL-collapse risk in the `ON CONFLICT` (addendum item 2). Verified `outbox.address_id` (the
+  only other `address_id` column in the schema) declares no FK to `customer_address`, so
+  `erasure_coverage.rs`'s new detection arm (Task 3) is additive as the Description claims —
+  it does not newly catch `outbox`. Gate order in `try_process` confirmed: expiry → suppression
+  (unconditional) → verification (transactional+marketing) → **consent (marketing only, this
+  ticket)** → decrypt, matching decision 2 and the Description's own account of why it diverges
+  from §5's prose table order (suppression-first, T-038 already shipped that way). Hard
+  invariants 1/3 hold (grep: gate lives in `try_process`, dispatch-time only; no ingest-side
+  change). Project-wide sweep for stale `consent`/gate-chain prose found four governing/shipped-doc
+  references this branch makes false — F1-F4 below, all fixed inline — plus two pre-existing
+  ones out of this branch's causation — F6/F7, `noted`.
+- [x] Documentation audit — coverage, whole-tree sweep, docs build clean (step 4a). New CLI
+  subcommand (`consent set`) and dispatcher behaviour both documented
+  (`control-plane-cli.adoc`, `dispatcher.adoc`) and verified accurate against the shipped code.
+  `just docs-check` passes. Whole-tree sweep beyond the two pages this ticket's own docs task
+  touched found F1-F4.
+- [ ] Docs-readability pass — no docs-readability reviewer configured in this environment;
+  conscious skip (step 4b, optional, never blocks).
+- [x] Findings recorded below with severity, class, and disposition; disposition summary and
+  cost line present (step 5).
+- [x] Ticket moved to `tickets/6-done/`; `## History` appended (step 6).
+- [x] Other references updated; governing-document reconciliation done in this review — F3
+  (`06-pii-retention.md`, DESIGN.md bumped to Version 9 per the addendum) and F4 (`AGENTS.md`)
+  (step 7).
+- [x] Remaining-tickets impact sweep done (step 8) — no `1-to-do/`/`2-ready/` ticket lists T-037
+  in `depends-on:` or Description; nothing to patch.
+- [x] Summary + child-project commit message & MR attributes presented for approval; remote-base
+  check and overarching-repo bookkeeping to follow approval (step 9).
+
+| id | severity | class | disposition | description | evidence | suggestion |
+|---|---|---|---|---|---|---|
+| F1 | non-blocking | stale-xref | fixed inline | `docs/user-manual/introduction.adoc`'s Status section listed `consent` as part of "no full gate chain ... yet" — false as of this branch. | `docs/user-manual/introduction.adoc:16` (pre-fix) | Fixed inline: split `consent` (`T-037`) into the already-enforced clause alongside suppression (`T-038`), commit `dcd4f40`. |
+| F2 | non-blocking | stale-xref | fixed inline | `docs/user-manual/ingest.adoc` said "Consent and quotas (§5, §5.1) are still unbuilt" — false for consent as of this branch. | `docs/user-manual/ingest.adoc:10` (pre-fix) | Fixed inline: reworded to "Quotas ... are still unbuilt; suppression and consent ... are now enforced", commit `dcd4f40`. |
+| F3 | non-blocking | stale-xref | fixed inline | `development/design/06-pii-retention.md`'s new prose justified the `consent` erasure statement's placement ahead of `customer_address`'s own `UPDATE` by claiming the subquery needed to run "before that column's [`customer_id`'s] value is zeroed" — `customer_id` is never zeroed by physical redaction (the same section already says so two paragraphs below: "`customer_id` itself is retained as an opaque UUID"). The ordering is not load-bearing at all; neither statement touches `customer_id`. | `development/design/06-pii-retention.md:51` (pre-fix), contradicted by its own `:59` | Fixed inline: reworded to state the placement is not load-bearing and why, commit `dcd4f40`; `DESIGN.md` version stamp bumped 8→9 per the review addendum step 5. |
+| F4 | non-blocking | stale-xref | fixed inline | `AGENTS.md` said "Step 5, the gate chain ... is not yet built" — this branch is the third and last of the three gates (verification/suppression already merged), so the chain is now code-complete. | `AGENTS.md:14-15` (pre-fix) | Fixed inline: reworded to name each gate's actual status (verification/suppression merged, consent reviewed pending merge), commit `dcd4f40`. |
+| F5 | non-blocking | other | noted | One `just test` run (before any review edits, full suite, default parallelism) failed 2 tests — this ticket's own `marketing_without_any_consent_row_is_blocked_with_suppressed_consent` and the unrelated pre-existing `transient_http_failure_requeues` — both on `claim()` returning 0 rows instead of 1. Both passed cleanly on two immediate reruns. Since a pre-existing, unrelated test failed in the same run, this reads as shared test-infra contention (likely connection/provisioning load under full parallelism), not a defect in this branch's gate logic. | first `just test` run, this review, 2026-09-18; both tests green on rerun | Not investigated further — doesn't reproduce and isn't this branch's causation. Worth a look if `cargo test`'s default parallelism keeps producing occasional cross-test flakes as the suite grows. |
+| F6 | non-blocking | stale-xref | noted | `development/design/01-overview-architecture.md`'s gate-chain walkthrough still lists the built-order-table sequence "verification, consent, suppression" — the actual `try_process` order (suppression first, unconditional) has been suppression-before-both since `T-038` shipped, before this branch. Pre-existing, not this branch's causation (T-037 didn't move suppression's or verification's position, only added consent in the slot the doc already predicted). | `development/design/01-overview-architecture.md:249-251` | Leave for whoever next touches that walkthrough, or a documentation-accuracy sweep ticket if the gate-chain doc drift keeps recurring (this is now the second review — after T-038 — to find gate-order prose stale without promoting a fix). |
+| F7 | non-blocking | stale-xref | noted | `docs/user-manual/introduction.adoc`'s Status section (same sentence as F1) still doesn't name verification (`T-036`) as already enforced, only suppression and (now) consent. Pre-existing since before this branch — `T-036`'s own review never touched this file. | `docs/user-manual/introduction.adoc:16-18` | Leave for whoever next touches that page's Status section; doesn't clear the batching bar alone (same family as T-038/F5's `kill switches` note on the same sentence). |
+
+Disposition summary: 7 non-blocking findings — 4 `fixed inline` (F1-F4, commit `dcd4f40` on
+`feat/T-037-consent-gate-at-dispatch`), 3 `noted` (F5, F6, F7). No blocking findings. No new
+tickets spawned.
+
+cost: estimated M, actual M
 
 ## History
 
@@ -716,3 +785,4 @@ Run: `just build && just test && just lint`.
   what refinement found (erasure gap, detection-query fix, no-mint decision).
 - 2026-09-17 — READY → IN DEVELOPMENT: picked up
 - 2026-09-17 — IN DEVELOPMENT → IN REVIEW: acceptance green
+- 2026-09-18 — IN REVIEW → DONE: no blocking findings; 4 fixed inline, 3 noted (see Review)
