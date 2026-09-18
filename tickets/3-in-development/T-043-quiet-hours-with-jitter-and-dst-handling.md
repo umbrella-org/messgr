@@ -679,3 +679,4 @@ Run: `just build && just test && just lint`.
   analysis — last of the next-batch-of-5 (T-039-T-043), lowest urgency since it's schema-only
   today rather than a live gap in an already-claimed control.
 - 2026-09-18 — TO DO → READY: plan complete
+- 2026-09-18 — READY → IN DEVELOPMENT: picked up
