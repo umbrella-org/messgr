@@ -798,3 +798,6 @@ Run: `just build && just test && just lint`.
 - 2026-09-15 — created (TO DO). source: pickle ticket new
 - 2026-09-18 — TO DO → READY: plan complete
 - 2026-09-18 — READY → IN DEVELOPMENT: picked up
+- 2026-09-18 — docs update incidentally resolved T-038's F5 (`docs/user-manual/introduction.adoc`'s
+  "kill switches" claim, flagged but left unfixed by T-038's own review) while rewording the same
+  clause for T-042's own quota-gate mention.
