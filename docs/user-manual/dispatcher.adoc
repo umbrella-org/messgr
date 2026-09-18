@@ -69,6 +69,15 @@ defaults to not-opted-in, the same outcome as an explicit `opted_in = false` row
 blocks the send and writes a terminal `suppressed_consent` event/status. See "Consent"
 (control-plane CLI) for recording entries.
 
+`T-041` adds the cancellation re-check (DESIGN.md §6.2), run last -- immediately before the
+provider call, not alongside the Expiry/Suppression/Verification/Consent gates above. Those four
+run early specifically to skip wasted decrypt/DEK work on a message already known dead; this
+check exists to close a different race instead -- `DELETE /comms/{id}` (see "messgr-ingest") can
+land at any point up to send, including after every earlier gate has already passed, so only a
+check placed last, re-reading `outbox.cancelled_at` fresh from the database rather than the
+claim-time snapshot, can catch it. A cancelled row is terminal-written `cancelled` and the
+provider is never called.
+
 Requires `DISPATCHER_TENANT_SLUG` (which tenant this process serves), `VAULT_ROLE_ID` /
 `VAULT_WRAPPED_SECRET_ID` (this tenant's own AppRole -- printed by `just provision` on a fresh
 provisioning run), and, per channel in `DISPATCHER_CHANNELS` (default `sms`),

@@ -89,6 +89,8 @@ pub enum IngestError {
         horizon_days: i32,
     },
     TemplateNotFound,
+    CommsRequestNotFound,
+    AlreadySent,
     Render(RenderError),
     Database(sqlx::Error),
     Encryption(EncryptionError),
@@ -190,6 +192,10 @@ impl std::fmt::Display for IngestError {
                 "scheduled_for exceeds the tenant's {horizon_days}-day scheduling horizon"
             ),
             Self::TemplateNotFound => write!(f, "template not found"),
+            Self::CommsRequestNotFound => write!(f, "comms request not found"),
+            Self::AlreadySent => {
+                write!(f, "comms request already reached a terminal state")
+            }
             Self::Render(err) => write!(f, "template render failed: {err}"),
             Self::Database(err) => write!(f, "database error: {err}"),
             Self::Encryption(err) => write!(f, "encryption error: {err}"),
@@ -213,7 +219,10 @@ impl IntoResponse for IngestError {
             | Self::CampaignIdOnTransactional
             | Self::InvalidResolutionInput
             | Self::ScheduleHorizonExceeded { .. } => StatusCode::UNPROCESSABLE_ENTITY,
-            Self::TemplateNotFound => StatusCode::NOT_FOUND,
+            Self::TemplateNotFound | Self::CommsRequestNotFound => {
+                StatusCode::NOT_FOUND
+            }
+            Self::AlreadySent => StatusCode::CONFLICT,
             Self::TenantNotConfigured => StatusCode::FAILED_DEPENDENCY,
             Self::MissingPeerCertificate
             | Self::Render(_)

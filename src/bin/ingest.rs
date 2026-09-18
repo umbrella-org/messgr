@@ -7,14 +7,14 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use axum::Router;
-use axum::routing::post;
+use axum::routing::{delete, post};
 use axum_server::tls_rustls::{RustlsAcceptor, RustlsConfig};
 use clap::{Parser, Subcommand};
 
 use messgr::config::Config;
 use messgr::db;
 use messgr::ingest::AppState;
-use messgr::ingest::handler::create_comms;
+use messgr::ingest::handler::{cancel_comms, create_comms};
 use messgr::keystore::{KeyStore, VaultKeyStore};
 use messgr::mtls::{self, ClientCertAcceptor};
 use messgr::tenant::registry::TenantRegistry;
@@ -91,6 +91,7 @@ async fn main() {
 
     let app: Router = Router::new()
         .route("/comms", post(create_comms))
+        .route("/comms/{id}", delete(cancel_comms))
         .with_state(app_state);
 
     let tls_config = mtls::load_server_config(&cert_file, &key_file, &client_ca_file)

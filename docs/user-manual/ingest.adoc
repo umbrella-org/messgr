@@ -84,6 +84,32 @@ resolves to that other customer instead (see "Customer projection" in the contro
 chapter). Once `messgr-dispatcher` is running against this tenant and channel, the row is picked
 up and `final_status` moves to `sent` or `failed`.
 
+== `DELETE /comms/{id}`
+
+Cancels a not-yet-sent message (`T-041`, DESIGN.md §6.2). Scoped to the producer that created
+the row -- a request against another producer's id is indistinguishable from an unknown id
+(`404`, never `403`), so the endpoint leaks nothing about whether an id belongs to another
+producer:
+
+[source,bash]
+----
+curl -sk --cert /tmp/producer-cert/cert.pem --key /tmp/producer-cert/key.pem \
+  --cacert /tmp/ingest-cert/ca.pem --resolve messgr-ingest.internal:8443:127.0.0.1 \
+  -X DELETE https://messgr-ingest.internal:8443/comms/<comms_request_id>
+----
+
+Returns `204` on success, idempotently -- a second `DELETE` on an already-cancelled row is still
+`204`, not an error. `404` for an unknown id or one belonging to another producer. `409 Already
+Sent` when the message already reached a terminal state other than `cancelled` -- it was already
+sent, failed, expired, or suppressed, and that cannot be undone.
+
+This call only _requests_ cancellation: `messgr-dispatcher` makes the final call at send time
+(§6.2), re-reading `cancelled_at` immediately before it calls the provider, since a cancel can
+arrive while the dispatcher already holds the row's lease. A `204` response here does not itself
+guarantee the message never goes out -- if the dispatcher's send already started, cancellation
+lost the race and the message sends; the ledger's `final_status` is the source of truth for what
+actually happened, not this response.
+
 `docker compose up -d` also starts a dev-mode Vault (`VAULT_ADDR=http://localhost:8200`,
 `VAULT_TOKEN=messgr-dev-root-token`, both in `.env.example`) backing the `KeyStore` trait
 (`src/keystore.rs`) that per-customer data-encryption keys go through (DESIGN.md §7.6).

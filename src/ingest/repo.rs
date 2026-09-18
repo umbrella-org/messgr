@@ -144,3 +144,47 @@ pub async fn insert_transactional(
 
     Ok(InsertOutcome::Created)
 }
+
+pub enum CancelOutcome {
+    Cancelled,
+    AlreadySent,
+    NotFound,
+}
+
+/// DESIGN.md §6.2, T-041 decisions 1–3: producer-scoped, idempotent
+/// (`COALESCE`), and falls back to `comms_request.final_status` when the
+/// `outbox` row is already gone (deleted on terminal write) to disambiguate
+/// "never existed / wrong producer" from "already resolved".
+pub async fn cancel(
+    pool: &PgPool,
+    comms_request_id: Uuid,
+    producer_id: Uuid,
+) -> Result<CancelOutcome, sqlx::Error> {
+    let matched: Option<Uuid> = sqlx::query_scalar(
+        "UPDATE outbox SET cancelled_at = COALESCE(cancelled_at, now()) \
+         WHERE comms_request_id = $1 AND producer_id = $2 \
+         RETURNING comms_request_id",
+    )
+    .bind(comms_request_id)
+    .bind(producer_id)
+    .fetch_optional(pool)
+    .await?;
+
+    if matched.is_some() {
+        return Ok(CancelOutcome::Cancelled);
+    }
+
+    let final_status: Option<Option<String>> = sqlx::query_scalar(
+        "SELECT final_status FROM comms_request WHERE id = $1 AND producer_id = $2",
+    )
+    .bind(comms_request_id)
+    .bind(producer_id)
+    .fetch_optional(pool)
+    .await?;
+
+    Ok(match final_status.flatten().as_deref() {
+        Some("cancelled") => CancelOutcome::Cancelled,
+        Some(_) => CancelOutcome::AlreadySent,
+        None => CancelOutcome::NotFound,
+    })
+}

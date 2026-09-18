@@ -259,6 +259,22 @@ pub async fn clear_stale_leases(pool: &PgPool) -> Result<u64, sqlx::Error> {
     Ok(result.rows_affected())
 }
 
+/// Re-reads `outbox.cancelled_at` fresh from the DB (DESIGN.md §6.2, T-041)
+/// — `ClaimedOutbox::cancelled_at` is a snapshot from claim time and
+/// cannot see a cancel that landed afterward; this is the check that
+/// closes the race between claim and send.
+pub async fn is_cancelled(
+    pool: &PgPool,
+    comms_request_id: Uuid,
+) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT cancelled_at IS NOT NULL FROM outbox WHERE comms_request_id = $1",
+    )
+    .bind(comms_request_id)
+    .fetch_one(pool)
+    .await
+}
+
 /// Writes the one permitted `comms_request` mutation (§4.1), the
 /// corresponding `comms_event` row (§4.4), and removes the row from the
 /// queue (§4.2) — all in one transaction, so a crash between them can never
