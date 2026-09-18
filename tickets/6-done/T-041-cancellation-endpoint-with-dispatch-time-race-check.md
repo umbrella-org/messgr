@@ -330,7 +330,78 @@ and confirm `204` again; `DELETE` a random UUID and confirm `404`.
 
 ## Review
 
-<!-- empty until IN REVIEW -->
+- [x] Reviewer independence settled (step 0): **independent** — reviewing session has no memory
+  of authoring `feat/T-041-cancellation-endpoint-with-dispatch-time-race-check` (fresh session);
+  audits run directly, no delegation needed.
+- [x] Implementation audit — acceptance test re-run, tasks & criteria verified (steps 1, 2)
+- [x] Quality audit (step 3)
+- [x] Consistency audit (step 4)
+- [x] Documentation audit — coverage, whole-tree sweep, docs build clean (step 4a)
+- [x] Docs-readability pass — **conscious skip**: no docs-readability reviewer configured in this
+  session/host (step 4b)
+- [x] Findings recorded, disposition summary + cost line below (step 5)
+- [x] Ticket moved (step 6)
+- [x] Other references / governing documents reconciled or noted why not (step 7)
+- [x] Remaining-tickets impact sweep done (step 8)
+- [x] Summary + commit message & MR attributes presented for approval; next-ticket suggestion (step 9)
+
+**Implementation audit.** All six tasks verified against the branch tip (`054a0fe`), each in the
+files the plan named. `just build` / `just test` / `just lint` / `just docs-check` all green;
+full suite (166 tests across all files) passed, including the 6 new ones
+(`cancel_comms_sets_cancelled_at_and_returns_204`, `cancel_comms_is_idempotent`,
+`cancel_comms_unknown_id_returns_404`, `cancel_comms_wrong_producer_returns_404`,
+`cancel_comms_after_dispatch_returns_409`, `cancelled_row_is_terminal_written_and_not_sent`).
+Manual smoke check not re-run (covered equivalently by the automated integration tests, which
+exercise the same mTLS/HTTP path). All five confirmed decisions honored: producer-scoped 404 (no
+403, decision 1); `comms_request(id)` index added (decision 2, task 1); fallback `final_status =
+'cancelled'` still returns `204` (decision 3, `repo::cancel`'s match arm); the dispatcher check
+sits immediately before `ctx.sender.send(...)` in `try_process`, not alongside the
+Expiry/Suppression/Verification/Consent gates (decision 4); `COALESCE(cancelled_at, now())` makes
+the cancel idempotent (decision 5, exercised by `cancel_comms_is_idempotent`).
+
+**Quality audit.** Idiomatic — matches the existing `InsertOutcome`/`insert_transactional`
+pattern in the same files. The mock-server assertion in
+`cancelled_row_is_terminal_written_and_not_sent` uses `.expect(0)` on the provider call, so it is
+mutation-testable per the addendum's rule (deleting the `is_cancelled` check would turn it red,
+not just green-by-construction). Both `cancel()` queries are parameterized (no injection surface)
+and scoped by `producer_id`, so no secret/PII handling concern. No `NULL`-semantics unique-index
+or `ON CONFLICT` issue (no new unique constraint added). `cancelled_at`'s pre-existing "written by
+nothing, read by nothing" gap (the ticket's own filing reason) is now closed — it has both a
+writer (`repo::cancel`) and a reader (`repo::is_cancelled`), addendum step 2 item 6.
+
+**Consistency audit.** No stale cross-reference introduced. `justfile`/`.github/workflows/*.yml`
+untouched, so addendum step 2 item 8 (local/CI command parity) doesn't trigger. Hard invariants 1
+(auth/OTP bypasses the queue) and 3 (gates run at dispatch, not ingest) hold — cancellation
+*write* happens at ingest, but the only *check* against it runs at dispatch, matching decision 4
+and the existing gate-chain design (`04-gate-chain.md`'s gate table deliberately excludes
+cancellation as a listed gate, consistent with decision 4's "not alongside" rationale — this is
+already correct as written, not something this branch needed to change).
+
+**Documentation audit.** `docs/user-manual/ingest.adoc` and `dispatcher.adoc` both updated per
+the plan; `just docs-check` clean. This ticket also completes build-order step 9 (§14:
+"Scheduled delivery, cancellation, and `expires_at`" — T-040 shipped the first and third,
+T-041 the second), which per the addendum's step 8 triggers a boundary re-audit of `DESIGN.md`
+beyond this ticket's own diff: checked `05-send-timing.md` §6.2 (cancellation mechanism, still
+accurate to the letter), `04-gate-chain.md` §5 (correctly excludes cancellation as its own gate
+row), `10-query-api-ui.md` §11 (its route table already listed `DELETE /comms/{id}` alongside
+`POST /comms`, which also lives on `messgr-ingest` rather than the future `query-api` — so
+routing this endpoint through `messgr-ingest` is consistent with how that table already read, not
+a divergence from it), and decision #13 in `14-decisions-and-open-questions.md` ("Cancellation
+and `expires_at` are part of the feature, not follow-ups" — already anticipated this, no update
+needed). No DESIGN.md defect found at this boundary.
+
+One pre-existing governing-document staleness surfaced, **not caused by this branch** (T-037
+merged, per `tickets/BOARD.md`, before this branch was cut — rules §5's inline bar is causation,
+not authorship): `AGENTS.md` line 16 still reads "consent (T-037) is reviewed, pending merge",
+which has been false since PR #56 merged. `noted` rather than `fixed inline` per that same rule.
+
+| id | severity | class | disposition | description | evidence | suggestion |
+|---|---|---|---|---|---|---|
+| F1 | non-blocking | stale-xref | noted | `AGENTS.md`'s build-status paragraph still says T-037 is "reviewed, pending merge" | `AGENTS.md:16`; `tickets/BOARD.md` shows T-037 in DONE, merged PR #56 (pre-`main` commit `47e5b99`) | Update the line to reflect T-037 merged, and consider naming step 9 (T-040+T-041) as closed, next time this paragraph is touched |
+
+Disposition summary: 1 finding — 1 noted (F1). No blocking findings.
+
+cost: estimated M, actual M
 
 ## History
 
@@ -340,3 +411,6 @@ and confirm `204` again; `DELETE` a random UUID and confirm `404`.
 - 2026-09-18 — TO DO → READY: plan complete
 - 2026-09-18 — READY → IN DEVELOPMENT: picked up
 - 2026-09-18 — IN DEVELOPMENT → IN REVIEW: acceptance green
+- 2026-09-18 — reviewed: independent (fresh session), 0 blocking findings, 1 non-blocking (F1,
+  noted). `just build`/`test`/`lint`/`docs-check` all green. IN REVIEW → DONE.
+- 2026-09-18 — IN REVIEW → DONE: 0 blocking, 1 non-blocking (F1 noted); build/test/lint/docs-check green

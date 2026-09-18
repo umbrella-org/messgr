@@ -20,11 +20,10 @@ Last updated: 2026-09-18
 
 ## IN REVIEW
 
-### messgr (1/1)
+### messgr (0/1)
 
 | id | title | depends-on |
 |---|---|---|
-| T-041 | Cancellation endpoint with dispatch-time race check | [] |
 
 ## REWORK
 
@@ -94,6 +93,7 @@ Last updated: 2026-09-18
 | T-038 | Suppression gate at dispatch | yes — MERGED: PR #53 (`feat/T-038-suppression-gate-at-dispatch`, `3409991`) |
 | T-039 | Dispatcher leader election (HA) | yes — MERGED: PR #54 (`0b67787`) merged to `main`. |
 | T-040 | Wire scheduled delivery and expiry into the outbox | yes — MERGED: PR #55 merged to `main` (`590f284`) |
+| T-041 | Cancellation endpoint with dispatch-time race check | no — publish-gated |
 
 ## DROPPED
 
