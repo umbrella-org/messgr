@@ -69,12 +69,29 @@ defaults to not-opted-in, the same outcome as an explicit `opted_in = false` row
 blocks the send and writes a terminal `suppressed_consent` event/status. See "Consent"
 (control-plane CLI) for recording entries.
 
+`T-042` adds the producer quota gate (DESIGN.md §5.1), checked right after consent, before
+decrypt -- the same "cheapest first" placement as every gate above: a message already going to
+be blocked for an unrelated reason never spends quota budget, and a quota-deferred message spends
+no Vault/DEK work. Enforcement is per `(producer, channel, class)`: `marketing` is `hard` or
+`soft` depending on how the row was configured; `transactional` is always `soft` -- send anyway
+and log a warning -- since quota can never block transactional traffic (AGENTS.md hard invariant
+5); `auth` is exempt from enforcement entirely but still counted, so its volume stays visible. A
+`hard` breach reschedules the row to the start of the next window (day takes precedence over
+minute) rather than terminal-failing it -- the same defer-not-discard treatment a retryable send
+failure gets. Counters are an in-process map behind a single `QuotaTracker` per tenant (safe
+without coordination only because T-039 guarantees one active dispatcher per tenant), flushed to
+`producer_usage` every 5 seconds and rebuilt from that table after acquiring leadership, so a
+restart mid-window does not reset a producer's allowance to zero. The per-day window resets at
+local midnight in `tenant_config.quota_day_boundary_tz`; the per-minute window is a plain UTC
+minute. See "Producer quotas" (control-plane CLI) for configuring limits and overrides.
+
 `T-041` adds the cancellation re-check (DESIGN.md §6.2), run last -- immediately before the
-provider call, not alongside the Expiry/Suppression/Verification/Consent gates above. Those four
-run early specifically to skip wasted decrypt/DEK work on a message already known dead; this
-check exists to close a different race instead -- `DELETE /comms/{id}` (see "messgr-ingest") can
-land at any point up to send, including after every earlier gate has already passed, so only a
-check placed last, re-reading `outbox.cancelled_at` fresh from the database rather than the
+provider call, not alongside the Expiry/Suppression/Verification/Consent/Producer quota gates
+above. Those five run early specifically to skip wasted decrypt/DEK work on a message already
+known dead; this check exists to close a different race instead -- `DELETE /comms/{id}` (see
+"messgr-ingest") can land at any point up to send, including after every earlier gate has
+already passed, so only a check placed last, re-reading `outbox.cancelled_at` fresh from the
+database rather than the
 claim-time snapshot, can catch it. A cancelled row is terminal-written `cancelled` and the
 provider is never called.
 
