@@ -13,10 +13,11 @@ Last updated: 2026-09-18
 
 ## IN DEVELOPMENT
 
-### messgr (0/1)
+### messgr (1/1)
 
 | id | title | depends-on |
 |---|---|---|
+| T-041 | Cancellation endpoint with dispatch-time race check | [] |
 
 ## IN REVIEW
 
@@ -38,7 +39,6 @@ Last updated: 2026-09-18
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
-| T-041 | Cancellation endpoint with dispatch-time race check | high | medium | M | [] |  |
 
 ## TO DO (impact order, per child)
 

@@ -338,3 +338,4 @@ and confirm `204` again; `DELETE` a random UUID and confirm `404`.
   analysis — `outbox.cancelled_at` exists but has no write path and is never checked before
   send, contradicting §6.2's "cancellation is mandatory" requirement.
 - 2026-09-18 — TO DO → READY: plan complete
+- 2026-09-18 — READY → IN DEVELOPMENT: picked up
