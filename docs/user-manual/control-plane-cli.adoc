@@ -275,6 +275,28 @@ evidence of where the choice was captured (e.g. `web_form`, `ivr_call`, `branch_
 idempotent, same `created`/`updated`/`idempotent` outcome and `platform_audit` trail as
 `suppression add`/`tenant-config set`.
 
+== Quiet hours
+
+[source,bash]
+----
+cargo run --bin messgr-control -- quiet-hours set --tenant-slug acme \
+    --start-local 22:00 --end-local 07:00 --actor operator@example.com
+
+cargo run --bin messgr-control -- quiet-hours show --tenant-slug acme
+----
+
+`quiet-hours` (DESIGN.md §5, §6.1, T-043) sets or shows the tenant's institution-wide quiet-hours
+window, enforced by `messgr-dispatcher`'s quiet-hours gate at send time: a message due inside the
+window reschedules to window end plus up to 30 minutes of uniform jitter instead of sending.
+`--start-local`/`--end-local` take `HH:MM` in 24-hour time; a window may wrap midnight (e.g.
+`--start-local 22:00 --end-local 07:00`). Only the institution-wide default is settable today --
+there is no `--scope`/`--scope-key` flag, even though the underlying schema supports per-segment
+and per-region windows; see `05-send-timing.md`'s §6.1 correction note for why those scopes are
+currently unreachable. Re-running `set` with identical inputs is idempotent, same
+`created`/`updated`/`idempotent` outcome and `platform_audit` trail as `consent set`/`suppression
+add`. A change takes effect on `messgr-dispatcher`'s next restart -- the window is read once at
+startup, not hot-reloaded.
+
 == Customer DEK pre-provisioning
 
 [source,bash]

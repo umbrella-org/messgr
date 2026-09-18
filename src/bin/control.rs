@@ -16,6 +16,8 @@ use messgr::producer::dev_pki;
 use messgr::producer::register::{disable_producer, list_producers, register_producer};
 use messgr::provider_config::configure::{list_provider_config, set_provider_config};
 use messgr::provider_config::model::ProviderConfigInput;
+use messgr::quiet_hours::configure::{set_quiet_hours_policy, show_quiet_hours_policy};
+use messgr::quiet_hours::model::QuietHoursPolicyInput;
 use messgr::stats::tenant_message_stats;
 use messgr::suppression::configure::{
     add_suppression, list_suppression, remove_suppression,
@@ -116,6 +118,15 @@ enum Command {
     Consent {
         #[command(subcommand)]
         command: ConsentCommand,
+    },
+    /// Set or show the tenant's institution-wide quiet-hours window (DESIGN.md
+    /// §5, §6.1, T-043), enforced by `messgr-dispatcher`'s quiet-hours gate at
+    /// send time. Only the institution-wide default is settable -- see
+    /// `05-send-timing.md`'s §6.1 correction note for why per-segment/region
+    /// windows aren't exposed here.
+    QuietHours {
+        #[command(subcommand)]
+        command: QuietHoursCommand,
     },
     /// Keep comms_request/comms_event partitions self-managing (DESIGN.md
     /// §4.1, §7.2, §7.5, T-014): create-ahead, move to slow tablespace,
@@ -494,6 +505,33 @@ enum ConsentCommand {
         /// Operator identity recorded on the platform_audit row.
         #[arg(long)]
         actor: String,
+    },
+}
+
+fn parse_local_time(value: &str) -> Result<chrono::NaiveTime, String> {
+    chrono::NaiveTime::parse_from_str(value, "%H:%M")
+        .map_err(|_| format!("expected HH:MM (24-hour), got {value:?}"))
+}
+
+#[derive(Subcommand)]
+enum QuietHoursCommand {
+    /// Create or overwrite the tenant's quiet-hours window. Safe to re-run:
+    /// identical inputs are an idempotent no-op.
+    Set {
+        #[arg(long = "tenant-slug")]
+        tenant_slug: String,
+        #[arg(long = "start-local", value_parser = parse_local_time)]
+        start_local: chrono::NaiveTime,
+        #[arg(long = "end-local", value_parser = parse_local_time)]
+        end_local: chrono::NaiveTime,
+        /// Operator identity recorded on the platform_audit row.
+        #[arg(long)]
+        actor: String,
+    },
+    /// Show the tenant's quiet-hours window, or report that none is set.
+    Show {
+        #[arg(long = "tenant-slug")]
+        tenant_slug: String,
     },
 }
 
@@ -1178,6 +1216,53 @@ async fn run(
                 }
             }
         }
+        // No Vault client is connected here either -- quiet-hours touches
+        // neither Transit nor AppRole, matching tenant-config.
+        Command::QuietHours { command } => match command {
+            QuietHoursCommand::Set {
+                tenant_slug,
+                start_local,
+                end_local,
+                actor,
+            } => {
+                let outcome = set_quiet_hours_policy(
+                    &control_pool,
+                    &config.control_database_url,
+                    &tenant_slug,
+                    QuietHoursPolicyInput {
+                        start_local,
+                        end_local,
+                    },
+                    &actor,
+                )
+                .await
+                .map_err(|err| {
+                    format!("failed to set quiet_hours_policy for tenant {tenant_slug:?}: {err}")
+                })?;
+                println!("outcome={}", outcome.outcome);
+            }
+            QuietHoursCommand::Show { tenant_slug } => {
+                let policy = show_quiet_hours_policy(
+                    &control_pool,
+                    &config.control_database_url,
+                    &tenant_slug,
+                )
+                .await
+                .map_err(|err| {
+                    format!("failed to show quiet_hours_policy for tenant {tenant_slug:?}: {err}")
+                })?;
+
+                match policy {
+                    Some(policy) => println!(
+                        "start_local={} end_local={}",
+                        policy.start_local, policy.end_local
+                    ),
+                    None => println!(
+                        "no quiet-hours policy configured for tenant {tenant_slug}"
+                    ),
+                }
+            }
+        },
         // No Vault client is connected here either — partition-lifecycle
         // touches neither Transit nor AppRole.
         Command::PartitionLifecycle { command } => match command {
@@ -1853,5 +1938,87 @@ mod tests {
             result.is_err(),
             "a non-boolean --opted-in value must fail to parse"
         );
+    }
+
+    #[test]
+    fn quiet_hours_set_parses_every_flag() {
+        let cli = Cli::try_parse_from([
+            "messgr-control",
+            "quiet-hours",
+            "set",
+            "--tenant-slug",
+            "acme",
+            "--start-local",
+            "22:00",
+            "--end-local",
+            "07:00",
+            "--actor",
+            "operator@example.com",
+        ])
+        .expect("parsing quiet-hours set must succeed");
+
+        let Command::QuietHours {
+            command:
+                QuietHoursCommand::Set {
+                    tenant_slug,
+                    start_local,
+                    end_local,
+                    actor,
+                },
+        } = cli.command
+        else {
+            panic!("expected QuietHours::Set");
+        };
+
+        assert_eq!(tenant_slug, "acme");
+        assert_eq!(
+            start_local,
+            chrono::NaiveTime::from_hms_opt(22, 0, 0).unwrap()
+        );
+        assert_eq!(end_local, chrono::NaiveTime::from_hms_opt(7, 0, 0).unwrap());
+        assert_eq!(actor, "operator@example.com");
+    }
+
+    #[test]
+    fn quiet_hours_set_rejects_an_invalid_time() {
+        let result = Cli::try_parse_from([
+            "messgr-control",
+            "quiet-hours",
+            "set",
+            "--tenant-slug",
+            "acme",
+            "--start-local",
+            "25:99",
+            "--end-local",
+            "07:00",
+            "--actor",
+            "operator@example.com",
+        ]);
+
+        assert!(
+            result.is_err(),
+            "an invalid --start-local value must fail to parse"
+        );
+    }
+
+    #[test]
+    fn quiet_hours_show_parses() {
+        let cli = Cli::try_parse_from([
+            "messgr-control",
+            "quiet-hours",
+            "show",
+            "--tenant-slug",
+            "acme",
+        ])
+        .expect("parsing quiet-hours show must succeed");
+
+        let Command::QuietHours {
+            command: QuietHoursCommand::Show { tenant_slug },
+        } = cli.command
+        else {
+            panic!("expected QuietHours::Show");
+        };
+
+        assert_eq!(tenant_slug, "acme");
     }
 }
