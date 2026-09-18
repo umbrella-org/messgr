@@ -680,3 +680,4 @@ Run: `just build && just test && just lint`.
   today rather than a live gap in an already-claimed control.
 - 2026-09-18 — TO DO → READY: plan complete
 - 2026-09-18 — READY → IN DEVELOPMENT: picked up
+- 2026-09-18 — IN DEVELOPMENT → IN REVIEW: acceptance green
