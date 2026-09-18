@@ -38,6 +38,7 @@ Last updated: 2026-09-18
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
+| T-042 | Producer quotas and producer_usage enforcement | high | high | L | [] |  |
 
 ## TO DO (impact order, per child)
 
@@ -45,7 +46,6 @@ Last updated: 2026-09-18
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
-| T-042 | Producer quotas and producer_usage enforcement | high | high | L | [] |  |
 | T-043 | Quiet hours with jitter and DST handling | medium | medium | M | [] |  |
 
 ## DONE
