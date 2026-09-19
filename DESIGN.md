@@ -1,6 +1,6 @@
 # messgr — Design
 
-**Version 9** · 2026-09-17 · T-037 review: §7.2 corrected — the new `consent` erasure statement's placement ahead of `customer_address`'s own `UPDATE` was justified by a claim that `customer_id` gets zeroed there; it never is (§7.2 already says so), so the ordering was never load-bearing and the claim is removed
+**Version 10** · 2026-09-19 · T-043 review: §4/§6.1 corrected — `03-data-model.md` still described `quiet_hours_policy` as "not yet created", and `14-decisions-and-open-questions.md`'s Still-open #2 still posed "windows per region" as an undecided value rather than a structurally unreachable one; both now match T-043's shipped `scope = 'default'`-only resolver and `05-send-timing.md`'s existing correction note
 
 Centralized communications orchestration and audit ledger for customer messaging across SMS, email, and WhatsApp.
 

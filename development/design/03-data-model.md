@@ -464,8 +464,10 @@ fire — every request supplies its own `destination`, so nothing ever reads a p
 address closely enough to check its staleness. The column still exists in
 `migrations/tenant/0002_tenant_config.sql`; dropping it is a schema migration, not a documentation
 change, and is tracked as part of the ledger/queue schema remediation ticket rather than done here.
-`quiet_hours_policy` is an unrelated table not yet created (later ticket: quiet-hours
-resolution). `provider_config` ships in T-012, without a `tenant_id` column — corrected here to
+`quiet_hours_policy` is an unrelated table, created by T-043 with only its `scope = 'default'`
+row ever read or written — see `05-send-timing.md`'s §6.1 correction note for why the `segment`/
+`region` scopes it also carries are unreachable. `provider_config` ships in T-012, without a
+`tenant_id` column — corrected here to
 match the "no `tenant_id` inside a tenant-database table" convention `tenant_config` and
 `producer` already established (§2.1: the tenant is the database); the primary key is
 `(channel, priority)`. T-012 ships the table, a channel-agnostic `Sender` trait, and a generic
