@@ -14,6 +14,11 @@ use messgr::orphan_reconcile::reconcile::run_for_tenant as run_orphan_reconcile;
 use messgr::partition_lifecycle::lifecycle::run_for_tenant as run_partition_lifecycle;
 use messgr::producer::dev_pki;
 use messgr::producer::register::{disable_producer, list_producers, register_producer};
+use messgr::producer_quota::configure::{
+    add_producer_quota_override, list_producer_quota, list_producer_quota_overrides,
+    set_producer_quota,
+};
+use messgr::producer_quota::model::enforcement;
 use messgr::provider_config::configure::{list_provider_config, set_provider_config};
 use messgr::provider_config::model::ProviderConfigInput;
 use messgr::quiet_hours::configure::{set_quiet_hours_policy, show_quiet_hours_policy};
@@ -118,6 +123,13 @@ enum Command {
     Consent {
         #[command(subcommand)]
         command: ConsentCommand,
+    },
+    /// Set, list producer send quotas, and add/list time-boxed per-day
+    /// overrides (DESIGN.md §5.1, T-042), enforced by `messgr-dispatcher`'s
+    /// quota gate at dispatch time.
+    ProducerQuota {
+        #[command(subcommand)]
+        command: ProducerQuotaCommand,
     },
     /// Set or show the tenant's institution-wide quiet-hours window (DESIGN.md
     /// §5, §6.1, T-043), enforced by `messgr-dispatcher`'s quiet-hours gate at
@@ -530,6 +542,103 @@ enum QuietHoursCommand {
     },
     /// Show the tenant's quiet-hours window, or report that none is set.
     Show {
+        #[arg(long = "tenant-slug")]
+        tenant_slug: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum ProducerQuotaCommand {
+    /// Set (create or update) one (producer, channel, class) quota row.
+    /// `auth` is never a legal `--class` value (AGENTS.md invariant 5: quota
+    /// must never block auth traffic); `--enforcement hard` is rejected for
+    /// `transactional` for the same reason.
+    Set {
+        #[arg(long = "tenant-slug")]
+        tenant_slug: String,
+        #[arg(long = "producer-name")]
+        producer_name: String,
+        #[arg(
+            long,
+            value_parser = clap::builder::PossibleValuesParser::new([
+                channel::SMS,
+                channel::EMAIL,
+                channel::WHATSAPP,
+            ])
+        )]
+        channel: String,
+        #[arg(
+            long,
+            value_parser = clap::builder::PossibleValuesParser::new([
+                class::MARKETING,
+                class::TRANSACTIONAL,
+            ])
+        )]
+        class: String,
+        /// Burst ceiling; omit for unlimited.
+        #[arg(long = "per-minute")]
+        per_minute: Option<i32>,
+        /// Daily total; omit for unlimited.
+        #[arg(long = "per-day")]
+        per_day: Option<i32>,
+        #[arg(
+            long,
+            value_parser = clap::builder::PossibleValuesParser::new([
+                enforcement::HARD,
+                enforcement::SOFT,
+            ])
+        )]
+        enforcement: String,
+        #[arg(long)]
+        actor: String,
+    },
+    /// List every producer_quota row for a tenant.
+    List {
+        #[arg(long = "tenant-slug")]
+        tenant_slug: String,
+    },
+    /// Add a time-boxed per_day uplift (e.g. a campaign day). Raises
+    /// `per_day` only -- `enforcement` is always inherited from the base
+    /// `producer_quota` row.
+    OverrideAdd {
+        #[arg(long = "tenant-slug")]
+        tenant_slug: String,
+        #[arg(long = "producer-name")]
+        producer_name: String,
+        #[arg(
+            long,
+            value_parser = clap::builder::PossibleValuesParser::new([
+                channel::SMS,
+                channel::EMAIL,
+                channel::WHATSAPP,
+            ])
+        )]
+        channel: String,
+        #[arg(
+            long,
+            value_parser = clap::builder::PossibleValuesParser::new([
+                class::MARKETING,
+                class::TRANSACTIONAL,
+            ])
+        )]
+        class: String,
+        #[arg(long = "per-day")]
+        per_day: i32,
+        /// RFC 3339 timestamp; the override starts applying at this instant.
+        #[arg(long = "valid-from")]
+        valid_from: String,
+        /// RFC 3339 timestamp; the override stops applying at this instant.
+        #[arg(long = "valid-to")]
+        valid_to: String,
+        #[arg(long = "approved-by")]
+        approved_by: String,
+        #[arg(long)]
+        reason: String,
+        #[arg(long)]
+        actor: String,
+    },
+    /// List every producer_quota_override row for a tenant.
+    OverrideList {
         #[arg(long = "tenant-slug")]
         tenant_slug: String,
     },
@@ -1213,6 +1322,147 @@ async fn run(
                         )
                     })?;
                     println!("outcome={}", outcome.outcome);
+                }
+            }
+        }
+        // No Vault client here either — nothing in producer_quota computes
+        // an HMAC or reads a KV secret.
+        Command::ProducerQuota { command } => {
+            match command {
+                ProducerQuotaCommand::Set {
+                    tenant_slug,
+                    producer_name,
+                    channel,
+                    class,
+                    per_minute,
+                    per_day,
+                    enforcement,
+                    actor,
+                } => {
+                    let outcome = set_producer_quota(
+                    &control_pool,
+                    &config.control_database_url,
+                    &tenant_slug,
+                    &producer_name,
+                    &channel,
+                    &class,
+                    per_minute,
+                    per_day,
+                    &enforcement,
+                    &actor,
+                )
+                .await
+                .map_err(|err| {
+                    format!(
+                        "failed to set producer quota for tenant {tenant_slug:?}: {err}"
+                    )
+                })?;
+                    println!("outcome={}", outcome.outcome);
+                }
+                ProducerQuotaCommand::List { tenant_slug } => {
+                    let rows = list_producer_quota(
+                    &control_pool,
+                    &config.control_database_url,
+                    &tenant_slug,
+                )
+                .await
+                .map_err(|err| {
+                    format!("failed to list producer quotas for tenant {tenant_slug:?}: {err}")
+                })?;
+                    if rows.is_empty() {
+                        println!("no producer_quota rows for tenant {tenant_slug}");
+                    } else {
+                        for row in rows {
+                            println!(
+                                "producer_id={} channel={} class={} per_minute={} per_day={} enforcement={}",
+                                row.producer_id,
+                                row.channel,
+                                row.class,
+                                row.per_minute
+                                    .map_or("unlimited".to_string(), |v| v.to_string()),
+                                row.per_day
+                                    .map_or("unlimited".to_string(), |v| v.to_string()),
+                                row.enforcement,
+                            );
+                        }
+                    }
+                }
+                ProducerQuotaCommand::OverrideAdd {
+                    tenant_slug,
+                    producer_name,
+                    channel,
+                    class,
+                    per_day,
+                    valid_from,
+                    valid_to,
+                    approved_by,
+                    reason,
+                    actor,
+                } => {
+                    let valid_from = DateTime::parse_from_rfc3339(&valid_from)
+                    .map(|dt| dt.with_timezone(&Utc))
+                    .map_err(|err| {
+                        format!("invalid --valid-from {valid_from:?} (expected RFC 3339): {err}")
+                    })?;
+                    let valid_to = DateTime::parse_from_rfc3339(&valid_to)
+                    .map(|dt| dt.with_timezone(&Utc))
+                    .map_err(|err| {
+                        format!("invalid --valid-to {valid_to:?} (expected RFC 3339): {err}")
+                    })?;
+                    let id = add_producer_quota_override(
+                    &control_pool,
+                    &config.control_database_url,
+                    &tenant_slug,
+                    &producer_name,
+                    &channel,
+                    &class,
+                    per_day,
+                    valid_from,
+                    valid_to,
+                    &approved_by,
+                    &reason,
+                    &actor,
+                )
+                .await
+                .map_err(|err| {
+                    format!(
+                        "failed to add producer quota override for tenant {tenant_slug:?}: {err}"
+                    )
+                })?;
+                    println!("id={id}");
+                }
+                ProducerQuotaCommand::OverrideList { tenant_slug } => {
+                    let rows = list_producer_quota_overrides(
+                    &control_pool,
+                    &config.control_database_url,
+                    &tenant_slug,
+                )
+                .await
+                .map_err(|err| {
+                    format!(
+                        "failed to list producer quota overrides for tenant {tenant_slug:?}: {err}"
+                    )
+                })?;
+                    if rows.is_empty() {
+                        println!(
+                            "no producer_quota_override rows for tenant {tenant_slug}"
+                        );
+                    } else {
+                        for row in rows {
+                            println!(
+                                "id={} producer_id={} channel={} class={} per_day={} valid_from={} valid_to={} approved_by={} reason={}",
+                                row.id,
+                                row.producer_id,
+                                row.channel,
+                                row.class,
+                                row.per_day,
+                                row.valid_from,
+                                row.valid_to,
+                                row.approved_by,
+                                row.reason,
+                            );
+                        }
+                    }
                 }
             }
         }

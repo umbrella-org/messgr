@@ -25,6 +25,10 @@ use messgr::ingest::repo::insert_transactional;
 use messgr::key_cache::KeyCache;
 use messgr::keystore::VaultKeyStore;
 use messgr::kill_switch::cache::{ChannelExclusion, KillSwitchCache};
+use messgr::producer::register::register_producer;
+use messgr::producer_quota::configure::set_producer_quota;
+use messgr::producer_quota::model::enforcement;
+use messgr::producer_quota::tracker::QuotaTracker;
 use messgr::profile::Profile;
 use messgr::quiet_hours::model::QuietHoursPolicy;
 use messgr::sender::Sender;
@@ -212,6 +216,7 @@ async fn write_outbox_row_with_verification(
     verified_at: Option<DateTime<Utc>>,
     destination_hmac: &[u8],
     expires_at: Option<DateTime<Utc>>,
+    producer_id: Uuid,
 ) -> (Uuid, DateTime<Utc>, Uuid) {
     let tenant_id =
         messgr::tenant::repo::find_by_slug(&tenant.control_pool, &tenant.slug)
@@ -263,7 +268,7 @@ async fn write_outbox_row_with_verification(
         destination_hmac,
         &destination_ciphertext,
         &payload_ciphertext,
-        Uuid::new_v4(),
+        producer_id,
         address_id,
         None,
         expires_at,
@@ -308,6 +313,7 @@ async fn write_ready_outbox_row(
         Some(Utc::now()),
         b"unused-hmac",
         None,
+        Uuid::new_v4(),
     )
     .await
 }
@@ -334,6 +340,7 @@ async fn write_outbox_row_with_hmac(
         Some(Utc::now()),
         destination_hmac,
         None,
+        Uuid::new_v4(),
     )
     .await
 }
@@ -376,6 +383,8 @@ async fn successful_send_writes_sent_event_and_final_status_and_deletes_the_outb
         quiet_hours_policy: None,
         kill_switches: Arc::new(KillSwitchCache::new()),
         draining: Arc::new(RwLock::new(HashMap::new())),
+        quota_day_boundary_tz: "UTC".to_string(),
+        quota: Arc::new(QuotaTracker::new("UTC")),
     };
 
     let claimed = repo::claim(
@@ -466,6 +475,8 @@ async fn terminal_provider_rejection_writes_failed_event_and_final_status_with_n
         quiet_hours_policy: None,
         kill_switches: Arc::new(KillSwitchCache::new()),
         draining: Arc::new(RwLock::new(HashMap::new())),
+        quota_day_boundary_tz: "UTC".to_string(),
+        quota: Arc::new(QuotaTracker::new("UTC")),
     };
 
     let claimed = repo::claim(
@@ -555,6 +566,8 @@ async fn transient_provider_failure_requeues_with_cleared_lease_and_backoff() {
         quiet_hours_policy: None,
         kill_switches: Arc::new(KillSwitchCache::new()),
         draining: Arc::new(RwLock::new(HashMap::new())),
+        quota_day_boundary_tz: "UTC".to_string(),
+        quota: Arc::new(QuotaTracker::new("UTC")),
     };
 
     let claimed = repo::claim(
@@ -643,6 +656,8 @@ async fn transient_http_failure_requeues() {
         quiet_hours_policy: None,
         kill_switches: Arc::new(KillSwitchCache::new()),
         draining: Arc::new(RwLock::new(HashMap::new())),
+        quota_day_boundary_tz: "UTC".to_string(),
+        quota: Arc::new(QuotaTracker::new("UTC")),
     };
 
     let claimed = repo::claim(
@@ -711,6 +726,8 @@ async fn retries_exhausted_after_max_attempts_terminal_fails() {
         quiet_hours_policy: None,
         kill_switches: Arc::new(KillSwitchCache::new()),
         draining: Arc::new(RwLock::new(HashMap::new())),
+        quota_day_boundary_tz: "UTC".to_string(),
+        quota: Arc::new(QuotaTracker::new("UTC")),
     };
 
     let mut claimed = repo::claim(
@@ -813,6 +830,8 @@ async fn seventh_attempt_still_reschedules_one_short_of_the_cap() {
         quiet_hours_policy: None,
         kill_switches: Arc::new(KillSwitchCache::new()),
         draining: Arc::new(RwLock::new(HashMap::new())),
+        quota_day_boundary_tz: "UTC".to_string(),
+        quota: Arc::new(QuotaTracker::new("UTC")),
     };
 
     let mut claimed = repo::claim(
@@ -898,6 +917,8 @@ async fn attempts_past_the_cap_still_terminal_fails() {
         quiet_hours_policy: None,
         kill_switches: Arc::new(KillSwitchCache::new()),
         draining: Arc::new(RwLock::new(HashMap::new())),
+        quota_day_boundary_tz: "UTC".to_string(),
+        quota: Arc::new(QuotaTracker::new("UTC")),
     };
 
     let mut claimed = repo::claim(
@@ -1132,6 +1153,7 @@ async fn enforce_blocks_unverified_address_with_terminal_event_and_no_send() {
             None,
             b"unused-hmac",
             None,
+            Uuid::new_v4(),
         )
         .await;
 
@@ -1148,6 +1170,8 @@ async fn enforce_blocks_unverified_address_with_terminal_event_and_no_send() {
         quiet_hours_policy: None,
         kill_switches: Arc::new(KillSwitchCache::new()),
         draining: Arc::new(RwLock::new(HashMap::new())),
+        quota_day_boundary_tz: "UTC".to_string(),
+        quota: Arc::new(QuotaTracker::new("UTC")),
     };
 
     let claimed = repo::claim(
@@ -1230,6 +1254,7 @@ async fn observe_records_unverified_address_and_still_sends() {
             None,
             b"unused-hmac",
             None,
+            Uuid::new_v4(),
         )
         .await;
 
@@ -1246,6 +1271,8 @@ async fn observe_records_unverified_address_and_still_sends() {
         quiet_hours_policy: None,
         kill_switches: Arc::new(KillSwitchCache::new()),
         draining: Arc::new(RwLock::new(HashMap::new())),
+        quota_day_boundary_tz: "UTC".to_string(),
+        quota: Arc::new(QuotaTracker::new("UTC")),
     };
 
     let claimed = repo::claim(
@@ -1333,6 +1360,7 @@ async fn verified_address_sends_normally_under_enforce() {
             Some(Utc::now()),
             b"unused-hmac",
             None,
+            Uuid::new_v4(),
         )
         .await;
 
@@ -1349,6 +1377,8 @@ async fn verified_address_sends_normally_under_enforce() {
         quiet_hours_policy: None,
         kill_switches: Arc::new(KillSwitchCache::new()),
         draining: Arc::new(RwLock::new(HashMap::new())),
+        quota_day_boundary_tz: "UTC".to_string(),
+        quota: Arc::new(QuotaTracker::new("UTC")),
     };
 
     let claimed = repo::claim(
@@ -1424,6 +1454,7 @@ async fn auth_class_skips_the_gate_even_when_unverified() {
             None,
             b"unused-hmac",
             None,
+            Uuid::new_v4(),
         )
         .await;
 
@@ -1440,6 +1471,8 @@ async fn auth_class_skips_the_gate_even_when_unverified() {
         quiet_hours_policy: None,
         kill_switches: Arc::new(KillSwitchCache::new()),
         draining: Arc::new(RwLock::new(HashMap::new())),
+        quota_day_boundary_tz: "UTC".to_string(),
+        quota: Arc::new(QuotaTracker::new("UTC")),
     };
 
     let claimed = repo::claim(
@@ -1550,6 +1583,8 @@ async fn an_active_suppression_entry_blocks_the_send() {
         quiet_hours_policy: None,
         kill_switches: Arc::new(KillSwitchCache::new()),
         draining: Arc::new(RwLock::new(HashMap::new())),
+        quota_day_boundary_tz: "UTC".to_string(),
+        quota: Arc::new(QuotaTracker::new("UTC")),
     };
 
     let claimed = repo::claim(
@@ -1648,6 +1683,8 @@ async fn an_expired_suppression_entry_no_longer_blocks() {
         quiet_hours_policy: None,
         kill_switches: Arc::new(KillSwitchCache::new()),
         draining: Arc::new(RwLock::new(HashMap::new())),
+        quota_day_boundary_tz: "UTC".to_string(),
+        quota: Arc::new(QuotaTracker::new("UTC")),
     };
 
     let claimed = repo::claim(
@@ -1715,6 +1752,7 @@ async fn expired_row_is_terminal_written_and_not_sent() {
             Some(Utc::now()),
             b"unused-hmac",
             Some(Utc::now() - chrono::Duration::minutes(5)),
+            Uuid::new_v4(),
         )
         .await;
 
@@ -1731,6 +1769,8 @@ async fn expired_row_is_terminal_written_and_not_sent() {
         quiet_hours_policy: None,
         kill_switches: Arc::new(KillSwitchCache::new()),
         draining: Arc::new(RwLock::new(HashMap::new())),
+        quota_day_boundary_tz: "UTC".to_string(),
+        quota: Arc::new(QuotaTracker::new("UTC")),
     };
 
     let claimed = repo::claim(
@@ -1818,6 +1858,7 @@ async fn marketing_without_any_consent_row_is_blocked_with_suppressed_consent() 
             Some(Utc::now()),
             unique_name("hmac").as_bytes(),
             None,
+            Uuid::new_v4(),
         )
         .await;
 
@@ -1834,6 +1875,8 @@ async fn marketing_without_any_consent_row_is_blocked_with_suppressed_consent() 
         quiet_hours_policy: None,
         kill_switches: Arc::new(KillSwitchCache::new()),
         draining: Arc::new(RwLock::new(HashMap::new())),
+        quota_day_boundary_tz: "UTC".to_string(),
+        quota: Arc::new(QuotaTracker::new("UTC")),
     };
 
     let claimed = repo::claim(
@@ -1913,6 +1956,7 @@ async fn marketing_with_an_explicit_opt_out_is_blocked() {
             Some(Utc::now()),
             unique_name("hmac").as_bytes(),
             None,
+            Uuid::new_v4(),
         )
         .await;
 
@@ -1929,6 +1973,8 @@ async fn marketing_with_an_explicit_opt_out_is_blocked() {
         quiet_hours_policy: None,
         kill_switches: Arc::new(KillSwitchCache::new()),
         draining: Arc::new(RwLock::new(HashMap::new())),
+        quota_day_boundary_tz: "UTC".to_string(),
+        quota: Arc::new(QuotaTracker::new("UTC")),
     };
 
     let claimed = repo::claim(
@@ -2016,6 +2062,7 @@ async fn marketing_with_an_explicit_opt_in_sends() {
             Some(Utc::now()),
             unique_name("hmac").as_bytes(),
             None,
+            Uuid::new_v4(),
         )
         .await;
 
@@ -2032,6 +2079,8 @@ async fn marketing_with_an_explicit_opt_in_sends() {
         quiet_hours_policy: None,
         kill_switches: Arc::new(KillSwitchCache::new()),
         draining: Arc::new(RwLock::new(HashMap::new())),
+        quota_day_boundary_tz: "UTC".to_string(),
+        quota: Arc::new(QuotaTracker::new("UTC")),
     };
 
     let claimed = repo::claim(
@@ -2115,6 +2164,7 @@ async fn transactional_sends_without_any_consent_row() {
             Some(Utc::now()),
             unique_name("hmac").as_bytes(),
             None,
+            Uuid::new_v4(),
         )
         .await;
 
@@ -2131,6 +2181,8 @@ async fn transactional_sends_without_any_consent_row() {
         quiet_hours_policy: None,
         kill_switches: Arc::new(KillSwitchCache::new()),
         draining: Arc::new(RwLock::new(HashMap::new())),
+        quota_day_boundary_tz: "UTC".to_string(),
+        quota: Arc::new(QuotaTracker::new("UTC")),
     };
 
     let claimed = repo::claim(
@@ -2225,6 +2277,8 @@ async fn cancelled_row_is_terminal_written_and_not_sent() {
         quiet_hours_policy: None,
         kill_switches: Arc::new(KillSwitchCache::new()),
         draining: Arc::new(RwLock::new(HashMap::new())),
+        quota_day_boundary_tz: "UTC".to_string(),
+        quota: Arc::new(QuotaTracker::new("UTC")),
     };
 
     let claimed = repo::claim(
@@ -2264,6 +2318,372 @@ async fn cancelled_row_is_terminal_written_and_not_sent() {
     tenant.cleanup().await;
 }
 
+/// Registers a producer directly against the tenant, with no mTLS cert
+/// issuance -- unlike `tests/kill_switch.rs`'s heavier `register_test_producer`,
+/// nothing in this suite exercises identity resolution.
+async fn register_test_producer_row(tenant: &TestTenant, name: &str) -> Uuid {
+    let control_url = control_database_url();
+    register_producer(
+        &tenant.control_pool,
+        &control_url,
+        &tenant.slug,
+        name,
+        &format!("CN={name}"),
+        "test-team",
+        "oncall@example.com",
+        "test-actor",
+    )
+    .await
+    .expect("registering producer failed")
+    .producer_id
+}
+
+#[tokio::test]
+async fn a_marketing_producer_over_its_per_minute_limit_is_deferred_not_terminal_failed()
+ {
+    let vault = vault_keystore();
+    let tenant = provision_test_tenant(&vault).await;
+    let cache = Arc::new(small_cache());
+    let control_url = control_database_url();
+
+    let producer_name = unique_name("quota-producer");
+    let producer_id = register_test_producer_row(&tenant, &producer_name).await;
+    set_producer_quota(
+        &tenant.control_pool,
+        &control_url,
+        &tenant.slug,
+        &producer_name,
+        "sms",
+        "marketing",
+        Some(1),
+        None,
+        enforcement::HARD,
+        "test-actor",
+    )
+    .await
+    .expect("setting producer quota failed");
+
+    let quota = QuotaTracker::new("UTC");
+    quota
+        .refresh_config(&tenant.tenant_pool, Utc::now())
+        .await
+        .expect("refreshing quota config failed");
+
+    let mock_server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/messages"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "message_id": "msg-quota-1",
+            "status": "queued",
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let sender: Arc<dyn Sender> =
+        Arc::new(HttpSender::new(mock_server.uri(), "test-key".to_string()));
+    let ctx = DispatcherContext {
+        pool: tenant.tenant_pool.clone(),
+        keystore: Arc::new(vault_keystore()),
+        cache: cache.clone(),
+        mount: tenant.mount.clone(),
+        sender,
+        verification_mode: "observe".to_string(),
+        default_timezone: "UTC".to_string(),
+        quiet_hours_policy: None,
+        kill_switches: Arc::new(KillSwitchCache::new()),
+        draining: Arc::new(RwLock::new(HashMap::new())),
+        quota_day_boundary_tz: "UTC".to_string(),
+        quota: Arc::new(quota),
+    };
+
+    let (first_id, _, _) = write_outbox_row_with_verification(
+        &tenant,
+        &vault,
+        &cache,
+        "+15550100",
+        "hello there",
+        "marketing",
+        Some(Utc::now()),
+        unique_name("hmac").as_bytes(),
+        None,
+        producer_id,
+    )
+    .await;
+
+    let claimed_first = repo::claim(
+        &tenant.tenant_pool,
+        "sms",
+        10,
+        Utc::now() + chrono::Duration::minutes(2),
+        &no_exclusion(),
+    )
+    .await
+    .expect("claim failed");
+    assert_eq!(claimed_first.len(), 1);
+    assert_eq!(claimed_first[0].comms_request_id, first_id);
+    insert_consent_row(
+        &tenant.tenant_pool,
+        claimed_first[0].address_id,
+        "marketing",
+        true,
+    )
+    .await;
+    try_process(&ctx, &claimed_first[0])
+        .await
+        .expect("try_process failed for first row");
+
+    let (second_id, second_created_at, _) = write_outbox_row_with_verification(
+        &tenant,
+        &vault,
+        &cache,
+        "+15550100",
+        "hello there",
+        "marketing",
+        Some(Utc::now()),
+        unique_name("hmac").as_bytes(),
+        None,
+        producer_id,
+    )
+    .await;
+
+    let claimed_second = repo::claim(
+        &tenant.tenant_pool,
+        "sms",
+        10,
+        Utc::now() + chrono::Duration::minutes(2),
+        &no_exclusion(),
+    )
+    .await
+    .expect("claim failed");
+    assert_eq!(claimed_second.len(), 1);
+    assert_eq!(claimed_second[0].comms_request_id, second_id);
+    insert_consent_row(
+        &tenant.tenant_pool,
+        claimed_second[0].address_id,
+        "marketing",
+        true,
+    )
+    .await;
+    try_process(&ctx, &claimed_second[0])
+        .await
+        .expect("try_process failed for second row");
+
+    let final_status: Option<String> = sqlx::query_scalar(
+        "SELECT final_status FROM comms_request WHERE created_at = $1 AND id = $2",
+    )
+    .bind(second_created_at)
+    .bind(second_id)
+    .fetch_one(&tenant.tenant_pool)
+    .await
+    .expect("fetching final_status failed");
+    assert_eq!(
+        final_status, None,
+        "a quota-deferred message must not be terminal-written"
+    );
+
+    let (leased_until, next_attempt_at): (Option<DateTime<Utc>>, DateTime<Utc>) = sqlx::query_as(
+        "SELECT leased_until, next_attempt_at FROM outbox WHERE comms_request_id = $1",
+    )
+    .bind(second_id)
+    .fetch_one(&tenant.tenant_pool)
+    .await
+    .expect("fetching outbox row failed");
+    assert_eq!(leased_until, None, "a quota defer must clear the lease");
+    assert!(
+        next_attempt_at > Utc::now(),
+        "a quota-deferred message must be rescheduled into the future"
+    );
+
+    tenant.cleanup().await;
+}
+
+#[tokio::test]
+async fn a_transactional_producer_over_its_per_minute_limit_still_sends_and_is_counted()
+{
+    let vault = vault_keystore();
+    let tenant = provision_test_tenant(&vault).await;
+    let cache = Arc::new(small_cache());
+    let control_url = control_database_url();
+
+    let producer_name = unique_name("quota-producer-soft");
+    let producer_id = register_test_producer_row(&tenant, &producer_name).await;
+    set_producer_quota(
+        &tenant.control_pool,
+        &control_url,
+        &tenant.slug,
+        &producer_name,
+        "sms",
+        "transactional",
+        Some(1),
+        None,
+        enforcement::SOFT,
+        "test-actor",
+    )
+    .await
+    .expect("setting producer quota failed");
+
+    let quota = QuotaTracker::new("UTC");
+    quota
+        .refresh_config(&tenant.tenant_pool, Utc::now())
+        .await
+        .expect("refreshing quota config failed");
+
+    let mock_server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/messages"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "message_id": "msg-quota-2",
+            "status": "queued",
+        })))
+        .expect(2)
+        .mount(&mock_server)
+        .await;
+
+    let sender: Arc<dyn Sender> =
+        Arc::new(HttpSender::new(mock_server.uri(), "test-key".to_string()));
+    let ctx = DispatcherContext {
+        pool: tenant.tenant_pool.clone(),
+        keystore: Arc::new(vault_keystore()),
+        cache: cache.clone(),
+        mount: tenant.mount.clone(),
+        sender,
+        verification_mode: "observe".to_string(),
+        default_timezone: "UTC".to_string(),
+        quiet_hours_policy: None,
+        kill_switches: Arc::new(KillSwitchCache::new()),
+        draining: Arc::new(RwLock::new(HashMap::new())),
+        quota_day_boundary_tz: "UTC".to_string(),
+        quota: Arc::new(quota),
+    };
+
+    for _ in 0..2 {
+        let (comms_request_id, created_at, _) = write_outbox_row_with_verification(
+            &tenant,
+            &vault,
+            &cache,
+            "+15550100",
+            "hello there",
+            "transactional",
+            Some(Utc::now()),
+            unique_name("hmac").as_bytes(),
+            None,
+            producer_id,
+        )
+        .await;
+
+        let claimed = repo::claim(
+            &tenant.tenant_pool,
+            "sms",
+            10,
+            Utc::now() + chrono::Duration::minutes(2),
+            &no_exclusion(),
+        )
+        .await
+        .expect("claim failed");
+        assert_eq!(claimed.len(), 1);
+        assert_eq!(claimed[0].comms_request_id, comms_request_id);
+        try_process(&ctx, &claimed[0])
+            .await
+            .expect("try_process failed");
+
+        let final_status: Option<String> = sqlx::query_scalar(
+            "SELECT final_status FROM comms_request WHERE created_at = $1 AND id = $2",
+        )
+        .bind(created_at)
+        .bind(comms_request_id)
+        .fetch_one(&tenant.tenant_pool)
+        .await
+        .expect("fetching final_status failed");
+        assert_eq!(
+            final_status.as_deref(),
+            Some("sent"),
+            "AGENTS.md invariant 5: quota must never block transactional traffic, \
+             even over a soft limit"
+        );
+    }
+
+    tenant.cleanup().await;
+}
+
+#[tokio::test]
+async fn a_producer_with_no_configured_quota_row_is_never_blocked() {
+    let vault = vault_keystore();
+    let tenant = provision_test_tenant(&vault).await;
+    let cache = Arc::new(small_cache());
+
+    let producer_id =
+        register_test_producer_row(&tenant, &unique_name("quota-unconfigured")).await;
+
+    let mock_server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/messages"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "message_id": "msg-quota-3",
+            "status": "queued",
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let sender: Arc<dyn Sender> =
+        Arc::new(HttpSender::new(mock_server.uri(), "test-key".to_string()));
+    let ctx = DispatcherContext {
+        pool: tenant.tenant_pool.clone(),
+        keystore: Arc::new(vault_keystore()),
+        cache: cache.clone(),
+        mount: tenant.mount.clone(),
+        sender,
+        verification_mode: "observe".to_string(),
+        default_timezone: "UTC".to_string(),
+        quiet_hours_policy: None,
+        kill_switches: Arc::new(KillSwitchCache::new()),
+        draining: Arc::new(RwLock::new(HashMap::new())),
+        quota_day_boundary_tz: "UTC".to_string(),
+        quota: Arc::new(QuotaTracker::new("UTC")),
+    };
+
+    let (comms_request_id, created_at, _) = write_outbox_row_with_verification(
+        &tenant,
+        &vault,
+        &cache,
+        "+15550100",
+        "hello there",
+        "transactional",
+        Some(Utc::now()),
+        unique_name("hmac").as_bytes(),
+        None,
+        producer_id,
+    )
+    .await;
+
+    let claimed = repo::claim(
+        &tenant.tenant_pool,
+        "sms",
+        10,
+        Utc::now() + chrono::Duration::minutes(2),
+        &no_exclusion(),
+    )
+    .await
+    .expect("claim failed");
+    assert_eq!(claimed.len(), 1);
+    try_process(&ctx, &claimed[0])
+        .await
+        .expect("try_process failed");
+
+    let final_status: Option<String> = sqlx::query_scalar(
+        "SELECT final_status FROM comms_request WHERE created_at = $1 AND id = $2",
+    )
+    .bind(created_at)
+    .bind(comms_request_id)
+    .fetch_one(&tenant.tenant_pool)
+    .await
+    .expect("fetching final_status failed");
+    assert_eq!(final_status.as_deref(), Some("sent"));
+
+    tenant.cleanup().await;
+}
+
 #[tokio::test]
 async fn a_send_during_quiet_hours_is_deferred_to_window_end_plus_jitter() {
     let vault = vault_keystore();
@@ -2292,6 +2712,7 @@ async fn a_send_during_quiet_hours_is_deferred_to_window_end_plus_jitter() {
             Some(Utc::now()),
             unique_name("hmac").as_bytes(),
             None,
+            Uuid::new_v4(),
         )
         .await;
 
@@ -2321,6 +2742,8 @@ async fn a_send_during_quiet_hours_is_deferred_to_window_end_plus_jitter() {
         quiet_hours_policy: Some(policy),
         kill_switches: Arc::new(KillSwitchCache::new()),
         draining: Arc::new(RwLock::new(HashMap::new())),
+        quota_day_boundary_tz: "UTC".to_string(),
+        quota: Arc::new(QuotaTracker::new("UTC")),
     };
 
     let claimed = repo::claim(
@@ -2404,6 +2827,7 @@ async fn a_send_outside_quiet_hours_is_unaffected() {
             Some(Utc::now()),
             unique_name("hmac").as_bytes(),
             None,
+            Uuid::new_v4(),
         )
         .await;
 
@@ -2432,6 +2856,8 @@ async fn a_send_outside_quiet_hours_is_unaffected() {
         quiet_hours_policy: Some(policy),
         kill_switches: Arc::new(KillSwitchCache::new()),
         draining: Arc::new(RwLock::new(HashMap::new())),
+        quota_day_boundary_tz: "UTC".to_string(),
+        quota: Arc::new(QuotaTracker::new("UTC")),
     };
 
     let claimed = repo::claim(

@@ -38,6 +38,7 @@ use messgr::mtls::{self, ClientCertAcceptor};
 use messgr::producer::cert_repo;
 use messgr::producer::dev_pki;
 use messgr::producer::register::register_producer;
+use messgr::producer_quota::tracker::QuotaTracker;
 use messgr::profile::Profile;
 use messgr::sender::Sender;
 use messgr::sender::http::HttpSender;
@@ -526,6 +527,8 @@ async fn drain_sends_every_row_and_marks_an_already_expired_one_expired_instead(
         quiet_hours_policy: None,
         kill_switches: Arc::new(KillSwitchCache::new()),
         draining: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
+        quota_day_boundary_tz: "UTC".to_string(),
+        quota: Arc::new(QuotaTracker::new("UTC")),
     });
 
     drain_released_scope(ctx, "sms".to_string(), released_switch, 10).await;

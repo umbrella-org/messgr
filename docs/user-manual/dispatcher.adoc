@@ -69,27 +69,45 @@ defaults to not-opted-in, the same outcome as an explicit `opted_in = false` row
 blocks the send and writes a terminal `suppressed_consent` event/status. See "Consent"
 (control-plane CLI) for recording entries.
 
-`T-043` adds the quiet-hours gate (DESIGN.md §5, §6.1), checked right after consent, before
-decrypt: a customer inside their configured quiet-hours window has the send deferred rather than
-sent or blocked -- `outbox.next_attempt_at` is pushed to window end plus up to 30 minutes of
-uniform jitter (avoiding a thundering herd at the window's exact close) and the lease is cleared,
-the same non-terminal reschedule T-021's retry path already uses; no terminal event is written.
-The customer's timezone (`customer.timezone`) resolves the window, falling back to the tenant's
-`tenant_config.default_timezone` when the customer's own timezone fails to parse as a real IANA
-zone; if the tenant default *also* fails to parse, the gate is skipped and the send proceeds --
-a courtesy control's own bad configuration must not become an availability risk. Windows resolve
-through a real tz database (`chrono-tz`), rounding a non-existent spring-forward local time
-forward to the next valid instant. Both `default_timezone` and the quiet-hours window are read
-once at dispatcher startup, like `verification_mode`; a configured window is a no-op until an
-operator sets one. See "Quiet hours" (control-plane CLI) for managing the window.
+`T-042` adds the producer quota gate (DESIGN.md §5.1), checked right after consent, before
+quiet hours/decrypt -- the same "cheapest first" placement as every gate above: a message already
+going to be blocked for an unrelated reason never spends quota budget, and a quota-deferred
+message spends no Vault/DEK work. Enforcement is per `(producer, channel, class)`: `marketing` is
+`hard` or `soft` depending on how the row was configured; `transactional` is always `soft` -- send
+anyway and log a warning -- since quota can never block transactional traffic (AGENTS.md hard
+invariant 5); `auth` is exempt from enforcement entirely but still counted, so its volume stays
+visible. A `hard` breach reschedules the row to the start of the next window (day takes precedence
+over minute) rather than terminal-failing it -- the same defer-not-discard treatment a retryable
+send failure gets. Counters are an in-process map behind a single `QuotaTracker` per tenant (safe
+without coordination only because T-039 guarantees one active dispatcher per tenant), flushed to
+`producer_usage` every 5 seconds and rebuilt from that table after acquiring leadership, so a
+restart mid-window does not reset a producer's allowance to zero. The per-day window resets at
+local midnight in `tenant_config.quota_day_boundary_tz`; the per-minute window is a plain UTC
+minute. See "Producer quotas" (control-plane CLI) for configuring limits and overrides.
+
+`T-043` adds the quiet-hours gate (DESIGN.md §5, §6.1), checked right after the producer quota
+gate above -- an in-process counter check, so it runs ahead of this gate's own DB round trip on
+the same cheapest-first principle -- and before decrypt: a customer inside their configured
+quiet-hours window has the send deferred rather than sent or blocked -- `outbox.next_attempt_at`
+is pushed to window end plus up to 30 minutes of uniform jitter (avoiding a thundering herd at the
+window's exact close) and the lease is cleared, the same non-terminal reschedule T-021's retry
+path already uses; no terminal event is written. The customer's timezone (`customer.timezone`)
+resolves the window, falling back to the tenant's `tenant_config.default_timezone` when the
+customer's own timezone fails to parse as a real IANA zone; if the tenant default *also* fails to
+parse, the gate is skipped and the send proceeds -- a courtesy control's own bad configuration
+must not become an availability risk. Windows resolve through a real tz database (`chrono-tz`),
+rounding a non-existent spring-forward local time forward to the next valid instant. Both
+`default_timezone` and the quiet-hours window are read once at dispatcher startup, like
+`verification_mode`; a configured window is a no-op until an operator sets one. See "Quiet hours"
+(control-plane CLI) for managing the window.
 
 `T-041` adds the cancellation re-check (DESIGN.md §6.2), run last -- immediately before the
-provider call, not alongside the Expiry/Suppression/Verification/Consent/Quiet-hours gates above.
-Those five run early specifically to skip wasted decrypt/DEK work on a message already known dead
-or deferred; this check exists to close a different race instead -- `DELETE /comms/{id}` (see
-"messgr-ingest") can land at any point up to send, including after every earlier gate has already
-passed, so only a
-check placed last, re-reading `outbox.cancelled_at` fresh from the database rather than the
+provider call, not alongside the Expiry/Suppression/Verification/Consent/Producer quota/Quiet-hours
+gates above. Those six run early specifically to skip wasted decrypt/DEK work on a message already
+known dead or deferred; this check exists to close a different race instead -- `DELETE /comms/{id}`
+(see "messgr-ingest") can land at any point up to send, including after every earlier gate has
+already passed, so only a check placed last, re-reading `outbox.cancelled_at` fresh from the
+database rather than the
 claim-time snapshot, can catch it. A cancelled row is terminal-written `cancelled` and the
 provider is never called.
 

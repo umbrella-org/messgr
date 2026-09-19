@@ -275,6 +275,39 @@ evidence of where the choice was captured (e.g. `web_form`, `ivr_call`, `branch_
 idempotent, same `created`/`updated`/`idempotent` outcome and `platform_audit` trail as
 `suppression add`/`tenant-config set`.
 
+== Producer quotas
+
+[source,bash]
+----
+cargo run --bin messgr-control -- producer-quota set --tenant-slug acme \
+    --producer-name marketing-service --channel sms --class marketing \
+    --per-minute 50 --per-day 5000 --enforcement hard --actor operator@example.com
+cargo run --bin messgr-control -- producer-quota list --tenant-slug acme
+cargo run --bin messgr-control -- producer-quota override-add --tenant-slug acme \
+    --producer-name marketing-service --channel sms --class marketing \
+    --per-day 20000 --valid-from 2027-01-01T00:00:00Z --valid-to 2027-01-02T00:00:00Z \
+    --approved-by ops-lead --reason "New Year campaign day" --actor operator@example.com
+cargo run --bin messgr-control -- producer-quota override-list --tenant-slug acme
+----
+
+`producer-quota` (DESIGN.md §5.1, T-042) sets a producer's per-minute burst and per-day total
+send quota for one `(channel, class)`, enforced by `messgr-dispatcher`'s quota gate at dispatch
+time -- never at ingest. `--channel` is closed to `sms`/`email`/`whatsapp`; `--class` is closed
+to `marketing`/`transactional` -- **`auth` is never a legal `--class` value here**: auth traffic
+is exempt from quota but always counted unconditionally, so a quota row for it would be
+meaningless. `--per-minute`/`--per-day` are each optional; omitting either means unlimited on
+that window. `--enforcement` is closed to `hard`/`soft`, with one restriction: `hard` is
+rejected for `class = transactional` (AGENTS.md hard invariant 5 -- quota must never be able to
+block transactional traffic); `marketing` may be `hard` or `soft`. Re-running `set` with
+identical inputs is idempotent, same `created`/`updated`/`idempotent` outcome and
+`platform_audit` trail as `suppression add`/`consent set`.
+
+`override-add` raises `--per-day` only for a time-boxed window (`--valid-from`/`--valid-to`,
+both mandatory RFC 3339 timestamps) -- it never touches `enforcement`, which is always inherited
+from the base `producer-quota set` row. It is rejected for `class = auth` (same reason as
+`set`), or if `--valid-to` is not after `--valid-from`. `override-list` prints every override
+for a tenant, newest `--valid-from` first.
+
 == Quiet hours
 
 [source,bash]
