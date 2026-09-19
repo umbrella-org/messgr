@@ -53,9 +53,9 @@ specifically because it proposed an *unauthenticated* web server — directly ag
 guard. Those prerequisite tickets are now all in `6-done/`; this ticket is the real §11/§11.2
 surface, not a repeat of that shortcut.
 
-Soft coupling: T-049 (admin panel) is explicitly "same binary, same server-rendered stack"
-(§11.3) — it extends whatever this ticket stands up rather than being independent of it. See
-T-049's Description for why that isn't set as a hard `depends-on:` here without your sign-off.
+Coupling: T-049 (admin panel) is explicitly "same binary, same server-rendered stack" (§11.3)
+— it extends whatever this ticket stands up and carries a hard `depends-on: [T-048]` (this
+ticket) for that reason.
 
 Out of scope: `messgr-control` / platform console (§11.4, already separate, different binary
 and auth realm), the rollup/OLAP tier (explicitly deferred), real OIDC discovery/JWKS wiring

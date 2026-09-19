@@ -2,7 +2,7 @@
 id: T-049
 title: Admin panel: quota dashboard, kill-switch console, scheduled queue, producer registry
 project: messgr
-depends-on: []
+depends-on: [T-048]
 spawned-by: []
 impact: high
 complexity: medium
@@ -45,12 +45,9 @@ query API/UI (T-048, §11.3), gated to the `comms_ops` and `admin` roles that ti
   T-005's registry and T-042's quota-override machinery). Every mutation audited with actor,
   timestamp, before/after values.
 
-**Likely hard dependency — flagging for your sign-off, not set in frontmatter yet.** §11.3 opens
-with "same binary, same server-rendered stack" as the query-api/UI T-048 stands up — this
-panel's routes need T-048's `AuthProvider`/role-gating in place to be gated at all, not just to
-share a process. That reads as a hard `depends-on: [T-048]`, but rules restrict adding hard
-dependencies to user sign-off, so it's left as a soft coupling here for you to confirm at
-refinement (or now, if you'd rather set it immediately).
+**Hard dependency on T-048 (`depends-on:`, user-confirmed).** §11.3 opens with "same binary,
+same server-rendered stack" as the query-api/UI T-048 stands up — this panel's routes need
+T-048's `AuthProvider`/role-gating in place to be gated at all, not just to share a process.
 
 Out of scope: template approval and quiet-hours-policy UI (mentioned in the `admin` role's
 scope in §11.1 but not itemized under §11.3's four admin-panel items above — confirm at
@@ -69,3 +66,4 @@ two-person approval for the auth switch (flagged above as an open call, not deci
 ## History
 
 - 2026-09-19 — created (TO DO). source: audit: build-order step 14, remaining gap identified when auditing unticketed steps against the board
+- 2026-09-19 — added hard depends-on: [T-048], user-confirmed (shared binary + role-gating, §11.3)
