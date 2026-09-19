@@ -13,18 +13,18 @@ Last updated: 2026-09-19
 
 ## IN DEVELOPMENT
 
+### messgr (0/1)
+
+| id | title | depends-on |
+|---|---|---|
+
+## IN REVIEW
+
 ### messgr (1/1)
 
 | id | title | depends-on |
 |---|---|---|
 | T-047 | Webhook receiver and delivery-receipt ingestion (messgr-webhook) | [] |
-
-## IN REVIEW
-
-### messgr (0/1)
-
-| id | title | depends-on |
-|---|---|---|
 
 ## REWORK
 

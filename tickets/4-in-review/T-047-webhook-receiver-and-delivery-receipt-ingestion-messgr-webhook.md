@@ -278,3 +278,4 @@ See Task 7 above.
 - 2026-09-19 — created (TO DO). source: audit: build-order step 12, remaining gap identified when auditing unticketed steps against the board
 - 2026-09-19 — TO DO → READY: plan complete
 - 2026-09-19 — READY → IN DEVELOPMENT: picked up
+- 2026-09-19 — IN DEVELOPMENT → IN REVIEW: acceptance green
