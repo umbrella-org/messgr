@@ -279,3 +279,4 @@ cost: estimated S, actual S
 - 2026-09-19 — READY → IN DEVELOPMENT: picked up
 - 2026-09-19 — IN DEVELOPMENT → IN REVIEW: acceptance green
 - 2026-09-19 — IN REVIEW → DONE: 0 findings — verified end to end
+- 2026-09-19 — MERGED: PR #61 (`feat/T-046-remaining-channels-email-and-whatsapp-senders`, 65b99f8) into `main`
