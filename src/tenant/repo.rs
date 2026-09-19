@@ -39,6 +39,25 @@ pub async fn find_by_id(
     .await
 }
 
+/// Looks up a tenant by its public `webhook_token` (§4.11) -- the only
+/// identity `messgr-webhook` resolves a caller by (never the tenant slug,
+/// so a public callback path leaks nothing, T-047).
+pub async fn find_by_webhook_token(
+    pool: &PgPool,
+    webhook_token: &str,
+) -> Result<Option<Tenant>, sqlx::Error> {
+    sqlx::query_as::<_, Tenant>(
+        r#"
+        SELECT id, slug, region, database_name, vault_mount, vault_role_id, vault_pepper_wrapped, webhook_token, status, created_at
+        FROM tenant
+        WHERE webhook_token = $1
+        "#,
+    )
+    .bind(webhook_token)
+    .fetch_optional(pool)
+    .await
+}
+
 /// Persists the public AppRole RoleID Vault issued for this tenant
 /// (`tenant.vault_role_id`, T-004). Never called with a SecretID — that is
 /// never a column (DESIGN.md §7.6, this ticket's decision 2).

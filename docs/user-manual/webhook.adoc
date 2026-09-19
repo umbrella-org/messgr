@@ -1,0 +1,90 @@
+= messgr-webhook: `POST /webhook/{webhook_token}/{provider}`
+
+`messgr-webhook` (`T-047`) is the one internet-facing binary in an otherwise internal system
+(DESIGN.md §10): a delivery-receipt/bounce/complaint callback from an SMS/email/WhatsApp provider
+arrives here, in the DMZ, and nowhere else. Deliberately narrow -- signature verification and a
+single, narrowly-scoped DB write, nothing else. It routes on the tenant's opaque
+`tenant.webhook_token` (`03-data-model.md` §4.11), never the tenant slug -- an unauthenticated
+caller must not be able to learn anything from the URL itself, so an unknown token returns a flat
+`404`, identical in shape to any other unmatched route.
+
+Verification is a `WebhookVerifier` trait with one concrete implementation today,
+`HmacSha256Verifier` (shared-secret HMAC-SHA256 over the raw request body, hex-encoded in the
+`X-Webhook-Signature` header, optionally prefixed `sha256=`). Provider selection is still open
+(see `14-decisions-and-open-questions.md`), so this proves the verification shape against a
+generic mock provider rather than committing to one real vendor's actual scheme -- the same
+treatment `T-012` gave the outbound send path. The shared secret itself is per-tenant, read from
+Vault KV v2 at `secret/data/{tenant_slug}/webhook` -- the same KV engine `provider_config`
+credentials already use (see "Provider configuration" in the control-plane CLI chapter), just a
+path this binary resolves itself rather than one an operator configures. Seed it once per tenant:
+
+[source,bash]
+----
+vault kv put secret/acme/webhook secret=<a long random shared secret>
+----
+
+A signature mismatch, or a missing signature header, is `401` with no database write. A verified
+body that doesn't parse into the generic receipt shape (`provider_ref`, `event_type`,
+`occurred_at`, and an optional `provider_status`) is `400`. Only a verified, well-formed receipt
+is written -- one row into `webhook_receipt_staging`, this binary's only SQL statement, ever, via
+`INSERT ... ON CONFLICT (provider, provider_ref, event_type, occurred_at) DO NOTHING`, so a
+provider's own retries before the next promotion run are free. The response is `200` once that
+`INSERT` commits, regardless of whether promotion has happened yet -- the provider only needs to
+know the receipt was received.
+
+== Encryption placement
+
+A delivery receipt's raw provider JSON must end up encrypted under the customer's DEK, same as
+any other ledger payload (AGENTS.md hard invariant 7) -- but `messgr-webhook` itself never holds
+any tenant's Vault Transit credentials. Holding a decrypt/encrypt AppRole for every tenant mount
+directly in the DMZ binary would make the platform's most exposed process also its widest
+keyholder, the opposite of "narrowly-scoped" -- and a synchronous internal RPC to a separate
+encryptor service would put a new internal dependency on this binary's hot path for no reduction
+in *which* process ends up holding every tenant's decrypt capability. Instead, `messgr-webhook`
+writes the verified-but-unencrypted payload to `webhook_receipt_staging`, and a separate,
+internal-only `messgr-control webhook-promote` step (see "Webhook receipt promotion" in the
+control-plane CLI chapter) -- invoked by cron, never a long-lived listener -- resolves the
+customer, encrypts under their DEK exactly as orphan-event reconciliation's own promotion path
+already does, and writes the real `comms_event` row (or, if the `provider_ref` isn't known yet,
+hands it to `orphan_event` for that reconciler to pick up).
+
+The cost of this is an exposure window: the raw payload sits unencrypted in
+`webhook_receipt_staging`, inside the tenant's own database (never in the DMZ), for as long as it
+takes the next `webhook-promote` run to pick it up -- bounded by the cron cadence, not open-ended.
+Start that cadence at every 1 minute; tighten it first if the window is ever too slow, before
+reaching for a listener process.
+
+== Running it
+
+Requires two env vars, no defaults (`.env.example`): `WEBHOOK_TLS_CERT_FILE`,
+`WEBHOOK_TLS_KEY_FILE`. `WEBHOOK_LISTEN_ADDR` defaults to `0.0.0.0:8543`;
+`WEBHOOK_HEALTH_LISTEN_ADDR` (`T-032`) defaults to `0.0.0.0:8082` and binds a second, plain
+(non-TLS) listener serving only `GET /healthz`. Unlike `messgr-ingest`, there is no client-cert
+acceptor -- a provider authenticates by signature, not mTLS, so a server-only TLS identity is
+enough:
+
+[source,bash]
+----
+just dev-pki-bootstrap
+just dev-pki-issue-server-cert messgr-webhook.internal /tmp/webhook-cert   # writes cert.pem, key.pem, ca.pem
+
+WEBHOOK_TLS_CERT_FILE=/tmp/webhook-cert/cert.pem \
+WEBHOOK_TLS_KEY_FILE=/tmp/webhook-cert/key.pem \
+just webhook-run
+----
+
+Then, with a tenant provisioned and its webhook secret seeded (above):
+
+[source,bash]
+----
+BODY='{"provider_ref":"msg-123","event_type":"delivered","occurred_at":"2026-09-19T12:00:00Z"}'
+SIG=$(printf '%s' "$BODY" | openssl dgst -sha256 -hmac "<the shared secret>" | sed 's/^.* //')
+
+curl -sk --cacert /tmp/webhook-cert/ca.pem --resolve messgr-webhook.internal:8543:127.0.0.1 \
+  -H "X-Webhook-Signature: $SIG" -H "Content-Type: application/json" -d "$BODY" \
+  https://messgr-webhook.internal:8543/webhook/<webhook_token>/mock-provider
+----
+
+`tenant.webhook_token` is minted at provisioning time and never rotated automatically -- rotating
+it (e.g. after a suspected leak) means updating the `tenant` row and re-registering the new URL
+with every provider, so treat it with the same care as a credential, not a public identifier.

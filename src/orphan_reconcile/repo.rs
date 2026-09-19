@@ -101,20 +101,27 @@ pub async fn find_match(
     ))
 }
 
-/// One transaction: inserts the promoted `comms_event` row (ciphertext
-/// already computed by the caller — this module never touches the
-/// DEK/keystore), conditionally advances `comms_request.final_status` per
-/// the caller's `advance` verdict, and deletes the now-redundant
-/// `orphan_event` row.
-pub async fn promote(
-    pool: &PgPool,
-    orphan: &PendingOrphan,
-    m: &Match,
+/// Inserts one promoted `comms_event` row (ciphertext already computed by
+/// the caller — this module never touches the DEK/keystore) and
+/// conditionally advances `comms_request.final_status` per the caller's
+/// `advance` verdict, against an already-open transaction. Shared by
+/// `promote` below (which then deletes the `orphan_event` row) and
+/// `webhook_receipt::repo::promote` (T-047, which deletes the
+/// `webhook_receipt_staging` row instead) — one `INSERT` statement instead
+/// of two copies free to drift apart.
+#[allow(clippy::too_many_arguments)]
+pub async fn insert_comms_event(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    comms_request_id: Uuid,
+    comms_request_created_at: DateTime<Utc>,
+    customer_id: Uuid,
+    occurred_at: DateTime<Utc>,
+    event_type: &str,
+    provider_ref: &str,
+    provider_status: Option<&str>,
     ciphertext: Option<Vec<u8>>,
     advance: bool,
 ) -> Result<(), sqlx::Error> {
-    let mut tx = pool.begin().await?;
-
     sqlx::query(
         r#"
         INSERT INTO comms_event (
@@ -124,14 +131,14 @@ pub async fn promote(
         ON CONFLICT (occurred_at, comms_request_id, event_type, provider_ref) DO NOTHING
         "#,
     )
-    .bind(m.comms_request_id)
-    .bind(m.customer_id)
-    .bind(orphan.occurred_at)
-    .bind(&orphan.event_type)
-    .bind(&orphan.provider_ref)
-    .bind(orphan.provider_status.as_deref())
+    .bind(comms_request_id)
+    .bind(customer_id)
+    .bind(occurred_at)
+    .bind(event_type)
+    .bind(provider_ref)
+    .bind(provider_status)
     .bind(ciphertext)
-    .execute(&mut *tx)
+    .execute(&mut **tx)
     .await?;
 
     if advance {
@@ -139,13 +146,41 @@ pub async fn promote(
             "UPDATE comms_request SET final_status = $1, finalized_at = $2 \
              WHERE created_at = $3 AND id = $4",
         )
-        .bind(&orphan.event_type)
+        .bind(event_type)
         .bind(Utc::now())
-        .bind(m.comms_request_created_at)
-        .bind(m.comms_request_id)
-        .execute(&mut *tx)
+        .bind(comms_request_created_at)
+        .bind(comms_request_id)
+        .execute(&mut **tx)
         .await?;
     }
+
+    Ok(())
+}
+
+/// One transaction: inserts the promoted `comms_event` row via
+/// `insert_comms_event`, then deletes the now-redundant `orphan_event` row.
+pub async fn promote(
+    pool: &PgPool,
+    orphan: &PendingOrphan,
+    m: &Match,
+    ciphertext: Option<Vec<u8>>,
+    advance: bool,
+) -> Result<(), sqlx::Error> {
+    let mut tx = pool.begin().await?;
+
+    insert_comms_event(
+        &mut tx,
+        m.comms_request_id,
+        m.comms_request_created_at,
+        m.customer_id,
+        orphan.occurred_at,
+        &orphan.event_type,
+        &orphan.provider_ref,
+        orphan.provider_status.as_deref(),
+        ciphertext,
+        advance,
+    )
+    .await?;
 
     sqlx::query("DELETE FROM orphan_event WHERE id = $1")
         .bind(orphan.id)

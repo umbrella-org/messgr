@@ -155,6 +155,26 @@ partition-lifecycle, this command does connect to Vault -- promotion is the payl
 meant to be invoked on a schedule (cron/systemd timer), not run continuously -- this binary does
 not daemonize.
 
+== Webhook receipt promotion
+
+[source,bash]
+----
+cargo run --bin messgr-control -- webhook-promote run --tenant-slug acme
+----
+
+`messgr-webhook` (DESIGN.md §10, T-047) writes every verified receipt it receives into
+`webhook_receipt_staging`, unencrypted -- it holds no tenant's Transit credentials, so encryption
+happens here instead. This command matches each pending row's `provider_ref` against
+`comms_event.provider_ref`, exactly as orphan-event reconciliation does above (reusing the same
+`find_match` query and the same recognized-`event_type` guard): a match is encrypted under the
+matched customer's DEK and promoted into a real `comms_event` row; a row with no match yet is
+handed to `orphan_event` for the orphan-event reconciliation command above to pick up on its own
+schedule. Like orphan-event reconciliation, this command does connect to Vault. Safe to re-run;
+meant to be invoked on a schedule (cron/systemd timer) -- start at every 1 minute, the latency
+bound between "provider called the webhook" and "status visible"; tighten it here first if that
+is ever too slow, before reaching for a listener process -- not run continuously; this binary
+does not daemonize.
+
 == Message stats
 
 [source,bash]

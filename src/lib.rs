@@ -28,3 +28,6 @@ pub mod template;
 pub mod tenant;
 pub mod tenant_config;
 pub mod tenant_pepper;
+pub mod webhook;
+pub mod webhook_receipt;
+pub mod webhook_verify;

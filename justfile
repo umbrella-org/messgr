@@ -239,6 +239,14 @@ ingest-run:
 dispatcher-run:
     cargo run --bin messgr-dispatcher
 
+# Run messgr-webhook (POST /webhook/:webhook_token/:provider). Requires
+# WEBHOOK_TLS_CERT_FILE and WEBHOOK_TLS_KEY_FILE to be set (see
+# .env.example); WEBHOOK_LISTEN_ADDR defaults to 0.0.0.0:8543. The
+# per-tenant verification secret comes from Vault KV, not an env var.
+[group('control-plane')]
+webhook-run:
+    cargo run --bin messgr-webhook
+
 # Run the partition lifecycle (create-ahead, move to slow tablespace,
 # detach + drop) once for a tenant. Meant to be invoked on a schedule
 # (cron/systemd timer) -- this does not loop.

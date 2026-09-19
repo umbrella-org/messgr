@@ -35,6 +35,7 @@ use messgr::template::model::channel;
 use messgr::tenant::provision::provision_tenant;
 use messgr::tenant_config::configure::{set_tenant_config, show_tenant_config};
 use messgr::tenant_config::model::{TenantConfigInput, verification_mode};
+use messgr::webhook_receipt::promote::run_for_tenant as run_webhook_promote;
 
 #[derive(Parser)]
 #[command(name = "messgr-control", about = "messgr control-plane operations")]
@@ -166,6 +167,16 @@ enum Command {
     OrphanReconcile {
         #[command(subcommand)]
         command: OrphanReconcileCommand,
+    },
+    /// Match pending webhook_receipt_staging rows (raw receipts messgr-webhook
+    /// wrote in the DMZ) against comms_event.provider_ref, encrypt and promote
+    /// matches into comms_event under the matched customer's DEK, or hand a
+    /// non-match to orphan_event for T-030's reconciler (DESIGN.md §10, T-047).
+    /// Meant to run on a schedule (cron/systemd timer) -- this binary does not
+    /// daemonize or loop.
+    WebhookPromote {
+        #[command(subcommand)]
+        command: WebhookPromoteCommand,
     },
     /// Message-volume counts by channel and status for one tenant (DESIGN.md
     /// §11.4: counts/metadata only, never payload content). Reads
@@ -671,6 +682,17 @@ enum OrphanReconcileCommand {
     /// Match pending orphan_event rows against comms_event.provider_ref,
     /// promote matches into comms_event (encrypted under the customer's
     /// DEK), age out rows past the reconcile_attempts cap.
+    Run {
+        #[arg(long = "tenant-slug")]
+        tenant_slug: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum WebhookPromoteCommand {
+    /// Match pending webhook_receipt_staging rows against
+    /// comms_event.provider_ref, encrypt and promote matches into
+    /// comms_event, hand non-matches to orphan_event.
     Run {
         #[arg(long = "tenant-slug")]
         tenant_slug: String,
@@ -1592,6 +1614,37 @@ async fn run(
                     println!(
                         "reconciled={} aged_out={} still_pending={}",
                         report.reconciled, report.aged_out, report.still_pending
+                    );
+                }
+            }
+        }
+        Command::WebhookPromote { command } => {
+            // This one needs Vault, unlike idempotency-sweep: a promoted
+            // webhook_receipt_staging row's raw payload must be encrypted
+            // under the matched customer's DEK before it becomes a
+            // comms_event row (AGENTS.md hard invariant 7).
+            let vault_keystore = VaultKeyStore::connect(config.profile).expect(
+                "failed to connect to Vault (has VAULT_ADDR/VAULT_TOKEN been set?)",
+            );
+            match command {
+                WebhookPromoteCommand::Run { tenant_slug } => {
+                    let report = run_webhook_promote(
+                        &control_pool,
+                        &config.control_database_url,
+                        &tenant_slug,
+                        &vault_keystore,
+                        config.database_max_connections,
+                    )
+                    .await
+                    .map_err(|err| {
+                        format!(
+                            "webhook promote run failed for tenant {tenant_slug:?}: {err}"
+                        )
+                    })?;
+
+                    println!(
+                        "promoted={} orphaned={}",
+                        report.promoted, report.orphaned
                     );
                 }
             }
