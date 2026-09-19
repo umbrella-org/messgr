@@ -190,7 +190,79 @@ design doc changes — build-order §14 step 11 itself carries no per-step "done
 
 ## Review
 
-<!-- empty until IN REVIEW -->
+**Reviewer independence (step 0):** independent — fresh session with no hand in the branch;
+no delegation needed.
+
+**Implementation audit (step 2):** all four tasks verified against the actual diff
+(`git diff main...feat/T-046-remaining-channels-email-and-whatsapp-senders`), not the prose:
+
+- Task 1 (`tests/ingest.rs`) — met. Two new tests
+  (`create_comms_accepts_email_channel_and_resolves_address_kind`,
+  `create_comms_accepts_whatsapp_channel_and_resolves_address_kind`) POST through the real
+  mTLS ingest path and assert both `comms_request.channel` and `customer_address.kind`,
+  matching the plan as amended (reuses the one approved template, per the recorded inline
+  amendment).
+- Task 2 (`tests/dispatcher.rs`) — met. New helper `write_ready_outbox_row_for_channel`
+  threads `channel` through `insert_transactional` without touching the ~15 existing SMS call
+  sites; `assert_successful_send_for_channel` claims, dispatches via `HttpSender` against a
+  `wiremock` server, and asserts `final_status = "sent"` and the `comms_event` row for both
+  channels.
+- Task 3 (`.env.example`) — met. `DISPATCHER_CHANNELS=sms,email,whatsapp` plus
+  `DISPATCHER_EMAIL_BASE_URL`/`DISPATCHER_WHATSAPP_BASE_URL` added alongside the existing SMS
+  line.
+- Task 4 (decisions doc) — met. Decision #31 added, cites T-046, leaves Still Open #4
+  untouched (verified: still item 4, unchanged text).
+- Acceptance test re-run verbatim on the feature branch: `just build` clean, `just test`
+  green (all 4 new tests pass: `successful_send_for_whatsapp_channel_writes_sent_event_and_final_status`,
+  `successful_send_for_email_channel_writes_sent_event_and_final_status`,
+  `create_comms_accepts_email_channel_and_resolves_address_kind`,
+  `create_comms_accepts_whatsapp_channel_and_resolves_address_kind`; 0 failures across the
+  whole suite), `just lint` clean, `just docs-check` clean.
+- Confirmed design decisions 1–4 all honoured: no `subject`/HTML added, no new `Sender`
+  impl (diff touches no `src/` file), no destination-format validation added, no vendor
+  picked.
+
+**Quality audit (step 3):** assertions are mutation-testable, not `is_err()`-shaped —
+`address_kind`/`comms_request.channel` would fail under a hardcoded-`sms` regression, and
+the dispatcher test's `comms_event`/`final_status` assertions depend on `try_process`
+actually running the channel through the real gate chain. The `let _ = customer_id;` and
+omission of the outbox-row-deleted assertion (present in the SMS-only original) both checked
+against the codebase: the discard pattern is pre-existing (`tests/dispatcher.rs:529,634`),
+and outbox deletion keys only on `comms_request_id` (`src/dispatcher/repo.rs:341`, no
+`channel` predicate) — already proven channel-agnostic by the SMS test, so its omission here
+is not a coverage gap.
+
+**Consistency audit (step 4):** whole-tree grep for stale "SMS-only" claims found one hit
+(`docs/user-manual/control-plane-cli.adoc:166`, "whatsapp rows are never included" in `stats`
+output) — pre-existing and unrelated (T-028's deliberate stats exclusion, out of this
+ticket's scope, not a channel-support claim). No other stale reference found. `13-build-order.md`
+step 11's prose ("Remaining channels … behind the same `Sender` trait") needs no edit — it
+was never a checklist item, and the decisions-table addition is the load-bearing record.
+
+**Documentation audit (step 4a):** `just docs-check` clean. No new CLI subcommand or HTTP
+route shipped (diff touches no `src/`), so no coverage gap possible. Decision #31 is the only
+doc change and is correctly placed.
+
+**Docs-readability pass (step 4b):** conscious skip — no docs-readability reviewer available
+in this session.
+
+**messgr addendum checks:** no new table/column/schema (addendum items 2, 5, 6 n/a — no
+migration in the diff); no secret handling added (item 4 n/a); "verbatim from design" claim
+(item 1) n/a — no schema copied; hard invariants 1 and 3 (auth/OTP bypass, gates at dispatch)
+grep clean, trivially — no `src/` file in the diff to violate either; local/CI command parity
+(item 8) n/a — diff touches neither `justfile` nor `.github/workflows/`.
+
+**Impact sweep (step 8):** no ticket in `tickets/1-to-do/` or `tickets/2-ready/` references
+T-046 in `depends-on:` or Description; nothing to patch.
+
+| id | severity | class | disposition | description | evidence | suggestion |
+|---|---|---|---|---|---|---|
+
+No findings.
+
+Disposition summary: 0 findings (0 blocking, 0 non-blocking).
+
+cost: estimated S, actual S
 
 ## History
 
@@ -206,3 +278,4 @@ design doc changes — build-order §14 step 11 itself carries no per-step "done
   just a wrong task-level instruction in the plan's prose.
 - 2026-09-19 — READY → IN DEVELOPMENT: picked up
 - 2026-09-19 — IN DEVELOPMENT → IN REVIEW: acceptance green
+- 2026-09-19 — IN REVIEW → DONE: 0 findings — verified end to end
