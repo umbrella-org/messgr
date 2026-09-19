@@ -94,7 +94,7 @@ Last updated: 2026-09-19
 | T-041 | Cancellation endpoint with dispatch-time race check | yes — MERGED: PR #57 merged to `main` (`35812b4`). |
 | T-042 | Producer quotas and producer_usage enforcement | yes — merged to main (PR #58, 8099fa3) |
 | T-043 | Quiet hours with jitter and DST handling | yes — MERGED: PR #59 (`feat/T-043-quiet-hours-with-jitter-and-dst-handling` → `main`, merge commit `43813e3`) |
-| T-044 | Integration test coverage for producer_quota_override's refresh_config SQL path | no — publish-gated |
+| T-044 | Integration test coverage for producer_quota_override's refresh_config SQL path | yes — MERGED: PR #60 merged to `main` (`2eaaacd`) |
 
 ## DROPPED
 
