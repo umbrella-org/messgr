@@ -47,6 +47,8 @@ Last updated: 2026-09-19
 |---|---|---|---|---|---|---|
 | T-046 | Remaining channels: email and WhatsApp senders | high | medium | L | [] |  |
 | T-047 | Webhook receiver and delivery-receipt ingestion (messgr-webhook) | high | high | L | [] |  |
+| T-049 | Admin panel: quota dashboard, kill-switch console, scheduled queue, producer registry | high | medium | L | [] |  |
+| T-048 | Query API and UI: AuthProvider, MockProvider, customer/campaign views | high | high | XL | [] |  |
 | T-045 | Customer event feed consumer and nightly reconciliation | medium | high | L | [] |  |
 
 ## DONE
