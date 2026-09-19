@@ -205,3 +205,4 @@ design doc changes — build-order §14 step 11 itself carries no per-step "done
   the same thing. Not a retraction of a confirmed design decision (§0-§4 decisions untouched),
   just a wrong task-level instruction in the plan's prose.
 - 2026-09-19 — READY → IN DEVELOPMENT: picked up
+- 2026-09-19 — IN DEVELOPMENT → IN REVIEW: acceptance green
