@@ -45,6 +45,9 @@ Last updated: 2026-09-19
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
+| T-046 | Remaining channels: email and WhatsApp senders | high | medium | L | [] |  |
+| T-047 | Webhook receiver and delivery-receipt ingestion (messgr-webhook) | high | high | L | [] |  |
+| T-045 | Customer event feed consumer and nightly reconciliation | medium | high | L | [] |  |
 
 ## DONE
 
