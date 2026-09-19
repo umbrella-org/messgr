@@ -2,7 +2,7 @@
 id: T-054
 title: Cloud enablement: messgr-otp, platform console, platform kill switches, offboarding modes, second region
 project: messgr
-depends-on: []
+depends-on: [T-052]
 spawned-by: []
 impact: critical
 complexity: high
@@ -72,9 +72,11 @@ work. Filed as a single TO DO ticket here to match the build-order line item; pe
 refinement should very likely split this into its own family rather than write one seven-part
 Implementation Plan.
 
-Soft coupling: `messgr-otp` reuses T-052's `sms-sender` audit-write/Vault-caching pattern rather
-than inventing a second one; platform kill switches reuse T-016's tenant-switch propagation
-shape two-tiered.
+Hard dependency on T-052 (`depends-on:`, user-confirmed): `messgr-otp` is the cloud variant of
+T-052's OTP mechanism and reuses its `sms-sender` audit-write/Vault-caching pattern rather than
+inventing a second one — this ticket cannot be picked up until T-052 is done and merged. Platform
+kill switches separately reuse T-016's tenant-switch propagation shape, two-tiered (T-016 is
+already done — no additional gating from that side).
 
 ## Implementation Plan
 
@@ -87,3 +89,4 @@ shape two-tiered.
 ## History
 
 - 2026-09-19 — created (TO DO). source: audit: build-order step 19, remaining gap identified when auditing unticketed steps against the board
+- 2026-09-19 — added hard depends-on: [T-052], user-confirmed (messgr-otp reuses T-052's sms-sender pattern, §3.1)
