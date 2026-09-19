@@ -17,6 +17,18 @@ policy: quiet_hours(region|segment) -> (start_local, end_local, tz)
 resolve: customer tz -> segment policy -> institution default
 ```
 
+**Correction: the `segment`/`region` scopes above are currently unreachable.** No customer
+segment attribute exists anywhere in the data model — §1 puts audience segmentation out of
+scope by design ("upstream systems decide who gets what and why") — and `region` (§2.2) is a
+deployment-topology concept already 1:1 with a tenant's own database, not a per-customer field a
+policy lookup could key on. A `scope = 'segment'` or `scope = 'region'` row is representable in
+`quiet_hours_policy` (§4.10) but nothing in the data model can ever resolve a customer to one.
+T-043 ships the table with its full `scope`/`scope_key` shape, so a future ticket can light up
+segment/region resolution once an upstream system actually supplies that identity, but its
+resolver and its `messgr-control` surface only ever read/write `scope = 'default'`. The
+effective resolution order today is `customer tz -> institution default`, not the three-tier
+version above.
+
 Auth class skips this evaluation entirely (§3).
 
 ### 6.2 Scheduled delivery

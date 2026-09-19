@@ -40,7 +40,7 @@
 ## Still open
 
 1. **Backup retention window** — sets `erasure_request.backups_clear_at` and therefore the date the bank can truthfully report physical erasure as complete. (§7.3)
-2. **Quiet-hours policy content** — the actual windows per region, and the institution-wide default for customers with unknown timezone. (§6)
+2. **Quiet-hours policy content** — the actual institution-wide window (T-043 ships only the mechanism and CLI to set `scope = 'default'`, no default value). "Per region" is no longer open as stated: `region` has no per-customer resolution path (it is already 1:1 with a tenant's own database, per §2.2), so a `scope = 'region'` row is structurally unreachable, same as `segment` — see `05-send-timing.md`'s §6.1 correction note. (§6)
 3. **OIDC group-to-role claim mapping** — needed only when real OIDC replaces the mock, but determines whether the four roles in §11.1 map cleanly onto existing directory groups.
 4. **Provider selection** per channel, and whether the chosen SMS provider supports idempotency keys (affects duplicate rates under at-least-once delivery). (§12)
 5. **Identifier systems** — which upstream systems (core banking CIF, CRM, digital, cards) will appear in `customer_external_id.system`, and which is canonical for the event feed. (§4.6)
