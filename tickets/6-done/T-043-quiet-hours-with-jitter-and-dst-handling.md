@@ -727,8 +727,8 @@ clean.
 
 | id | severity | class | disposition | description | evidence | suggestion |
 |---|---|---|---|---|---|---|
-| F1 | non-blocking | stale-xref | fixed inline | `03-data-model.md` still said `quiet_hours_policy` "is an unrelated table not yet created (later ticket: quiet-hours resolution)" — T-043 created it | `development/design/03-data-model.md` (pre-fix, ~line 467) | Corrected to describe the shipped table and cross-reference `05-send-timing.md`'s existing correction note; fixed on `feat/T-043-…` (commit b55fc96) |
-| F2 | non-blocking | stale-xref | fixed inline | `14-decisions-and-open-questions.md` Still-open #2 posed "the actual windows per region" as an undecided *value*, when T-043's own Description/decisions establish region resolution is structurally unreachable (no per-customer region attribute), same as segment | `development/design/14-decisions-and-open-questions.md` (pre-fix, Still-open #2) | Reworded to separate the still-genuinely-open institution-wide default value from the no-longer-open region/segment reachability question; fixed on `feat/T-043-…` (commit b55fc96) |
+| F1 | non-blocking | stale-xref | fixed inline | `03-data-model.md` still said `quiet_hours_policy` "is an unrelated table not yet created (later ticket: quiet-hours resolution)" — T-043 created it | `development/design/03-data-model.md` (pre-fix, ~line 467) | Corrected to describe the shipped table and cross-reference `05-send-timing.md`'s existing correction note; fixed on `feat/T-043-…` (commit 9e50bd2, tidied from the review's original b55fc96) |
+| F2 | non-blocking | stale-xref | fixed inline | `14-decisions-and-open-questions.md` Still-open #2 posed "the actual windows per region" as an undecided *value*, when T-043's own Description/decisions establish region resolution is structurally unreachable (no per-customer region attribute), same as segment | `development/design/14-decisions-and-open-questions.md` (pre-fix, Still-open #2) | Reworded to separate the still-genuinely-open institution-wide default value from the no-longer-open region/segment reachability question; fixed on `feat/T-043-…` (commit 9e50bd2, tidied from the review's original b55fc96) |
 
 Disposition summary: 2 fixed inline (F1, F2). 0 folded, 0 new ticket, 0 noted. No blocking
 findings.
@@ -744,3 +744,5 @@ cost: estimated M, actual M
 - 2026-09-18 — READY → IN DEVELOPMENT: picked up
 - 2026-09-18 — IN DEVELOPMENT → IN REVIEW: acceptance green
 - 2026-09-19 — IN REVIEW → DONE: reviewed: 0 blocking, F1+F2 stale-xref fixed inline
+- 2026-09-19 — MERGED: PR #59 (`feat/T-043-quiet-hours-with-jitter-and-dst-handling` → `main`,
+  merge commit `43813e3`)
