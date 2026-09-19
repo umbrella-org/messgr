@@ -165,3 +165,4 @@ no user-facing surface — internal test coverage only, no `DESIGN.md` or API su
   real SQL override path untested end-to-end.
 - 2026-09-19 — TO DO → READY: plan complete
 - 2026-09-19 — READY → IN DEVELOPMENT: picked up
+- 2026-09-19 — IN DEVELOPMENT → IN REVIEW: acceptance green
