@@ -671,7 +671,69 @@ Run: `just build && just test && just lint`.
 
 ## Review
 
-<!-- empty until IN REVIEW -->
+- [x] Reviewer independence settled (step 0): **independent** — reviewing session started fresh
+  (`/clear`) with no memory of authoring `feat/T-043-quiet-hours-with-jitter-and-dst-handling`;
+  a reviewer with no hand in the branch needs no delegation.
+- [x] Implementation audit — acceptance test re-run, tasks & criteria verified (steps 1, 2)
+- [x] Quality audit (step 3)
+- [x] Consistency audit (step 4)
+- [x] Documentation audit — coverage, whole-tree sweep, docs build clean (step 4a)
+- [x] Docs-readability pass — **conscious skip**: no docs-readability reviewer configured in this
+  host session (step 4b, optional)
+- [x] Findings recorded with severity, class, and disposition; disposition summary + cost line
+  present (step 5)
+- [x] Ticket moved; `## History` appended (step 6)
+- [x] Other references updated; governing documents reconciled (step 7)
+- [x] Remaining-tickets impact sweep done (step 8) — `2-ready/` and `1-to-do/` empty of any
+  `depends-on: [T-043]` or Description reference; only `T-044` is in `1-to-do/` and it is
+  unrelated
+- [x] Summary + commit message & MR attributes presented for approval; overarching bookkeeping
+  committed per policy; next-ticket suggestion (step 9)
+
+**Implementation audit (steps 1–2).** Read the ticket from `main` (the feature-branch worktree
+still showed a stale `3-in-development/` copy — the exact in-tree staleness hazard the protocol
+warns about). All 9 tasks verified against the tree: `chrono-tz = "0.10"` added
+(`Cargo.toml`/`Cargo.lock`, resolves clean); `migrations/tenant/0016_quiet_hours_policy.sql`
+verbatim from `03-data-model.md` §4.10; `src/quiet_hours/{model,repo,window,configure,mod}.rs`
+and the `dispatcher.rs`/`worker.rs`/`control.rs` wiring all match the plan's code blocks; every
+existing `DispatcherContext { .. }` literal (`tests/dispatcher.rs`, `tests/kill_switch.rs`)
+updated with the two new fields. Re-ran the acceptance test verbatim plus the full suite:
+`just build` clean, `just lint` clean (`cargo fmt --check` + `cargo clippy --all-targets
+--all-features -D warnings`), `just docs-check` clean, `just test` — 90+ tests green including
+the new `tests/quiet_hours.rs` (4), `src/quiet_hours/window.rs`'s unit tests (6, covering
+same-day/midnight-wrap/outside-window/tz-fallback/double-invalid-fail-open/DST-spring-forward),
+and the two new `tests/dispatcher.rs` gate-integration tests. All 9 confirmed design decisions
+honoured, including decision 9 (`tests/erasure_coverage.rs` passes — `quiet_hours_policy` has no
+`customer_id`/FK, out of that check's scope by construction).
+
+**Quality audit (step 3, addendum advisory).** The two new gate-integration tests use real,
+mutation-testable assertions, not `is_err()`/`is_ok()` tautologies: a mounted mock with
+`.expect(0)`/`.expect(1)`, `leased_until`/`next_attempt_at`/`comms_event` row counts, and
+`final_status`. Removing the gate would fail `a_send_during_quiet_hours_is_deferred…`'s mock
+expectation; removing the reschedule would fail `a_send_outside_quiet_hours_is_unaffected`'s.
+
+**Consistency audit (step 4).** Gate order in `worker.rs` matches decision 4 (after Consent,
+before decrypt) and `dispatcher.adoc`'s narrative. `AGENTS.md` invariants 1 and 3 grepped: auth
+never reaches the outbox (no class check needed, decision 3, consistent with T-011/T-036/T-037);
+the gate runs in `try_process` at dispatch time, not at ingest. No NULL-in-unique-index issue
+(`quiet_hours_policy`'s PK columns are both `NOT NULL`). No secret read from env/config — no
+secrets involved in this ticket. Found two stale governing-document references this branch made
+false (F1, F2 below); both fixed inline per the addendum's step 5 ("do not defer a design
+correction to a follow-up ticket").
+
+**Documentation audit (step 4a).** `docs/user-manual/control-plane-cli.adoc` and
+`dispatcher.adoc` both updated, correctly cross-referenced, no duplication. `just docs-check`
+clean.
+
+| id | severity | class | disposition | description | evidence | suggestion |
+|---|---|---|---|---|---|---|
+| F1 | non-blocking | stale-xref | fixed inline | `03-data-model.md` still said `quiet_hours_policy` "is an unrelated table not yet created (later ticket: quiet-hours resolution)" — T-043 created it | `development/design/03-data-model.md` (pre-fix, ~line 467) | Corrected to describe the shipped table and cross-reference `05-send-timing.md`'s existing correction note; fixed on `feat/T-043-…` (commit b55fc96) |
+| F2 | non-blocking | stale-xref | fixed inline | `14-decisions-and-open-questions.md` Still-open #2 posed "the actual windows per region" as an undecided *value*, when T-043's own Description/decisions establish region resolution is structurally unreachable (no per-customer region attribute), same as segment | `development/design/14-decisions-and-open-questions.md` (pre-fix, Still-open #2) | Reworded to separate the still-genuinely-open institution-wide default value from the no-longer-open region/segment reachability question; fixed on `feat/T-043-…` (commit b55fc96) |
+
+Disposition summary: 2 fixed inline (F1, F2). 0 folded, 0 new ticket, 0 noted. No blocking
+findings.
+
+cost: estimated M, actual M
 
 ## History
 
@@ -681,3 +743,4 @@ Run: `just build && just test && just lint`.
 - 2026-09-18 — TO DO → READY: plan complete
 - 2026-09-18 — READY → IN DEVELOPMENT: picked up
 - 2026-09-18 — IN DEVELOPMENT → IN REVIEW: acceptance green
+- 2026-09-19 — IN REVIEW → DONE: reviewed: 0 blocking, F1+F2 stale-xref fixed inline
