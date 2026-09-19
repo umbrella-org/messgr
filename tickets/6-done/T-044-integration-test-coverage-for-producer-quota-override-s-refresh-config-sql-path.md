@@ -157,7 +157,44 @@ no user-facing surface — internal test coverage only, no `DESIGN.md` or API su
 
 ## Review
 
-<!-- empty until IN REVIEW -->
+- [x] Reviewer independence settled (step 0): **independent** — fresh session, no memory of
+  authoring `feat/T-044-producer-quota-override-refresh-config-test`; nothing to delegate.
+- [x] Implementation audit (steps 1, 2): both tasks present exactly as planned in
+  `tests/producer_quota.rs` (`producer_quota_override_raises_the_limit_through_refresh_config`,
+  `an_expired_override_is_not_merged_by_refresh_config`); confirmed design decisions 1–4 honoured
+  (reuses `flushing_and_rebuilding_preserves_in_progress_window_counts`'s provisioning helpers,
+  drives override through `set_producer_quota`/`add_producer_quota_override` rather than raw SQL,
+  asserts an admit/defer boundary rather than an `EffectiveQuota` equality check, base quota is
+  `enforcement::HARD` + `per_day = 1`). `just test` re-run verbatim: 13/13 `tests/producer_quota.rs`
+  cases pass, including both new ones. `just build` and `just lint` clean.
+- [x] Quality audit (step 3): mutation-tested both new tests by hand (review-addendum §3).
+  Reverting `refresh_config`'s merge loop
+  (`src/producer_quota/tracker.rs:90-99`) to a no-op: `producer_quota_override_raises_the_limit_through_refresh_config`
+  fails (`left: Defer(...), right: Admit`) as intended;
+  `an_expired_override_is_not_merged_by_refresh_config` still passes — see F1. Reverting
+  `load_active_overrides`'s `WHERE valid_from <= $1 AND valid_to > $1` filter
+  (`src/producer_quota/repo.rs:104-107`) to an unfiltered `SELECT`: the opposite holds,
+  `an_expired_override_is_not_merged_by_refresh_config` fails and
+  `producer_quota_override_raises_the_limit_through_refresh_config` still passes. Both mutations
+  restored afterward (`git checkout -- <path>`); `git status` clean, `just test` green again.
+- [x] Consistency audit (step 4): `repo::load_active_overrides`'s SQL matches the ticket's
+  Description verbatim; `configure::set_producer_quota`/`add_producer_quota_override` signatures
+  match the test call sites. No `DESIGN.md`/`development/design/*` section asserts anything about
+  this test coverage to reconcile (grepped `producer_quota_override`, `refresh_config`). No
+  dependents in `tickets/1-to-do/` or `tickets/2-ready/` reference T-044 (step 8 — none to sweep).
+- [x] Documentation audit (step 4a): N/A — no user-facing surface, ticket correctly states no
+  docs change; `just docs-check` not run (nothing docs-related in the diff).
+- [x] Docs-readability pass (step 4b): conscious skip — no `.adoc`/`.md` prose changed by this
+  ticket (only `tests/producer_quota.rs` and ticket/board bookkeeping).
+- [x] Findings recorded, disposition summary and cost line below (step 5).
+
+| id | severity | class | disposition | description | evidence | suggestion |
+|---|---|---|---|---|---|---|
+| F1 | non-blocking | spec-unclear | note-and-close | The Finish step's mutation-test instruction ("revert `refresh_config`'s merge loop to a no-op... observing **both** new tests fail") doesn't hold as literally written: that mutation alone only fails `producer_quota_override_raises_the_limit_through_refresh_config`. `an_expired_override_is_not_merged_by_refresh_config`'s override is excluded by the `WHERE valid_from <= $1 AND valid_to > $1` filter before it ever reaches the merge loop, so a merge-loop-only mutation can't touch it — it instead catches a broken `WHERE` filter (verified: reverting the filter fails exactly that test and no other). Coverage is correct — between the two tests, both named failure modes (broken filter, broken merge loop) are each caught by one test — only the plan's specific verification claim is imprecise. | `tickets/4-in-review/T-044-*.md`'s Acceptance test section; `src/producer_quota/tracker.rs:90-99` (merge loop); `src/producer_quota/repo.rs:104-107` (WHERE filter) | No code change. Optionally reword the Acceptance test prose in a follow-up pass to say each test independently proves one failure mode, rather than claiming one mutation fails both — not worth a ticket on its own. |
+
+Disposition summary: 1 non-blocking (F1, note-and-close). No blocking findings.
+
+cost: estimated S, actual S
 
 ## History
 
@@ -166,3 +203,4 @@ no user-facing surface — internal test coverage only, no `DESIGN.md` or API su
 - 2026-09-19 — TO DO → READY: plan complete
 - 2026-09-19 — READY → IN DEVELOPMENT: picked up
 - 2026-09-19 — IN DEVELOPMENT → IN REVIEW: acceptance green
+- 2026-09-19 — IN REVIEW → DONE: acceptance green, F1 non-blocking noted and closed
