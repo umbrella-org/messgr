@@ -488,7 +488,7 @@ CREATE TABLE tenant (
     database_name  text UNIQUE NOT NULL,
     vault_mount    text UNIQUE NOT NULL,        -- per-tenant Transit mount (§7.6)
     webhook_token  text UNIQUE NOT NULL,        -- opaque; provider callback path (§10). Never the
-                                                 -- slug; unread until messgr-webhook ships (step 12)
+                                                 -- slug; resolved by messgr-webhook (T-047)
     status         text NOT NULL,               -- provisioning | active | suspended
                                                 -- | offboarding_archive | offboarding_destroy  (§7.7)
     created_at     timestamptz NOT NULL
