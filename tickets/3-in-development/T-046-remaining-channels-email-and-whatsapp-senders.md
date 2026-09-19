@@ -100,9 +100,15 @@ Add two new `#[tokio::test]` functions (mirroring
 `create_comms_writes_ledger_and_outbox_and_idempotency_replays`'s shape, trimmed to what's
 being proven here), one for `channel = "email"` and one for `channel = "whatsapp"`:
 
-- `setup(...)`, then call `approve_template(...)` for that test's own channel (`"email"` /
-  `"whatsapp"`), `template_id = "balance-alert"`, `version = 1`, reusing the same body text
-  `setup()` already approves for `"sms"`.
+- `setup(...)` reuses the `template_id = "balance-alert"` / `version = 1` / `locale = "en-US"`
+  template `setup()` already approves for `"sms"` — do **not** call `approve_template` again for
+  `"email"`/`"whatsapp"`. `template` is primary-keyed on `(template_id, version, locale)` only
+  (`migrations/tenant/0005_template.sql:17`); `channel` is a stored column but is not part of
+  the key and `template_repo::find` (`src/template/repo.rs:6-24`) never filters on it, so a
+  second approval under the same id/version/locale is rejected by `approve_template`'s own
+  immutability check (T-010 decision 5), and would be redundant even if it succeeded — the
+  request's `channel` field is what drives `validate_channel`/`kind_for_channel`, not the
+  template row.
 - Register a producer, build the request body from `sample_body(customer_id)` with
   `["channel"]` and `["destination"]` overridden (an email-shaped and a whatsapp-shaped
   destination string respectively — these are opaque strings to the system, per decision 3
@@ -190,4 +196,12 @@ design doc changes — build-order §14 step 11 itself carries no per-step "done
 
 - 2026-09-19 — created (TO DO). source: audit: build-order step 11, remaining gap identified when auditing unticketed steps against the board
 - 2026-09-19 — TO DO → READY: plan complete
+- 2026-09-19 — plan amended inline: Task 1 dropped the
+  per-channel `approve_template` call — `template` is keyed on `(template_id, version, locale)`
+  only, not `channel`, so approving `"balance-alert"` v1/en-US a second time for `"email"`/
+  `"whatsapp"` is rejected as already-approved by `approve_template`'s own immutability check,
+  discovered when the new tests failed on first run. Reuses the one template `setup()` already
+  approves for `"sms"` instead; `template_repo::find` never filters on `channel` so this proves
+  the same thing. Not a retraction of a confirmed design decision (§0-§4 decisions untouched),
+  just a wrong task-level instruction in the plan's prose.
 - 2026-09-19 — READY → IN DEVELOPMENT: picked up
