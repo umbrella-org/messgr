@@ -13,10 +13,11 @@ Last updated: 2026-09-19
 
 ## IN DEVELOPMENT
 
-### messgr (0/1)
+### messgr (1/1)
 
 | id | title | depends-on |
 |---|---|---|
+| T-044 | Integration test coverage for producer_quota_override's refresh_config SQL path | [] |
 
 ## IN REVIEW
 
@@ -38,7 +39,6 @@ Last updated: 2026-09-19
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
-| T-044 | Integration test coverage for producer_quota_override's refresh_config SQL path | low | low | S | [] |  |
 
 ## TO DO (impact order, per child)
 

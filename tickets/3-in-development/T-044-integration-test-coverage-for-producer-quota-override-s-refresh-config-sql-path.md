@@ -164,3 +164,4 @@ no user-facing surface — internal test coverage only, no `DESIGN.md` or API su
 - 2026-09-18 — created (TO DO). source: review: T-042's review (F1) found `refresh_config`'s
   real SQL override path untested end-to-end.
 - 2026-09-19 — TO DO → READY: plan complete
+- 2026-09-19 — READY → IN DEVELOPMENT: picked up
