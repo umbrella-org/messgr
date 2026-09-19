@@ -271,7 +271,42 @@ See Task 7 above.
 
 ## Review
 
-<!-- empty until IN REVIEW -->
+- [x] Reviewer independence settled (step 0): the reviewing session began with no memory of
+  writing this branch (a fresh session per the conversation's own history) — the protocol's
+  next-best handoff after a spawned independent reviewer. Audits below were run directly by
+  this session, not delegated further.
+- [x] Implementation audit — acceptance test re-run, tasks & criteria verified (steps 1, 2)
+- [x] Quality audit (step 3)
+- [x] Consistency audit (step 4)
+- [x] Documentation audit — coverage, whole-tree sweep, docs build clean (step 4a)
+- [x] Docs-readability pass — conscious skip: no docs-readability reviewer configured in this
+  session/host (step 4b)
+- [x] Findings recorded with severity, class, and disposition; disposition summary + cost line
+  below (step 5)
+- [x] Ticket moved to `tickets/5-rework/`; `## History` appended (step 6)
+- [x] Other references updated; governing documents reconciled (step 7)
+- [x] Remaining-tickets impact sweep done (step 8) — no `1-to-do/`/`2-ready/` ticket depends on
+  or references T-047
+- [x] Summary + commit message presented for approval; next-ticket suggestion (step 9)
+
+On `main` (`layout = "in-tree"`), so this ticket was read and is recorded here per the base
+branch, not the feature branch — the branch's own worktree copy was stale (still showed IN
+DEVELOPMENT), exactly the hazard `resources/review-protocol.md`'s intro box describes.
+
+Build/lint/docs-check/test all re-run against `feat/T-047-webhook-receiver-and-delivery-receipt-ingestion`
+(`just build`, `just lint`, `just docs-check`, `just test`) — all green, including the four
+acceptance-test scenarios (`tests/webhook.rs`).
+
+| id | severity | class | disposition | description | evidence | suggestion |
+|---|---|---|---|---|---|---|
+| F1 | blocking | correctness | — | T-038 explicitly deferred "wiring automatic population [of suppression] from delivery receipts" to build-order step 12/this ticket (`tickets/6-done/T-038-suppression-gate-at-dispatch.md:40-46`), and this ticket's own Outcome/Description promise it ships here ("bounces/complaints feed suppression automatically instead of needing a manual loop"). The Implementation Plan's seven tasks never wire any bounce/complaint event into the `suppression` table — `webhook_receipt::promote` and `orphan_reconcile` only ever write `comms_event`/`orphan_event`; nothing in the tree calls `suppression::configure`. §5's suppression list (hard bounce, complaint, regulatory) stays manual-CLI-only for the two sources this ticket was supposed to automate. | `src/webhook_receipt/promote.rs`, `src/orphan_reconcile/reconcile.rs` (no `suppression` reference anywhere in either); `src/dispatcher/repo.rs:363` only *reads* `suppression`, confirming nothing else writes it; `grep -rn "automatic population\|feed suppression" tickets/` returns only T-038's deferral and this ticket's own unmet promise | Scoped rework: when a promoted receipt's `event_type` is a hard bounce or complaint, also insert/upsert a `suppression` row (reason `hard_bounce`/`complaint`, `review_at` per T-038's existing expiry convention) via the existing `suppression` module. `orphan_reconcile::repo::find_match`'s `Match` will need `destination_hmac` added (from `comms_request`) to key the suppression row correctly. Either fix in this ticket's scope, or — if genuinely deferred again — update the Outcome/Description to say so explicitly and record why, rather than silently shipping less than promised. |
+| F2 | non-blocking | stale-xref | `development/design/03-data-model.md`'s `tenant.webhook_token` column comment still read "unread until messgr-webhook ships (step 12)" — false as of this branch, which is exactly what reads it (`src/tenant/repo.rs::find_by_webhook_token`). | `development/design/03-data-model.md:491` (pre-fix) | Fixed inline: reworded to "resolved by messgr-webhook (T-047)", commit `0dd44e0` (on the feature branch). |
+| F3 | non-blocking | stale-xref | `development/design/13-build-order.md`'s named-exemption list for customer-data tables (step 12's own CI-check description) listed `suppression`, `orphan_event`, `customer_dek`, `customer_alias`, `outbox`, `customer` but omitted `webhook_receipt_staging`, which this branch adds as a named exemption in `tests/erasure_coverage.rs`. | `development/design/13-build-order.md:34` (pre-fix) | Fixed inline: added `webhook_receipt_staging` to the list, commit `0dd44e0` (on the feature branch). |
+| F4 | non-blocking | test-gap | No test covers the unknown-`webhook_token` → flat 404 path (`src/webhook/handler.rs`'s first branch) or the Vault-secret-read-failure → 401 path — both real branches in `receive_webhook`, neither in the ticket's own 4-scenario acceptance test. | `src/webhook/handler.rs` (`receive_webhook`, the `Ok(None) =>` and Vault-error arms); `tests/webhook.rs` (4 tests, none exercising either) | Noted — small, and every other branch in the same handler is covered; not worth a follow-up ticket on its own. |
+
+Disposition summary: 1 blocking (F1, routes to rework), 2 fixed inline (F2, F3), 1 noted (F4).
+
+cost: estimated L, actual L
 
 ## History
 
@@ -279,3 +314,4 @@ See Task 7 above.
 - 2026-09-19 — TO DO → READY: plan complete
 - 2026-09-19 — READY → IN DEVELOPMENT: picked up
 - 2026-09-19 — IN DEVELOPMENT → IN REVIEW: acceptance green
+- 2026-09-19 — IN REVIEW → REWORK: F1 blocking: auto-suppression from bounce/complaint receipts never wired, contradicting the ticket's own Outcome and T-038's explicit deferral
