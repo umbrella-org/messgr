@@ -716,3 +716,165 @@ async fn flushing_and_rebuilding_preserves_in_progress_window_counts() {
     tenant_pool.close().await;
     drop_test_tenant(&control_pool, &db_name, &slug).await;
 }
+
+#[tokio::test]
+async fn producer_quota_override_raises_the_limit_through_refresh_config() {
+    let control_url = control_database_url();
+    let control_pool = db::connect(&control_url, 5)
+        .await
+        .expect("failed to connect to control database");
+    let vault = vault_keystore();
+
+    let slug = unique_name("test_pq_override_active");
+    let db_name = unique_name("test_db_pq_override_active");
+    let tenant_id =
+        provision_test_tenant(&control_pool, &control_url, &vault, &slug, &db_name)
+            .await;
+
+    let tenant_pool =
+        connect_tenant_pool(&control_pool, &control_url, tenant_id, &db_name, 2)
+            .await
+            .expect("connecting tenant pool failed")
+            .pool;
+
+    let producer_name = unique_name("producer");
+    let producer_id =
+        register_test_producer(&control_pool, &control_url, &slug, &producer_name)
+            .await;
+
+    // Base per_day of 1 turns "did refresh_config's merge loop actually raise
+    // the ceiling to the override's 5" into an observable admit/defer
+    // boundary a few calls later, rather than a decision that would come out
+    // the same either way.
+    set_producer_quota(
+        &control_pool,
+        &control_url,
+        &slug,
+        &producer_name,
+        "sms",
+        class::MARKETING,
+        None,
+        Some(1),
+        enforcement::HARD,
+        "test-actor",
+    )
+    .await
+    .expect("setting producer quota failed");
+
+    let now = Utc::now();
+    add_producer_quota_override(
+        &control_pool,
+        &control_url,
+        &slug,
+        &producer_name,
+        "sms",
+        class::MARKETING,
+        5,
+        now - chrono::Duration::hours(1),
+        now + chrono::Duration::hours(1),
+        "test-approver",
+        "test override",
+        "test-actor",
+    )
+    .await
+    .expect("adding producer quota override failed");
+
+    let tracker = QuotaTracker::new("UTC");
+    tracker
+        .refresh_config(&tenant_pool, now)
+        .await
+        .expect("refreshing quota config failed");
+
+    for _ in 0..5 {
+        let decision =
+            tracker.check_and_record(producer_id, "sms", class::MARKETING, now);
+        assert_eq!(decision, QuotaDecision::Admit);
+    }
+    let sixth = tracker.check_and_record(producer_id, "sms", class::MARKETING, now);
+    assert!(
+        matches!(sixth, QuotaDecision::Defer(_)),
+        "refresh_config must merge the active override's per_day (5) over the base \
+         limit (1), not leave the base limit in effect"
+    );
+
+    tenant_pool.close().await;
+    drop_test_tenant(&control_pool, &db_name, &slug).await;
+}
+
+#[tokio::test]
+async fn an_expired_override_is_not_merged_by_refresh_config() {
+    let control_url = control_database_url();
+    let control_pool = db::connect(&control_url, 5)
+        .await
+        .expect("failed to connect to control database");
+    let vault = vault_keystore();
+
+    let slug = unique_name("test_pq_override_expired");
+    let db_name = unique_name("test_db_pq_override_expired");
+    let tenant_id =
+        provision_test_tenant(&control_pool, &control_url, &vault, &slug, &db_name)
+            .await;
+
+    let tenant_pool =
+        connect_tenant_pool(&control_pool, &control_url, tenant_id, &db_name, 2)
+            .await
+            .expect("connecting tenant pool failed")
+            .pool;
+
+    let producer_name = unique_name("producer");
+    let producer_id =
+        register_test_producer(&control_pool, &control_url, &slug, &producer_name)
+            .await;
+
+    set_producer_quota(
+        &control_pool,
+        &control_url,
+        &slug,
+        &producer_name,
+        "sms",
+        class::MARKETING,
+        None,
+        Some(1),
+        enforcement::HARD,
+        "test-actor",
+    )
+    .await
+    .expect("setting producer quota failed");
+
+    let now = Utc::now();
+    add_producer_quota_override(
+        &control_pool,
+        &control_url,
+        &slug,
+        &producer_name,
+        "sms",
+        class::MARKETING,
+        5,
+        now - chrono::Duration::days(2),
+        now - chrono::Duration::days(1),
+        "test-approver",
+        "test override",
+        "test-actor",
+    )
+    .await
+    .expect("adding producer quota override failed");
+
+    let tracker = QuotaTracker::new("UTC");
+    tracker
+        .refresh_config(&tenant_pool, now)
+        .await
+        .expect("refreshing quota config failed");
+
+    let first = tracker.check_and_record(producer_id, "sms", class::MARKETING, now);
+    assert_eq!(first, QuotaDecision::Admit);
+    let second = tracker.check_and_record(producer_id, "sms", class::MARKETING, now);
+    assert!(
+        matches!(second, QuotaDecision::Defer(_)),
+        "refresh_config's WHERE valid_from <= $1 AND valid_to > $1 filter must exclude \
+         an override whose valid_to is already in the past, leaving the base per_day \
+         limit (1) in effect"
+    );
+
+    tenant_pool.close().await;
+    drop_test_tenant(&control_pool, &db_name, &slug).await;
+}
