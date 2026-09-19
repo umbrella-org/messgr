@@ -13,10 +13,11 @@ Last updated: 2026-09-19
 
 ## IN DEVELOPMENT
 
-### messgr (0/1)
+### messgr (1/1)
 
 | id | title | depends-on |
 |---|---|---|
+| T-047 | Webhook receiver and delivery-receipt ingestion (messgr-webhook) | [] |
 
 ## IN REVIEW
 
@@ -38,7 +39,6 @@ Last updated: 2026-09-19
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
-| T-047 | Webhook receiver and delivery-receipt ingestion (messgr-webhook) | high | high | L | [] |  |
 
 ## TO DO (impact order, per child)
 
