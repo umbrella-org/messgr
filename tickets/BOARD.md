@@ -93,7 +93,7 @@ Last updated: 2026-09-19
 | T-039 | Dispatcher leader election (HA) | yes — MERGED: PR #54 (`0b67787`) merged to `main`. |
 | T-040 | Wire scheduled delivery and expiry into the outbox | yes — MERGED: PR #55 merged to `main` (`590f284`) |
 | T-041 | Cancellation endpoint with dispatch-time race check | yes — MERGED: PR #57 merged to `main` (`35812b4`). |
-| T-042 | Producer quotas and producer_usage enforcement | no — publish-gated |
+| T-042 | Producer quotas and producer_usage enforcement | yes — merged to main (PR #58, 8099fa3) |
 | T-043 | Quiet hours with jitter and DST handling | yes — MERGED: PR #59 (`feat/T-043-quiet-hours-with-jitter-and-dst-handling` → `main`, merge commit `43813e3`) |
 
 ## DROPPED

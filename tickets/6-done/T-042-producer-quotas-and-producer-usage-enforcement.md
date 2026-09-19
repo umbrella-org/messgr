@@ -862,3 +862,11 @@ cost: estimated L, actual L
 - 2026-09-18 — IN REVIEW → DONE: reviewed: 0 blocking, 2 non-blocking (F1 new ticket T-044, F2 noted)
 - 2026-09-18 — pushed `feat/T-042-producer-quotas-and-producer-usage-enforcement`, opened PR #58
   (`https://github.com/umbrella-org/messgr/pull/58`) — awaiting human merge.
+- 2026-09-19 — merging `main` (T-043) into the branch to unblock PR #58 found both tickets'
+  migrations filed as `0016_*` (cut independently, before either merged) and both gates written
+  assuming they'd run immediately after the consent gate. Renamed this ticket's migration to
+  `migrations/tenant/0017_producer_quota.sql` (main's `0016_quiet_hours_policy.sql` already
+  shipped) and ordered the two gates quota-then-quiet-hours in `try_process` (in-process counter
+  check before quiet-hours' DB round trip, matching the chain's existing cheapest-first
+  placement) — `docs/user-manual/dispatcher.adoc` updated to match.
+- 2026-09-19 — merged to main (PR #58, 8099fa3)
