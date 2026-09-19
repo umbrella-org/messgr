@@ -507,6 +507,103 @@ async fn create_comms_writes_ledger_and_outbox_and_idempotency_replays() {
     teardown(&fixture, Some(&_cert_subject)).await;
 }
 
+/// T-046: proves `channel = "email"` / `"whatsapp"` flow through
+/// `validate_channel` and `kind_for_channel` end to end, not just by code
+/// reading — mirrors
+/// `create_comms_writes_ledger_and_outbox_and_idempotency_replays`'s setup,
+/// trimmed to what's being proven here (channel acceptance + address kind
+/// resolution, not ledger/outbox/idempotency, which is already covered for
+/// SMS).
+async fn assert_create_comms_accepts_channel(
+    channel: &str,
+    destination: &str,
+    expected_kind: &str,
+) {
+    let fixture = setup("en-US").await;
+    let vault = vault_keystore();
+
+    // Reuses the `balance-alert` v1/en-US template `setup()` already approved for
+    // `"sms"` — `template` is keyed on `(template_id, version, locale)` only
+    // (migrations/tenant/0005_template.sql:17), and `template_repo::find` never
+    // filters on `channel`, so a second approval under the same id/version/locale
+    // is rejected as already-approved and would prove nothing extra anyway.
+
+    let (identity_pem, cert_subject) =
+        register_test_producer(&fixture, &vault, &format!("{channel}-caller")).await;
+    let client = mtls_client(
+        &fixture.server_common_name,
+        fixture.server.addr,
+        &identity_pem,
+        &fixture.server_ca_pem,
+    );
+    let url = format!(
+        "https://{}:{}/comms",
+        fixture.server_common_name,
+        fixture.server.addr.port()
+    );
+
+    let customer_id = Uuid::new_v4();
+    let mut body = sample_body(customer_id);
+    body["channel"] = serde_json::json!(channel);
+    body["destination"] = serde_json::json!(destination);
+
+    let response = client
+        .post(&url)
+        .header("Idempotency-Key", &unique_name("idem"))
+        .json(&body)
+        .send()
+        .await
+        .expect("request failed");
+    assert_eq!(response.status(), 201, "expected 201 Created");
+    let response_body: serde_json::Value =
+        response.json().await.expect("parsing response failed");
+    let comms_request_id: Uuid = response_body["comms_request_id"]
+        .as_str()
+        .expect("comms_request_id must be a string")
+        .parse()
+        .expect("comms_request_id must be a uuid");
+
+    let tenant_pool = connect_tenant_pool(
+        &fixture.control_pool,
+        &fixture.control_url,
+        fixture.tenant_id,
+        &fixture.database_name,
+        5,
+    )
+    .await
+    .expect("connecting to tenant pool failed")
+    .pool;
+
+    let ledger_channel: String =
+        sqlx::query_scalar("SELECT channel FROM comms_request WHERE id = $1")
+            .bind(comms_request_id)
+            .fetch_one(&tenant_pool)
+            .await
+            .expect("ledger row must exist");
+    assert_eq!(ledger_channel, channel);
+
+    let address_kind: String =
+        sqlx::query_scalar("SELECT kind FROM customer_address WHERE customer_id = $1")
+            .bind(customer_id)
+            .fetch_one(&tenant_pool)
+            .await
+            .expect("customer_address row must exist");
+    assert_eq!(address_kind, expected_kind);
+
+    tenant_pool.close().await;
+    teardown(&fixture, Some(&cert_subject)).await;
+}
+
+#[tokio::test]
+async fn create_comms_accepts_email_channel_and_resolves_address_kind() {
+    assert_create_comms_accepts_channel("email", "jordan@example.com", "email").await;
+}
+
+#[tokio::test]
+async fn create_comms_accepts_whatsapp_channel_and_resolves_address_kind() {
+    assert_create_comms_accepts_channel("whatsapp", "+15550199", "whatsapp").await;
+}
+
 #[tokio::test]
 async fn concurrent_identical_requests_do_not_double_send() {
     let fixture = setup("en-US").await;
