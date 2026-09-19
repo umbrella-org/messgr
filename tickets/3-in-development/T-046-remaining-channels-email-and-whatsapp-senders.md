@@ -190,3 +190,4 @@ design doc changes — build-order §14 step 11 itself carries no per-step "done
 
 - 2026-09-19 — created (TO DO). source: audit: build-order step 11, remaining gap identified when auditing unticketed steps against the board
 - 2026-09-19 — TO DO → READY: plan complete
+- 2026-09-19 — READY → IN DEVELOPMENT: picked up
