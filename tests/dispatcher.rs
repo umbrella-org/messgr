@@ -349,6 +349,197 @@ fn small_cache() -> KeyCache {
     KeyCache::new(NonZeroUsize::new(8).unwrap(), Duration::from_secs(60))
 }
 
+/// Same shape as `write_ready_outbox_row`, but threads `channel` through to
+/// `insert_transactional` instead of hardcoding `"sms"` — T-046 needs one
+/// outbox row per non-SMS channel, and retrofitting `channel` onto
+/// `write_outbox_row_with_verification` would touch its ~15 existing
+/// SMS-only call sites for nothing.
+#[allow(clippy::too_many_arguments)]
+async fn write_ready_outbox_row_for_channel(
+    tenant: &TestTenant,
+    vault: &VaultKeyStore,
+    cache: &KeyCache,
+    channel: &str,
+    destination: &str,
+    body: &str,
+) -> (Uuid, DateTime<Utc>, Uuid) {
+    let tenant_id =
+        messgr::tenant::repo::find_by_slug(&tenant.control_pool, &tenant.slug)
+            .await
+            .expect("tenant lookup failed")
+            .expect("tenant must exist")
+            .id;
+
+    let customer_id = Uuid::new_v4();
+    let dek = get_or_create_dek(
+        &tenant.tenant_pool,
+        vault,
+        cache,
+        &tenant.mount,
+        customer_id,
+    )
+    .await
+    .expect("get_or_create_dek failed");
+
+    let comms_request_id = Uuid::new_v4();
+    let aad = comms_request_id.as_bytes();
+    let destination_ciphertext = encryption::encrypt(&dek, aad, destination.as_bytes())
+        .expect("encrypting destination failed");
+    let payload_ciphertext = encryption::encrypt(&dek, aad, body.as_bytes())
+        .expect("encrypting payload failed");
+
+    let address_id = Uuid::new_v4();
+    insert_customer_address(
+        tenant,
+        address_id,
+        customer_id,
+        &destination_ciphertext,
+        Some(Utc::now()),
+    )
+    .await;
+
+    let outcome = insert_transactional(
+        &tenant.tenant_pool,
+        &unique_name("idempotency-key"),
+        comms_request_id,
+        tenant_id,
+        customer_id,
+        channel,
+        "transactional",
+        1,
+        "balance-alert",
+        1,
+        None,
+        b"unused-hmac",
+        &destination_ciphertext,
+        &payload_ciphertext,
+        Uuid::new_v4(),
+        address_id,
+        None,
+        None,
+    )
+    .await
+    .expect("insert_transactional failed");
+
+    let created_at: DateTime<Utc> = match outcome {
+        messgr::ingest::repo::InsertOutcome::Created => {
+            sqlx::query_scalar("SELECT created_at FROM comms_request WHERE id = $1")
+                .bind(comms_request_id)
+                .fetch_one(&tenant.tenant_pool)
+                .await
+                .expect("fetching created_at failed")
+        }
+        messgr::ingest::repo::InsertOutcome::Replayed { .. } => {
+            panic!("a fresh idempotency key must never replay")
+        }
+    };
+
+    (comms_request_id, created_at, customer_id)
+}
+
+/// T-046: proves `try_process`'s claim/decrypt/send/write gate chain has no
+/// hidden SMS-only assumption — mirrors
+/// `successful_send_writes_sent_event_and_final_status_and_deletes_the_outbox_row`
+/// for a non-SMS channel.
+async fn assert_successful_send_for_channel(channel: &str, destination: &str) {
+    let vault = vault_keystore();
+    let tenant = provision_test_tenant(&vault).await;
+    let cache = small_cache();
+
+    let mock_server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/messages"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "message_id": format!("msg-sent-{channel}-1"),
+            "status": "queued",
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let (comms_request_id, created_at, customer_id) =
+        write_ready_outbox_row_for_channel(
+            &tenant,
+            &vault,
+            &cache,
+            channel,
+            destination,
+            "hello there",
+        )
+        .await;
+
+    let sender: Arc<dyn Sender> =
+        Arc::new(HttpSender::new(mock_server.uri(), "test-key".to_string()));
+    let ctx = DispatcherContext {
+        pool: tenant.tenant_pool.clone(),
+        keystore: Arc::new(vault_keystore()),
+        cache: Arc::new(cache),
+        mount: tenant.mount.clone(),
+        sender,
+        verification_mode: "observe".to_string(),
+        default_timezone: "UTC".to_string(),
+        quiet_hours_policy: None,
+        kill_switches: Arc::new(KillSwitchCache::new()),
+        draining: Arc::new(RwLock::new(HashMap::new())),
+        quota_day_boundary_tz: "UTC".to_string(),
+        quota: Arc::new(QuotaTracker::new("UTC")),
+    };
+
+    let claimed = repo::claim(
+        &tenant.tenant_pool,
+        channel,
+        10,
+        Utc::now() + chrono::Duration::minutes(2),
+        &no_exclusion(),
+    )
+    .await
+    .expect("claim failed");
+    assert_eq!(claimed.len(), 1);
+    assert_eq!(claimed[0].comms_request_id, comms_request_id);
+
+    try_process(&ctx, &claimed[0])
+        .await
+        .expect("try_process failed");
+
+    let final_status: Option<String> = sqlx::query_scalar(
+        "SELECT final_status FROM comms_request WHERE created_at = $1 AND id = $2",
+    )
+    .bind(created_at)
+    .bind(comms_request_id)
+    .fetch_one(&tenant.tenant_pool)
+    .await
+    .expect("fetching final_status failed");
+    assert_eq!(final_status.as_deref(), Some("sent"));
+
+    let events: Vec<(String, Option<String>, Option<String>)> = sqlx::query_as(
+        "SELECT event_type, provider_ref, provider_status FROM comms_event WHERE comms_request_id = $1",
+    )
+    .bind(comms_request_id)
+    .fetch_all(&tenant.tenant_pool)
+    .await
+    .expect("fetching comms_event rows failed");
+    assert_eq!(
+        events,
+        vec![(
+            "sent".to_string(),
+            Some(format!("msg-sent-{channel}-1")),
+            Some("queued".to_string())
+        )]
+    );
+
+    let _ = customer_id;
+    tenant.cleanup().await;
+}
+
+#[tokio::test]
+async fn successful_send_for_email_channel_writes_sent_event_and_final_status() {
+    assert_successful_send_for_channel("email", "jordan@example.com").await;
+}
+
+#[tokio::test]
+async fn successful_send_for_whatsapp_channel_writes_sent_event_and_final_status() {
+    assert_successful_send_for_channel("whatsapp", "+15550199").await;
+}
+
 #[tokio::test]
 async fn successful_send_writes_sent_event_and_final_status_and_deletes_the_outbox_row()
 {
