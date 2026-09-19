@@ -17,6 +17,7 @@ use crate::keystore::KeyStore;
 use crate::kill_switch::cache::{self, ChannelExclusion, KillSwitchCache};
 use crate::kill_switch::model::KillSwitch;
 use crate::producer_quota::tracker::{QuotaDecision, QuotaTracker};
+use crate::quiet_hours::{model::QuietHoursPolicy, window};
 use crate::sender::{Sender, SenderError};
 use crate::tenant_config::model::verification_mode;
 
@@ -60,6 +61,14 @@ pub struct DispatcherContext {
     /// T-036) — loaded once at `messgr-dispatcher` startup, like every other
     /// `tenant_config` field except kill switches, and never hot-reloaded.
     pub verification_mode: String,
+    /// `tenant_config.default_timezone` (DESIGN.md §5, §6.1, T-043) -- loaded
+    /// once at startup, like `verification_mode`, never hot-reloaded.
+    pub default_timezone: String,
+    /// The tenant's one `quiet_hours_policy` row (`scope = 'default'`,
+    /// T-043 decision 1), `None` until an operator runs `quiet-hours set` --
+    /// the gate is then a no-op, not a block, since there is nothing to
+    /// enforce yet.
+    pub quiet_hours_policy: Option<QuietHoursPolicy>,
     pub kill_switches: Arc<KillSwitchCache>,
     /// Released switches whose backlog hasn't finished the release-drain
     /// ramp yet (T-016 decision 4). Kept separate from `kill_switches`
@@ -297,7 +306,9 @@ pub async fn try_process(
 
     // Producer quota gate (DESIGN.md §5.1, T-042) — after every terminal/consent
     // gate above (a message already going to be blocked never spends quota
-    // budget) and before decrypt (a deferred message spends no Vault/DEK work).
+    // budget) and before quiet hours/decrypt: an in-process counter check, so
+    // it runs ahead of quiet hours' DB round trip on the same cheapest-first
+    // principle as every gate above.
     match ctx.quota.check_and_record(
         row.producer_id,
         &row.channel,
@@ -314,6 +325,28 @@ pub async fn try_process(
             );
         }
         QuotaDecision::Defer(next_attempt_at) => {
+            repo::reschedule_retry(&ctx.pool, row.comms_request_id, next_attempt_at)
+                .await?;
+            return Ok(());
+        }
+    }
+
+    // Quiet hours gate (DESIGN.md §5, §6.1, T-043) -- no class check needed
+    // (decision 3; auth never reaches the outbox, T-011 decision 3). `None`
+    // policy means the tenant hasn't configured a window yet. Checked after
+    // the producer quota gate above (cheapest-first: quota is an in-process
+    // lookup, this needs a DB round trip) and before decrypt (a deferred
+    // message spends no Vault/DEK work).
+    if let Some(policy) = ctx.quiet_hours_policy.as_ref() {
+        let customer_tz = repo::load_customer_timezone(&ctx.pool, row.customer_id)
+            .await?
+            .unwrap_or_else(|| ctx.default_timezone.clone());
+        if let Some(next_attempt_at) = window::resolve_reschedule(
+            Utc::now(),
+            &customer_tz,
+            &ctx.default_timezone,
+            policy,
+        ) {
             repo::reschedule_retry(&ctx.pool, row.comms_request_id, next_attempt_at)
                 .await?;
             return Ok(());

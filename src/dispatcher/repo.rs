@@ -183,6 +183,21 @@ pub async fn load_verified_at(
     Ok(result.flatten())
 }
 
+/// `customer.timezone` for the quiet-hours gate (DESIGN.md §5, §6.1, T-043).
+/// The column itself is `NOT NULL`, but there is no FK tying `outbox.customer_id`
+/// to `customer.id` (T-009 decision 1, same absence `load_verified_at` notes for
+/// `address_id`), so a missing row still collapses to `None` here -- the caller
+/// falls back to the tenant's `default_timezone` either way (decision 2).
+pub async fn load_customer_timezone(
+    pool: &PgPool,
+    customer_id: Uuid,
+) -> Result<Option<String>, sqlx::Error> {
+    sqlx::query_scalar("SELECT timezone FROM customer WHERE id = $1")
+        .bind(customer_id)
+        .fetch_optional(pool)
+        .await
+}
+
 /// A non-terminal `comms_event` row (T-036): unlike `write_terminal`, this
 /// touches no `outbox`/`comms_request` state — used by the verification
 /// gate's `observe` mode, which records the outcome but still lets the send

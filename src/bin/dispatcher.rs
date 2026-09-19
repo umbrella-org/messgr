@@ -52,6 +52,11 @@ const DEFAULT_KILL_SWITCH_RELEASE_RATE: i32 = 500;
 /// `verification_mode` column default (T-036) -- used when a tenant has no
 /// `tenant_config` row at all (T-007 decision 4: no auto-seeding).
 const DEFAULT_VERIFICATION_MODE: &str = "observe";
+/// Used when a tenant has no `tenant_config` row at all (T-007 decision 4:
+/// no auto-seeding) -- never server-local time (§6.1's "unknown timezone"
+/// case), so this is an explicit institution default, not a fallback to
+/// wherever the dispatcher process happens to run.
+const DEFAULT_TIMEZONE: &str = "UTC";
 const KILL_SWITCH_POLL_INTERVAL: Duration = Duration::from_secs(30);
 /// Used when a tenant has no `tenant_config` row at all (T-007 decision 4:
 /// no auto-seeding) -- matches `migrations/tenant/0002_tenant_config.sql`'s
@@ -160,6 +165,13 @@ async fn main() {
         .map(|c| c.quota_day_boundary_tz.clone())
         .unwrap_or_else(|| DEFAULT_QUOTA_DAY_BOUNDARY_TZ.to_string());
     let quota = Arc::new(QuotaTracker::new(&quota_day_boundary_tz));
+    let default_timezone = tenant_config
+        .as_ref()
+        .map(|c| c.default_timezone.clone())
+        .unwrap_or_else(|| DEFAULT_TIMEZONE.to_string());
+    let quiet_hours_policy = messgr::quiet_hours::repo::load_default(&tenant_pool)
+        .await
+        .expect("loading quiet_hours_policy failed");
 
     let kill_switches = Arc::new(KillSwitchCache::new());
     let draining = Arc::new(RwLock::new(HashMap::new()));
@@ -215,6 +227,8 @@ async fn main() {
                 mount: tenant.vault_mount.clone(),
                 sender,
                 verification_mode: verification_mode.clone(),
+                default_timezone: default_timezone.clone(),
+                quiet_hours_policy: quiet_hours_policy.clone(),
                 kill_switches: kill_switches.clone(),
                 draining: draining.clone(),
                 quota_day_boundary_tz: quota_day_boundary_tz.clone(),

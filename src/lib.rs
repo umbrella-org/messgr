@@ -20,6 +20,7 @@ pub mod producer;
 pub mod producer_quota;
 pub mod profile;
 pub mod provider_config;
+pub mod quiet_hours;
 pub mod sender;
 pub mod stats;
 pub mod suppression;

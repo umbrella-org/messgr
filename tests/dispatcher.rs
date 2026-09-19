@@ -30,6 +30,7 @@ use messgr::producer_quota::configure::set_producer_quota;
 use messgr::producer_quota::model::enforcement;
 use messgr::producer_quota::tracker::QuotaTracker;
 use messgr::profile::Profile;
+use messgr::quiet_hours::model::QuietHoursPolicy;
 use messgr::sender::Sender;
 use messgr::sender::http::HttpSender;
 use messgr::tenant::pool::connect_tenant_pool;
@@ -378,6 +379,8 @@ async fn successful_send_writes_sent_event_and_final_status_and_deletes_the_outb
         mount: tenant.mount.clone(),
         sender,
         verification_mode: "observe".to_string(),
+        default_timezone: "UTC".to_string(),
+        quiet_hours_policy: None,
         kill_switches: Arc::new(KillSwitchCache::new()),
         draining: Arc::new(RwLock::new(HashMap::new())),
         quota_day_boundary_tz: "UTC".to_string(),
@@ -468,6 +471,8 @@ async fn terminal_provider_rejection_writes_failed_event_and_final_status_with_n
         mount: tenant.mount.clone(),
         sender,
         verification_mode: "observe".to_string(),
+        default_timezone: "UTC".to_string(),
+        quiet_hours_policy: None,
         kill_switches: Arc::new(KillSwitchCache::new()),
         draining: Arc::new(RwLock::new(HashMap::new())),
         quota_day_boundary_tz: "UTC".to_string(),
@@ -557,6 +562,8 @@ async fn transient_provider_failure_requeues_with_cleared_lease_and_backoff() {
         mount: tenant.mount.clone(),
         sender,
         verification_mode: "observe".to_string(),
+        default_timezone: "UTC".to_string(),
+        quiet_hours_policy: None,
         kill_switches: Arc::new(KillSwitchCache::new()),
         draining: Arc::new(RwLock::new(HashMap::new())),
         quota_day_boundary_tz: "UTC".to_string(),
@@ -645,6 +652,8 @@ async fn transient_http_failure_requeues() {
         mount: tenant.mount.clone(),
         sender,
         verification_mode: "observe".to_string(),
+        default_timezone: "UTC".to_string(),
+        quiet_hours_policy: None,
         kill_switches: Arc::new(KillSwitchCache::new()),
         draining: Arc::new(RwLock::new(HashMap::new())),
         quota_day_boundary_tz: "UTC".to_string(),
@@ -713,6 +722,8 @@ async fn retries_exhausted_after_max_attempts_terminal_fails() {
         mount: tenant.mount.clone(),
         sender,
         verification_mode: "observe".to_string(),
+        default_timezone: "UTC".to_string(),
+        quiet_hours_policy: None,
         kill_switches: Arc::new(KillSwitchCache::new()),
         draining: Arc::new(RwLock::new(HashMap::new())),
         quota_day_boundary_tz: "UTC".to_string(),
@@ -815,6 +826,8 @@ async fn seventh_attempt_still_reschedules_one_short_of_the_cap() {
         mount: tenant.mount.clone(),
         sender,
         verification_mode: "observe".to_string(),
+        default_timezone: "UTC".to_string(),
+        quiet_hours_policy: None,
         kill_switches: Arc::new(KillSwitchCache::new()),
         draining: Arc::new(RwLock::new(HashMap::new())),
         quota_day_boundary_tz: "UTC".to_string(),
@@ -900,6 +913,8 @@ async fn attempts_past_the_cap_still_terminal_fails() {
         mount: tenant.mount.clone(),
         sender,
         verification_mode: "observe".to_string(),
+        default_timezone: "UTC".to_string(),
+        quiet_hours_policy: None,
         kill_switches: Arc::new(KillSwitchCache::new()),
         draining: Arc::new(RwLock::new(HashMap::new())),
         quota_day_boundary_tz: "UTC".to_string(),
@@ -1151,6 +1166,8 @@ async fn enforce_blocks_unverified_address_with_terminal_event_and_no_send() {
         mount: tenant.mount.clone(),
         sender,
         verification_mode: "enforce".to_string(),
+        default_timezone: "UTC".to_string(),
+        quiet_hours_policy: None,
         kill_switches: Arc::new(KillSwitchCache::new()),
         draining: Arc::new(RwLock::new(HashMap::new())),
         quota_day_boundary_tz: "UTC".to_string(),
@@ -1250,6 +1267,8 @@ async fn observe_records_unverified_address_and_still_sends() {
         mount: tenant.mount.clone(),
         sender,
         verification_mode: "observe".to_string(),
+        default_timezone: "UTC".to_string(),
+        quiet_hours_policy: None,
         kill_switches: Arc::new(KillSwitchCache::new()),
         draining: Arc::new(RwLock::new(HashMap::new())),
         quota_day_boundary_tz: "UTC".to_string(),
@@ -1354,6 +1373,8 @@ async fn verified_address_sends_normally_under_enforce() {
         mount: tenant.mount.clone(),
         sender,
         verification_mode: "enforce".to_string(),
+        default_timezone: "UTC".to_string(),
+        quiet_hours_policy: None,
         kill_switches: Arc::new(KillSwitchCache::new()),
         draining: Arc::new(RwLock::new(HashMap::new())),
         quota_day_boundary_tz: "UTC".to_string(),
@@ -1446,6 +1467,8 @@ async fn auth_class_skips_the_gate_even_when_unverified() {
         mount: tenant.mount.clone(),
         sender,
         verification_mode: "enforce".to_string(),
+        default_timezone: "UTC".to_string(),
+        quiet_hours_policy: None,
         kill_switches: Arc::new(KillSwitchCache::new()),
         draining: Arc::new(RwLock::new(HashMap::new())),
         quota_day_boundary_tz: "UTC".to_string(),
@@ -1556,6 +1579,8 @@ async fn an_active_suppression_entry_blocks_the_send() {
         mount: tenant.mount.clone(),
         sender,
         verification_mode: "observe".to_string(),
+        default_timezone: "UTC".to_string(),
+        quiet_hours_policy: None,
         kill_switches: Arc::new(KillSwitchCache::new()),
         draining: Arc::new(RwLock::new(HashMap::new())),
         quota_day_boundary_tz: "UTC".to_string(),
@@ -1654,6 +1679,8 @@ async fn an_expired_suppression_entry_no_longer_blocks() {
         mount: tenant.mount.clone(),
         sender,
         verification_mode: "observe".to_string(),
+        default_timezone: "UTC".to_string(),
+        quiet_hours_policy: None,
         kill_switches: Arc::new(KillSwitchCache::new()),
         draining: Arc::new(RwLock::new(HashMap::new())),
         quota_day_boundary_tz: "UTC".to_string(),
@@ -1738,6 +1765,8 @@ async fn expired_row_is_terminal_written_and_not_sent() {
         mount: tenant.mount.clone(),
         sender,
         verification_mode: "enforce".to_string(),
+        default_timezone: "UTC".to_string(),
+        quiet_hours_policy: None,
         kill_switches: Arc::new(KillSwitchCache::new()),
         draining: Arc::new(RwLock::new(HashMap::new())),
         quota_day_boundary_tz: "UTC".to_string(),
@@ -1842,6 +1871,8 @@ async fn marketing_without_any_consent_row_is_blocked_with_suppressed_consent() 
         mount: tenant.mount.clone(),
         sender,
         verification_mode: "observe".to_string(),
+        default_timezone: "UTC".to_string(),
+        quiet_hours_policy: None,
         kill_switches: Arc::new(KillSwitchCache::new()),
         draining: Arc::new(RwLock::new(HashMap::new())),
         quota_day_boundary_tz: "UTC".to_string(),
@@ -1938,6 +1969,8 @@ async fn marketing_with_an_explicit_opt_out_is_blocked() {
         mount: tenant.mount.clone(),
         sender,
         verification_mode: "observe".to_string(),
+        default_timezone: "UTC".to_string(),
+        quiet_hours_policy: None,
         kill_switches: Arc::new(KillSwitchCache::new()),
         draining: Arc::new(RwLock::new(HashMap::new())),
         quota_day_boundary_tz: "UTC".to_string(),
@@ -2042,6 +2075,8 @@ async fn marketing_with_an_explicit_opt_in_sends() {
         mount: tenant.mount.clone(),
         sender,
         verification_mode: "observe".to_string(),
+        default_timezone: "UTC".to_string(),
+        quiet_hours_policy: None,
         kill_switches: Arc::new(KillSwitchCache::new()),
         draining: Arc::new(RwLock::new(HashMap::new())),
         quota_day_boundary_tz: "UTC".to_string(),
@@ -2142,6 +2177,8 @@ async fn transactional_sends_without_any_consent_row() {
         mount: tenant.mount.clone(),
         sender,
         verification_mode: "observe".to_string(),
+        default_timezone: "UTC".to_string(),
+        quiet_hours_policy: None,
         kill_switches: Arc::new(KillSwitchCache::new()),
         draining: Arc::new(RwLock::new(HashMap::new())),
         quota_day_boundary_tz: "UTC".to_string(),
@@ -2236,6 +2273,8 @@ async fn cancelled_row_is_terminal_written_and_not_sent() {
         mount: tenant.mount.clone(),
         sender,
         verification_mode: "enforce".to_string(),
+        default_timezone: "UTC".to_string(),
+        quiet_hours_policy: None,
         kill_switches: Arc::new(KillSwitchCache::new()),
         draining: Arc::new(RwLock::new(HashMap::new())),
         quota_day_boundary_tz: "UTC".to_string(),
@@ -2350,6 +2389,8 @@ async fn a_marketing_producer_over_its_per_minute_limit_is_deferred_not_terminal
         mount: tenant.mount.clone(),
         sender,
         verification_mode: "observe".to_string(),
+        default_timezone: "UTC".to_string(),
+        quiet_hours_policy: None,
         kill_switches: Arc::new(KillSwitchCache::new()),
         draining: Arc::new(RwLock::new(HashMap::new())),
         quota_day_boundary_tz: "UTC".to_string(),
@@ -2508,6 +2549,8 @@ async fn a_transactional_producer_over_its_per_minute_limit_still_sends_and_is_c
         mount: tenant.mount.clone(),
         sender,
         verification_mode: "observe".to_string(),
+        default_timezone: "UTC".to_string(),
+        quiet_hours_policy: None,
         kill_switches: Arc::new(KillSwitchCache::new()),
         draining: Arc::new(RwLock::new(HashMap::new())),
         quota_day_boundary_tz: "UTC".to_string(),
@@ -2592,6 +2635,8 @@ async fn a_producer_with_no_configured_quota_row_is_never_blocked() {
         mount: tenant.mount.clone(),
         sender,
         verification_mode: "observe".to_string(),
+        default_timezone: "UTC".to_string(),
+        quiet_hours_policy: None,
         kill_switches: Arc::new(KillSwitchCache::new()),
         draining: Arc::new(RwLock::new(HashMap::new())),
         quota_day_boundary_tz: "UTC".to_string(),
@@ -2635,6 +2680,219 @@ async fn a_producer_with_no_configured_quota_row_is_never_blocked() {
     .await
     .expect("fetching final_status failed");
     assert_eq!(final_status.as_deref(), Some("sent"));
+
+    tenant.cleanup().await;
+}
+
+#[tokio::test]
+async fn a_send_during_quiet_hours_is_deferred_to_window_end_plus_jitter() {
+    let vault = vault_keystore();
+    let tenant = provision_test_tenant(&vault).await;
+    let cache = small_cache();
+
+    let mock_server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/messages"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "message_id": "msg-should-not-send",
+            "status": "queued",
+        })))
+        .expect(0)
+        .mount(&mock_server)
+        .await;
+
+    let (comms_request_id, created_at, _customer_id) =
+        write_outbox_row_with_verification(
+            &tenant,
+            &vault,
+            &cache,
+            "+15550100",
+            "hello there",
+            "transactional",
+            Some(Utc::now()),
+            unique_name("hmac").as_bytes(),
+            None,
+            Uuid::new_v4(),
+        )
+        .await;
+
+    // customer.timezone is "UTC" (insert_customer_address's own convention),
+    // matching default_timezone below, so the window is evaluated in UTC.
+    // Built from "now" so the window always contains it, regardless of when
+    // this test runs.
+    let now = Utc::now();
+    let window_end = now + chrono::Duration::hours(1);
+    let policy = QuietHoursPolicy {
+        scope: "default".to_string(),
+        scope_key: String::new(),
+        start_local: (now - chrono::Duration::hours(1)).time(),
+        end_local: window_end.time(),
+    };
+
+    let sender: Arc<dyn Sender> =
+        Arc::new(HttpSender::new(mock_server.uri(), "test-key".to_string()));
+    let ctx = DispatcherContext {
+        pool: tenant.tenant_pool.clone(),
+        keystore: Arc::new(vault_keystore()),
+        cache: Arc::new(cache),
+        mount: tenant.mount.clone(),
+        sender,
+        verification_mode: "observe".to_string(),
+        default_timezone: "UTC".to_string(),
+        quiet_hours_policy: Some(policy),
+        kill_switches: Arc::new(KillSwitchCache::new()),
+        draining: Arc::new(RwLock::new(HashMap::new())),
+        quota_day_boundary_tz: "UTC".to_string(),
+        quota: Arc::new(QuotaTracker::new("UTC")),
+    };
+
+    let claimed = repo::claim(
+        &tenant.tenant_pool,
+        "sms",
+        10,
+        Utc::now() + chrono::Duration::minutes(2),
+        &no_exclusion(),
+    )
+    .await
+    .expect("claim failed");
+    assert_eq!(claimed.len(), 1);
+    assert_eq!(claimed[0].comms_request_id, comms_request_id);
+
+    try_process(&ctx, &claimed[0])
+        .await
+        .expect("try_process failed");
+
+    let row: (Option<DateTime<Utc>>, DateTime<Utc>) = sqlx::query_as(
+        "SELECT leased_until, next_attempt_at FROM outbox WHERE comms_request_id = $1",
+    )
+    .bind(comms_request_id)
+    .fetch_one(&tenant.tenant_pool)
+    .await
+    .expect("outbox row must still exist, not be deleted");
+    let (leased_until, next_attempt_at) = row;
+    assert_eq!(leased_until, None, "the lease must be cleared on defer");
+    assert!(
+        next_attempt_at >= window_end
+            && next_attempt_at <= window_end + chrono::Duration::minutes(30),
+        "next_attempt_at must land between window end and window end + 30 minutes of jitter"
+    );
+
+    let event_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM comms_event WHERE comms_request_id = $1",
+    )
+    .bind(comms_request_id)
+    .fetch_one(&tenant.tenant_pool)
+    .await
+    .expect("counting comms_event rows failed");
+    assert_eq!(event_count, 0, "a deferred send writes no comms_event row");
+
+    let final_status: Option<String> = sqlx::query_scalar(
+        "SELECT final_status FROM comms_request WHERE created_at = $1 AND id = $2",
+    )
+    .bind(created_at)
+    .bind(comms_request_id)
+    .fetch_one(&tenant.tenant_pool)
+    .await
+    .expect("fetching final_status failed");
+    assert_eq!(final_status, None, "a deferred send is not terminal");
+
+    tenant.cleanup().await;
+}
+
+#[tokio::test]
+async fn a_send_outside_quiet_hours_is_unaffected() {
+    let vault = vault_keystore();
+    let tenant = provision_test_tenant(&vault).await;
+    let cache = small_cache();
+
+    let mock_server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/messages"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "message_id": "msg-outside-quiet-hours",
+            "status": "queued",
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let (comms_request_id, created_at, _customer_id) =
+        write_outbox_row_with_verification(
+            &tenant,
+            &vault,
+            &cache,
+            "+15550100",
+            "hello there",
+            "transactional",
+            Some(Utc::now()),
+            unique_name("hmac").as_bytes(),
+            None,
+            Uuid::new_v4(),
+        )
+        .await;
+
+    // A one-minute window twelve hours away from "now" never contains it,
+    // proving the gate is not a universal block just because a policy is
+    // configured.
+    let now = Utc::now();
+    let policy = QuietHoursPolicy {
+        scope: "default".to_string(),
+        scope_key: String::new(),
+        start_local: (now + chrono::Duration::hours(12)).time(),
+        end_local: (now + chrono::Duration::hours(12) + chrono::Duration::minutes(1))
+            .time(),
+    };
+
+    let sender: Arc<dyn Sender> =
+        Arc::new(HttpSender::new(mock_server.uri(), "test-key".to_string()));
+    let ctx = DispatcherContext {
+        pool: tenant.tenant_pool.clone(),
+        keystore: Arc::new(vault_keystore()),
+        cache: Arc::new(cache),
+        mount: tenant.mount.clone(),
+        sender,
+        verification_mode: "observe".to_string(),
+        default_timezone: "UTC".to_string(),
+        quiet_hours_policy: Some(policy),
+        kill_switches: Arc::new(KillSwitchCache::new()),
+        draining: Arc::new(RwLock::new(HashMap::new())),
+        quota_day_boundary_tz: "UTC".to_string(),
+        quota: Arc::new(QuotaTracker::new("UTC")),
+    };
+
+    let claimed = repo::claim(
+        &tenant.tenant_pool,
+        "sms",
+        10,
+        Utc::now() + chrono::Duration::minutes(2),
+        &no_exclusion(),
+    )
+    .await
+    .expect("claim failed");
+    assert_eq!(claimed.len(), 1);
+    assert_eq!(claimed[0].comms_request_id, comms_request_id);
+
+    try_process(&ctx, &claimed[0])
+        .await
+        .expect("try_process failed");
+
+    let final_status: Option<String> = sqlx::query_scalar(
+        "SELECT final_status FROM comms_request WHERE created_at = $1 AND id = $2",
+    )
+    .bind(created_at)
+    .bind(comms_request_id)
+    .fetch_one(&tenant.tenant_pool)
+    .await
+    .expect("fetching final_status failed");
+    assert_eq!(final_status.as_deref(), Some("sent"));
+
+    let outbox_count: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM outbox WHERE comms_request_id = $1")
+            .bind(comms_request_id)
+            .fetch_one(&tenant.tenant_pool)
+            .await
+            .expect("counting outbox rows failed");
+    assert_eq!(outbox_count, 0, "a normal send removes the outbox row");
 
     tenant.cleanup().await;
 }
