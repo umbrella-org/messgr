@@ -45,10 +45,15 @@ Last updated: 2026-09-19
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
+| T-052 | OTP fast path: sms-sender bypassing the queue | critical | high | L | [] |  |
+| T-054 | Cloud enablement: messgr-otp, platform console, platform kill switches, offboarding modes, second region | critical | high | XL | [] |  |
+| T-051 | SMS provider failover | high | medium | M | [] |  |
 | T-046 | Remaining channels: email and WhatsApp senders | high | medium | L | [] |  |
 | T-047 | Webhook receiver and delivery-receipt ingestion (messgr-webhook) | high | high | L | [] |  |
 | T-049 | Admin panel: quota dashboard, kill-switch console, scheduled queue, producer registry | high | medium | L | [T-048] |  |
+| T-053 | Bulk campaign path: DEK-unwrap-at-scale and ingest admission rate limiting | high | high | L | [] |  |
 | T-048 | Query API and UI: AuthProvider, MockProvider, customer/campaign views | high | high | XL | [] |  |
+| T-050 | Erasure tooling: crypto-shred and physical-redaction commands, erasure audit log | high | high | XL | [] |  |
 | T-045 | Customer event feed consumer and nightly reconciliation | medium | high | L | [] |  |
 
 ## DONE
