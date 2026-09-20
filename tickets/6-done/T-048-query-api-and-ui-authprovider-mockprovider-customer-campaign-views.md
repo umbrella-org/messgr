@@ -761,6 +761,83 @@ Branch tip before this round's fixes: `e1d9bf0`. Diff: `git diff e1d9bf0..e3b085
 (isolated, per round 1's flakiness note) — 30/30 pass; full `cargo test` (all binaries) — 0
 failures.
 
+**Correction (round-3 finding F9, 2026-09-20):** the sentence above claiming the fix was
+"confirmed by inspection" that the pre-fix template output "would [be] reject[ed]" by the parser
+is imprecise, and the same claim in F4's own evidence paragraph above is factually wrong, not
+just imprecise: `chrono::DateTime<Utc>`'s `FromStr` (what `serde`'s deserializer uses) is
+lenient and parses the pre-fix Display format (`"2024-01-01 12:00:00 UTC"`) successfully — it is
+not "RFC 3339 only" as F4 stated. The actual pre-fix failure, confirmed by round-3's re-review
+mutation-testing the reverted template, is that the unencoded output breaks *URI construction
+itself* (a raw space in the query string) before the parser ever runs — `InvalidUriChar`, not a
+rejected parse. The `+` in the RFC 3339 offset needing percent-encoding against
+`form_urlencoded`'s literal-`+`-as-space behavior remains accurate and load-bearing; only the
+"parser rejects the old format" half of the claim was wrong. The shipped fix (RFC 3339 +
+`urlencode`) is unaffected — still correct and sufficient — this corrects only the causal
+narrative recorded above and in F4's evidence.
+
+### Scoped re-review — round 3
+
+**Reviewer independence (step 0):** this session authored the round-2 rework fixes (commit
+`e3b0858`) itself, so the same trigger as rounds 1/2 applies: delegated the audits (steps 2–4a)
+to a freshly spawned, independent sub-agent with no memory of writing the code, briefed
+adversarially and instructed to find defects rather than confirm the work. Its findings were
+re-verified by hand before being recorded here (step 0: "delegation buys independence, not
+accuracy") — in particular, F9 below was independently reproduced (not just trusted): a
+throwaway parse check confirmed `chrono::DateTime<Utc>: FromStr` accepts the pre-fix Display
+format.
+
+**Scope note:** this round's mandatory scope is F4/F5's fix (commit `e3b0858`) and the diff that
+closed them, `git diff e1d9bf0..e3b0858` (protocol §1). The delegated audit re-ran the
+acceptance suite and configured commands, mutation-tested the new regression test (reverted the
+template fix locally, confirmed the new test fails, restored it), checked all four F5 call sites
+for divergence, swept the addendum's Step 2/3/4/4a items and AGENTS.md's ten hard invariants
+against this diff, and audited the fix's own replacement prose for accuracy — which is what
+surfaced F9.
+
+**Commands (step 2):** `just build` — pass. `just lint` — pass. `just docs-check` — pass.
+`cargo test --test query_api` — 8/8 pass (new test `ui_timeline_detail_link_is_followable`
+included). `cargo test --test dispatcher -- --test-threads=1` — 30/30 pass (isolated, per round
+1's flakiness note). `cargo test --test erasure_coverage` — 1/1 pass. Full `cargo test` (all
+binaries + lib + doc-tests, default parallel) — exit 0, no failures.
+
+**F4/F5 verified closed:** see the correction note directly above this section for the full
+detail. Summary — F4: `templates/query_api/timeline.html:31` now emits
+`row.created_at.to_rfc3339()|urlencode`; Askama 0.12.1's `urlencode` filter is in its default
+feature set (confirmed against the vendored crate's `Cargo.toml` and this repo's `Cargo.lock`),
+and its character set percent-encodes both `:` and `+`, which is what `axum`'s
+`form_urlencoded`-based `Query` extractor needs. The regression test was mutation-tested for
+real (reverted the template line, confirmed `ui_timeline_detail_link_is_followable` fails with
+an `InvalidUriChar` panic, restored the file, confirmed `git status` clean and the suite green
+again) — it is a genuine regression test, not a tautology. A repo-wide grep found no other
+template with the same raw-`Display`-inside-an-`href` pattern. F5: the stale
+"restricted at the extractor" comment above `handlers::comms_detail`'s inline check is corrected;
+all four call sites (`handlers::comms_detail`, `handlers::customer_timeline`,
+`views::ui_comms_detail`, `views::ui_customer_timeline`) confirmed still routing through the one
+shared `identity_owns` predicate, none diverged; Decision 12's rewritten text matches the shipped
+code line-for-line.
+
+| id | severity | class | disposition | description | evidence | suggestion |
+|---|---|---|---|---|---|---|
+| F9 | non-blocking | other | fixed inline | F4's evidence paragraph (round 2) and the round-2 "Rework fix record" both asserted the pre-fix template broke because chrono's `DateTime<Utc>` deserializer "only accepts RFC 3339" — verified false: `FromStr` is lenient and parses the pre-fix Display format (`"2024-01-01 12:00:00 UTC"`) successfully. The real pre-fix failure is that the unencoded output isn't a valid URI component (a raw space), which fails before any date parsing happens; separately, the RFC 3339 offset's `+` genuinely does need percent-encoding against `form_urlencoded`'s literal-`+`-as-space decoding, so that half of the original reasoning holds. No code defect — the shipped fix (RFC 3339 + `urlencode`) is correct and sufficient regardless of which half of the causal story was right; this is a reasoning error in the ticket's own review/fix-record prose, authored on this branch. None of the closed class vocabulary's other tests fit a reasoning error in review prose itself (not a stale reference made false by a later change, not a confirmed design decision, not ambiguous spec) — `other`, per the vocabulary's own fallback rule. | F4 row above; "Rework fix record — round 2" F4 paragraph; `src/query_api/handlers.rs:58-60` (`CommsDetailQuery { created_at: DateTime<Utc> }`); independently reproduced via a throwaway parse check (`"2024-01-01 12:00:00 UTC".parse::<chrono::DateTime<chrono::Utc>>()` → `Ok`) and via the mutation test's actual panic (`InvalidUriChar`, not a 400/422) | Fixed inline — correction note added directly after the round-2 rework fix record, above. |
+
+Disposition summary: 1 fixed inline (F9). No blocking, `noted`, `new ticket`, or `folded`
+dispositions this round.
+
+cost: estimated XL, actual XL
+
+**Docs/governing-document reconciliation (step 7):** no `DESIGN.md` or other governing-document
+drift found or introduced this round; F9 is a correction to this ticket's own review prose, not
+a governing document.
+
+**Impact sweep (step 8):** re-read `tickets/1-to-do/T-049-*.md` again — this round's fix (a
+link-encoding bug and a comment correction) changes nothing about `AuthProvider`/role-gating
+availability that T-049's Description assumes. No correction needed.
+
+**Docs-readability pass (step 4b):** conscious skip — no docs-readability reviewer configured in
+this session/host.
+
+**Verdict:** no blocking findings. T-048 proceeds to `tickets/6-done/`.
+
 ## History
 
 - 2026-09-19 — created (TO DO). source: audit: build-order step 13, remaining gap identified when auditing unticketed steps against the board
@@ -784,3 +861,4 @@ failures.
 - 2026-09-20 — REWORK → IN REVIEW: findings fixed
 - 2026-09-20 — IN REVIEW → REWORK: scoped re-review round 2: F4 blocking (malformed detail-link datetime, UI 400s on click), F5 blocking (decision 12 customer_service check shipped inline in 4 handlers, not the confirmed shared extractor); F1's fix verified closed; F8 fixed inline
 - 2026-09-20 — REWORK → IN REVIEW: findings fixed
+- 2026-09-20 — IN REVIEW → DONE: scoped re-review round 3: F4/F5 verified closed; F9 non-blocking (fixed inline) — corrected an inaccurate root-cause claim in the ticket's own review prose. No blocking findings.
