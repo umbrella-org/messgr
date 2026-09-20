@@ -54,6 +54,17 @@ takes the next `webhook-promote` run to pick it up -- bounded by the cron cadenc
 Start that cadence at every 1 minute; tighten it first if the window is ever too slow, before
 reaching for a listener process.
 
+== Auto-suppression
+
+A promoted `bounced` or `complaint` receipt also upserts a `suppression` row for the message's
+destination (`03-data-model.md` §4.4, `04-gate-chain.md` §5) -- the automatic half of what T-038
+otherwise leaves to a manual `suppression add` (see "Suppression list" in the control-plane CLI
+chapter). `review_at` defaults to one year from promotion; there is no shorter platform default
+anywhere else to inherit, and suppression is a compliance-adjacent decision, so it was set
+explicitly rather than assumed. The upsert never shortens an existing entry's `review_at` -- only
+lengthens it -- so a longer-standing manual entry (e.g. a `regulatory_hold`) is never weakened by
+a later automatic one, matching the gate's fail-safe direction (`04-gate-chain.md` §5).
+
 == Running it
 
 Requires two env vars, no defaults (`.env.example`): `WEBHOOK_TLS_CERT_FILE`,
