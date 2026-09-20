@@ -243,11 +243,17 @@ build-order prerequisite step (0–4, including all three gates, T-036/T-037/T-0
     "audited" = an `access_audit` row is written for every `compliance`-role call, successful or
     not, before the handler runs (decision 8).
 17. **`access_audit` is written by one middleware, not per-handler.** An
-    `axum::middleware::from_fn` layer runs after the role check; if the resolved identity's role
-    is `compliance`, it writes one row (`actor`, `role`, `route`, `customer_id` from the path when
-    the route names one, else `NULL`, and the raw query string) before calling the handler —
-    logged regardless of what the handler subsequently returns, since a zero-result or failed
-    search is still a compliance access. No handler calls `access_audit::repo::record` itself.
+    `axum::middleware::from_fn_with_state` layer wraps every data route and runs *before* the
+    handler — it re-resolves tenant + identity itself (`TenantContext`, then
+    `AuthProvider::authenticate`), independently of the handler's own `require_role` check, not
+    after it. **Correction found during review (2026-09-20; F3):** the original wording said this
+    middleware "runs after the role check," which doesn't match how an axum `.layer()` executes
+    relative to the handler it wraps. If the resolved identity's role is `compliance`, it writes
+    one row (`actor`, `role`, `route`, `customer_id` from the path when the route names one, else
+    `NULL`, and the raw query string) before the handler ever runs — logged regardless of what the
+    handler subsequently returns, including a `403` from the handler's own role check, since a
+    zero-result, failed, or role-rejected search is still a compliance access. No handler calls
+    `access_audit::repo::record` itself.
 
 ### Tasks
 
@@ -586,7 +592,61 @@ Register it in `docs/user-manual.adoc` with `include::user-manual/query-api.adoc
 
 ## Review
 
-<!-- empty until IN REVIEW -->
+**Reviewer independence (step 0):** fresh session (conversation cleared before this review
+began), no memory of authoring this branch — proceeding as an independent review directly, no
+delegation triggered. Heavy code-reading (steps 2–4a) was run by a same-context fork to keep
+this review's own context lean; all forked findings were re-verified by hand against the actual
+files before being recorded here, per step 0's "delegation buys independence, not accuracy."
+
+**Commands (step 2):** `just build` — pass. `just lint` (`cargo fmt --all -- --check` +
+`cargo clippy --all-targets --all-features -- -D warnings`) — pass; addendum step 2 item 8
+(justfile/CI parity) N/A, this branch's only `justfile` change is an additive `query-api-run`
+recipe. `just docs-check` — pass. `just test` (`cargo test`, full default-parallel run) — 20
+failures, all in the pre-existing `tests/dispatcher.rs` suite (a file this branch does not
+touch); isolated re-run `cargo test --test dispatcher -- --test-threads=1` — 30/30 pass.
+Read the diff (`git diff main...HEAD --stat`) — no dispatcher-touching files in it, confirming
+this is parallel-execution resource contention in an unrelated, pre-existing suite, not a
+regression T-048 introduced. This ticket's own acceptance suite — `tests/query_api.rs`'s 7 named
+tests plus `src/auth/mock.rs`'s own `#[should_panic]` unit test (8 total, matching the plan) —
+all pass, and each is genuinely falsifiable (real DB row-count/status-code assertions, not
+`is_err()`-only checks; addendum step 3's mutation-test bar).
+
+**Implementation, quality, consistency, docs (steps 2–4a):** all 8 Tasks and all 17 confirmed
+decisions verified present and correct against the actual code — schema, `AuthProvider`/
+`MockProvider` (the dev-only guard lives in the sole constructor, genuinely unbypassable), the
+five-role matrix and `customer_service`-owns check enforced server-side, decision 6's
+compound-key `detail` lookup, decision 14's `find → unwrap_dek → decrypt` chain (not
+`get_or_create_dek`), decision 15's reverse-direction `alias_set` CTE, no SQL built from
+unparameterized input, no new `UNIQUE`/`ON CONFLICT` NULL-semantics hazard (migrations 0019/0020
+add no such constraint), no secrets read outside `VAULT_ADDR`/`VAULT_TOKEN`, `access_audit`
+correctly carries no `tenant_id` column (database-per-tenant, §2.1), no stale `§N`
+cross-references introduced, `docs/user-manual/query-api.adoc` covers all routes/roles/env vars
+and is registered. Findings below are the exceptions to that.
+
+| id | severity | class | disposition | description | evidence | suggestion |
+|---|---|---|---|---|---|---|
+| F1 | blocking | stale-xref | — | New table `access_audit` (Task 2) was never added to `development/design/06-pii-retention.md` §7.2's named-exemption reasoning, contrary to Decision 8's own claim ("the same reasoning `06-pii-retention.md` already gives for `suppression`/`orphan_event`'s exemptions"). The doc's "these six tables ... are the complete named-exemption list" sentence is now false — the actual `EXEMPT` list has 8 entries. AGENTS.md hard invariant 6 / review-addendum step 2 item 5: blocking. | `development/design/06-pii-retention.md:65`; `tests/erasure_coverage.rs`'s `EXEMPT` array (8 entries, `access_audit` at the end) | Add an `access_audit` exemption paragraph to §7.2, mirroring the `suppression`/`orphan_event` style already there, and correct the "six tables" sentence to the current complete list. |
+| F2 | non-blocking | stale-xref | noted | Same §7.2 "six tables ... complete list" sentence was already stale *before* this ticket: `webhook_receipt_staging` (added to `EXEMPT` by T-047) is also absent from `06-pii-retention.md`'s prose and count. Not caused by this branch (rules §5's causation test — "did this branch break it?" — no), so not eligible for `fixed inline`; no existing ticket owns this ground, so `noted` rather than `folded`. | `development/design/06-pii-retention.md:65`; `tests/erasure_coverage.rs`'s `webhook_receipt_staging` entry | Convenience note: whoever fixes F1 touches this exact sentence, so folding this correction into that same edit costs nothing extra — not an obligation of this review. |
+| F3 | non-blocking | stale-xref | fixed inline | Decision 17 described the `access_audit` middleware as running "after the role check"; the shipped code re-resolves tenant + identity itself in the middleware, independent of the handler's own `require_role`, and executes as a `.layer()` wrapping the routes — i.e. before the handler, not after. Behaviour matches intent (audit fires unconditionally for the `compliance` role, including on an eventual `403`); only the plan's descriptive prose was wrong, and this branch's own decision-17 text is what made it false. | `src/query_api/handlers.rs:345-369` (`access_audit_mw` re-resolves `TenantContext` + calls `state.auth.authenticate` itself); `src/query_api/mod.rs:50-58` (`.layer()` wraps the data routes) | Fixed in this review — Decision 17's text corrected above. |
+
+Disposition summary: 1 fixed inline (F3), 1 noted (F2), 1 blocking → `5-rework/` (F1). No `new
+ticket`/`folded` dispositions this round.
+
+cost: estimated XL, actual XL
+
+**Docs/governing-document reconciliation (step 7):** F1/F2 are the only governing-document gaps
+found; F1 goes to rework (blocking, addendum-elevated), F2 is `noted` (pre-existing, out of this
+branch's causation). `development/design/10-query-api-ui.md` §11's route list was already
+corrected by this ticket's own Task 1 (the missing `GET /campaigns/{id}/reach` route) — verified
+present, no further doc drift found in the design tree.
+
+**Impact sweep (step 8):** `tickets/1-to-do/T-049-*.md` (`depends-on: [T-048]`) re-read — its
+Description's assumptions ("same binary, same server-rendered stack," gated on T-048's
+`AuthProvider`/role-gating, `admin` having no route in T-048) all still hold against what
+actually shipped. No correction needed.
+
+**Docs-readability pass (step 4b):** conscious skip — no docs-readability reviewer configured in
+this session/host.
 
 ## History
 
@@ -607,3 +667,4 @@ Register it in `docs/user-manual.adoc` with `include::user-manual/query-api.adoc
   decrypt is intentionally in scope for query-api (unlike the platform console, §11.4, which by
   design holds no Transit policy at all) — this is a wiring gap, not a scope question.
 - 2026-09-20 — IN DEVELOPMENT → IN REVIEW: acceptance green
+- 2026-09-20 — IN REVIEW → REWORK: F1 blocking: access_audit missing from DESIGN.md §7.2's erasure/exemption statements (addendum step 2 item 5, AGENTS.md hard invariant 6)

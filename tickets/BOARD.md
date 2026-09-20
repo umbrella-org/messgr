@@ -20,11 +20,10 @@ Last updated: 2026-09-20
 
 ## IN REVIEW
 
-### messgr (1/1)
+### messgr (0/1)
 
 | id | title | depends-on |
 |---|---|---|
-| T-048 | Query API and UI: AuthProvider, MockProvider, customer/campaign views | [] |
 
 ## REWORK
 
@@ -32,6 +31,7 @@ Last updated: 2026-09-20
 
 | id | title | open findings |
 |---|---|---|
+| T-048 | Query API and UI: AuthProvider, MockProvider, customer/campaign views | F1 blocking: access_audit missing from DESIGN.md §7.2's erasure/exemption statements (addendum step 2 item 5, AGENTS.md… |
 
 ## READY (impact order, per child)
 
