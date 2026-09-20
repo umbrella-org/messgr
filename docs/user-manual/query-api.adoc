@@ -65,7 +65,7 @@ GET /t/{tenant_slug}/openapi.yaml                  the OpenAPI document itself (
 
 Each data route has a server-rendered UI counterpart under the same nested path and the same role
 checks (`GET /t/{tenant_slug}/ui/customers/{id}/timeline`, `/ui/comms/{id}`,
-`/ui/campaigns/{id}/reach}`) -- no separate auth path for the UI vs. the API.
+`/ui/campaigns/{id}/reach`) -- no separate auth path for the UI vs. the API.
 
 `GET /comms/{id}` takes `created_at` as a required query parameter rather than `id` alone:
 `comms_request`'s primary key is `(created_at, id)` because the table is partitioned by
