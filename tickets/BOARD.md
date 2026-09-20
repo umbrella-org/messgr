@@ -104,7 +104,7 @@ Last updated: 2026-09-20
 | T-044 | Integration test coverage for producer_quota_override's refresh_config SQL path | yes — MERGED: PR #60 merged to `main` (`2eaaacd`) |
 | T-046 | Remaining channels: email and WhatsApp senders | yes — MERGED: PR #61 (`feat/T-046-remaining-channels-email-and-whatsapp-senders`, 65b99f8) into `main` |
 | T-047 | Webhook receiver and delivery-receipt ingestion (messgr-webhook) | yes — MERGED: PR #62 (`feat/T-047-webhook-receiver-and-delivery-receipt-ingestion`, `4a363d8`) |
-| T-048 | Query API and UI: AuthProvider, MockProvider, customer/campaign views | no — publish-gated |
+| T-048 | Query API and UI: AuthProvider, MockProvider, customer/campaign views | yes — MERGED: PR #63 merged to `main` (`adaced5`) |
 
 ## DROPPED
 

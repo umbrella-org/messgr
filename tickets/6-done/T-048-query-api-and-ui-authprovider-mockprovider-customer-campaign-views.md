@@ -864,3 +864,4 @@ this session/host.
 - 2026-09-20 — IN REVIEW → DONE: scoped re-review round 3: F4/F5 verified closed; F9 non-blocking (fixed inline) — corrected an inaccurate root-cause claim in the ticket's own review prose. No blocking findings.
 - 2026-09-20 — pushed `feat/T-048-query-api-and-ui-authprovider-mockprovider-customer-campaign-views`,
   opened PR #63 (`https://github.com/umbrella-org/messgr/pull/63`) — awaiting human merge.
+- 2026-09-20 — MERGED: PR #63 merged to `main` (`adaced5`)
