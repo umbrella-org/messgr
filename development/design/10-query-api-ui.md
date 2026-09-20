@@ -20,10 +20,15 @@ GET    /comms                    filter: customer_id, channel, class, campaign_i
                                  from, to, status, scheduled
 GET    /comms/{id}               detail plus event history
 GET    /customers/{id}/timeline
+GET    /campaigns/{id}/reach     aggregate reach/delivery-status counts for a campaign
 
 GET    /producers/{id}/usage     live quota consumption, current minute + day windows
 GET    /producers/{id}/quota     configured limits and any active override
 ```
+
+> **Correction (T-048):** `GET /campaigns/{id}/reach` was missing from this route list even
+> though §11.2's "campaign reach summary" query pattern and §11.1's `campaign_ops` role both
+> require one — found during T-048's refinement and added here.
 
 Producer identity is never taken from the request body — it is derived from the mTLS client certificate (§4.9). A producer cannot spend another producer's quota or evade its own kill switch by relabelling itself.
 
