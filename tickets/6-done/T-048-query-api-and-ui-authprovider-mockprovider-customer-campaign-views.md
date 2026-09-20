@@ -862,3 +862,5 @@ this session/host.
 - 2026-09-20 — IN REVIEW → REWORK: scoped re-review round 2: F4 blocking (malformed detail-link datetime, UI 400s on click), F5 blocking (decision 12 customer_service check shipped inline in 4 handlers, not the confirmed shared extractor); F1's fix verified closed; F8 fixed inline
 - 2026-09-20 — REWORK → IN REVIEW: findings fixed
 - 2026-09-20 — IN REVIEW → DONE: scoped re-review round 3: F4/F5 verified closed; F9 non-blocking (fixed inline) — corrected an inaccurate root-cause claim in the ticket's own review prose. No blocking findings.
+- 2026-09-20 — pushed `feat/T-048-query-api-and-ui-authprovider-mockprovider-customer-campaign-views`,
+  opened PR #63 (`https://github.com/umbrella-org/messgr/pull/63`) — awaiting human merge.
