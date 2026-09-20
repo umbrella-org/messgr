@@ -73,9 +73,10 @@ pub async fn comms_detail(
         Err(err) => return database_error(err),
     };
 
-    // customer_service is restricted at the extractor, not the handler
-    // (decision 12): it must own this row's customer, or 403 before any
-    // further work.
+    // customer_service is restricted here, inline (T-048 decision 12,
+    // corrected after F5: shipped as a per-handler check reusing the shared
+    // `identity_owns` predicate, not a `FromRequestParts` extractor): it
+    // must own this row's customer, or 403 before any further work.
     match identity.role.as_str() {
         role::COMPLIANCE => {}
         role::CUSTOMER_SERVICE if identity_owns(&identity, row.customer_id) => {}

@@ -28,7 +28,7 @@
             <td>{{ row.campaign_id.as_deref().unwrap_or("-") }}</td>
             <td>{{ row.final_status.as_deref().unwrap_or("in flight") }}</td>
             <td>
-                <a href="../../comms/{{ row.id }}?created_at={{ row.created_at }}">detail</a>
+                <a href="../../comms/{{ row.id }}?created_at={{ row.created_at.to_rfc3339()|urlencode }}">detail</a>
             </td>
         </tr>
         {% endfor %}

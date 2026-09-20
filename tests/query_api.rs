@@ -414,6 +414,87 @@ async fn comms_detail_requires_matching_created_at() {
     tenant.cleanup().await;
 }
 
+/// Regression for T-048 rework finding F4: the timeline UI's own detail
+/// link must be one the API actually accepts. Renders the real `/ui/...`
+/// page, pulls the generated `?created_at=` value straight out of the HTML
+/// (no re-deriving it from the seeded timestamp), and follows it.
+#[tokio::test]
+async fn ui_timeline_detail_link_is_followable() {
+    let vault = vault_keystore();
+    let tenant = provision_test_tenant(&vault).await;
+    let cache = KeyCache::new(
+        std::num::NonZeroUsize::new(10).unwrap(),
+        std::time::Duration::from_secs(60),
+    );
+
+    let customer_id = Uuid::new_v4();
+    let producer_id = register_test_producer(&tenant, &unique_name("producer")).await;
+    let (comms_request_id, _) = seed_comms_request(
+        &tenant,
+        &vault,
+        &cache,
+        customer_id,
+        "+15551234567",
+        "your balance is $42",
+        "transactional",
+        None,
+        producer_id,
+    )
+    .await;
+
+    let vault = Arc::new(vault);
+    let router = build_router(&tenant, vault.clone(), "compliance-agent", "compliance");
+
+    let timeline_response = router
+        .clone()
+        .oneshot(
+            Request::get(format!(
+                "/t/{}/ui/customers/{customer_id}/timeline",
+                tenant.slug
+            ))
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(timeline_response.status(), StatusCode::OK);
+    let html_bytes = axum::body::to_bytes(timeline_response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let html =
+        String::from_utf8(html_bytes.to_vec()).expect("timeline HTML was not UTF-8");
+
+    let href_marker = format!("comms/{comms_request_id}?created_at=");
+    let query_start = html
+        .find(&href_marker)
+        .expect("timeline HTML has no detail link for the seeded row")
+        + href_marker.len();
+    let query_value = &html[query_start..];
+    let query_value =
+        &query_value[..query_value.find('"').expect("href has no closing quote")];
+
+    let detail_response = router
+        .oneshot(
+            Request::get(format!(
+                "/t/{}/comms/{comms_request_id}?created_at={query_value}",
+                tenant.slug
+            ))
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        detail_response.status(),
+        StatusCode::OK,
+        "the timeline UI's own generated link must be accepted by GET /comms/{{id}}"
+    );
+    let json = body_json(detail_response).await;
+    assert_eq!(json["id"], comms_request_id.to_string());
+
+    tenant.cleanup().await;
+}
+
 #[tokio::test]
 async fn customer_timeline_includes_rows_written_under_a_merged_alias() {
     let vault = vault_keystore();
