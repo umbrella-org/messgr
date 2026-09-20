@@ -326,6 +326,62 @@ New acceptance scenario: `tests/webhook.rs::a_bounce_receipt_auto_suppresses_the
 `reason = hard_bounce` and `review_at` ~1 year out). `just build`, `just lint`, `just docs-check`,
 `just test` all green, including this new test and the existing four scenarios.
 
+## Review — round 2 (scoped re-review of round 1's F1 fix)
+
+- [x] Reviewer independence settled (step 0): this session began with no memory of writing
+  commit `669ea28` (a fresh session, same next-best handoff as round 1). Audits run directly,
+  not delegated further.
+- [x] Implementation audit — round-1 fix diff (`669ea28`) read task-by-task against F1's
+  suggestion; acceptance test re-run (steps 1, 2)
+- [x] Quality audit (step 3)
+- [x] Consistency audit (step 4)
+- [x] Documentation audit — coverage, whole-tree sweep, docs build clean (step 4a)
+- [x] Docs-readability pass — conscious skip: no docs-readability reviewer configured in this
+  session/host (step 4b)
+- [x] Findings recorded with severity, class, and disposition; disposition summary + cost line
+  below (step 5)
+- [x] Ticket moved to `tickets/5-rework/`; `## History` appended (step 6)
+- [x] Other references updated; governing documents reconciled, or an explicit note why not
+  (step 7) — F5 below is exactly that note: not reconciled this round, routed to rework instead
+- [x] Remaining-tickets impact sweep done (step 8) — no `1-to-do/`/`2-ready/` ticket depends on
+  or references T-047
+- [x] Summary + commit message presented for approval; next-ticket suggestion (step 9)
+
+Scope per `resources/review-protocol.md` §1's scoped-re-review rule: F1's fix diff
+(`git show 669ea28`, `src/orphan_reconcile/repo.rs`, `src/webhook_receipt/repo.rs`,
+`tests/webhook.rs`), read as new work in its own right, not a re-audit of the whole branch.
+
+Read from `main` (`layout = "in-tree"`) — the feature branch's own worktree copy was stale
+(still showed the round-1 `## Review`/`IN REVIEW` history without this round appended), same
+hazard as round 1.
+
+Build/lint/docs-check/test all re-run against
+`feat/T-047-webhook-receiver-and-delivery-receipt-ingestion` — all green: `just build`,
+`just lint`, `just docs-check` clean; `just test` (full suite) 0 failures, including
+`tests/webhook.rs`'s 5 scenarios (the 4 original plus the new
+`a_bounce_receipt_auto_suppresses_the_destination`).
+
+Verified independently rather than transcribed (addendum step 2 item 1): the `ON CONFLICT
+(destination_hmac) DO UPDATE ... WHERE EXCLUDED.review_at > suppression.review_at` guard's
+Postgres semantics — a failing `WHERE` on the `DO UPDATE` action leaves the existing row
+untouched (not deleted, not re-inserted), so a shorter-lived new entry never regresses a
+longer-standing one; confirmed against the `suppression` table's actual schema
+(`migrations/tenant/0013_suppression.sql`: `destination_hmac bytea PRIMARY KEY`, matching the
+conflict target) and against `src/suppression/repo.rs::upsert`, the pre-existing manual-`add`
+upsert this new one deliberately diverges from (no `WHERE` guard there — an operator's explicit
+`add` is meant to take effect unconditionally). `bounced`/`complaint` match
+`orphan_reconcile::reconcile::ABSORBING_STATUSES` exactly, so no drift from the documented
+twelve-event-type vocabulary.
+
+| id | severity | class | disposition | description | evidence | suggestion |
+|---|---|---|---|---|---|---|
+| F5 | blocking | docs-gap | — | Round 1's fix wires bounce/complaint receipts into automatic suppression — the ticket's own promised Outcome — with zero doc coverage: `docs/user-manual/webhook.adoc` never mentions suppression; `control-plane-cli.adoc`'s "Suppression list" section (~line 247) still reads as if `suppression add` is the only way a row is created; its "Webhook receipt promotion" section (~line 158) doesn't mention the suppression side-effect either; and the dispatcher-status paragraph (~line 194-199) still says the webhook-receipt path "hasn't shipped yet" — false as of this same ticket. The 1-year `review_at` default for auto-suppression (confirmed with the user during the round-1 fix, called out there as "a compliance-adjacent policy call") exists only in a Rust doc comment and a commit message, not in any governing or user-facing doc — an operator has no way to learn this policy without reading the diff. | `docs/user-manual/webhook.adoc` (no `suppress` match); `docs/user-manual/control-plane-cli.adoc:194-199,247-274,158-176` (no auto-suppression mention; stale "hasn't shipped yet" claim); `development/design/04-gate-chain.md` §5 (documents suppression's fail-safe *direction* generally but no receipt-driven default) | Scoped rework: (1) `webhook.adoc` — add a short section on auto-suppression (which event types, the review-at default, the fail-safe never-shortens rule); (2) `control-plane-cli.adoc`'s "Webhook receipt promotion" section — note it also upserts `suppression` for bounce/complaint; its "Suppression list" section — note `add` is not the only writer; its dispatcher-status paragraph — drop or rewrite the "hasn't shipped yet" clause; (3) `04-gate-chain.md` §5 — record the 1-year auto-suppression `review_at` default as a confirmed decision, the same treatment Task 7 gave the encryption-placement decision. |
+| F6 | non-blocking | test-gap | The round-1 fix lands in `insert_comms_event`, a funnel shared by two callers (`orphan_reconcile::repo::promote` and `webhook_receipt::repo::promote`), but the new suppression assertion is exercised only via the webhook direct-match path (`tests/webhook.rs`). `tests/orphan_reconcile.rs` has no scenario posting a bounce/complaint through the orphan-match-then-reconcile route and checking `suppression`. | `tests/orphan_reconcile.rs` (no `bounced`/`complaint`/`suppression` reference); `src/orphan_reconcile/repo.rs:216-224` (the other caller of the same shared insert) | Noted — same shared code path already proven correct via the webhook route; low marginal value given `promote`'s only difference is which table it deletes from afterward. Not worth a follow-up ticket on its own. |
+
+Disposition summary: 1 blocking (F5, routes to rework), 1 noted (F6).
+
+cost: estimated L, actual L (unchanged; round 2 is a re-review, not new implementation work)
+
 ## History
 
 - 2026-09-19 — created (TO DO). source: audit: build-order step 12, remaining gap identified when auditing unticketed steps against the board
@@ -334,3 +390,4 @@ New acceptance scenario: `tests/webhook.rs::a_bounce_receipt_auto_suppresses_the
 - 2026-09-19 — IN DEVELOPMENT → IN REVIEW: acceptance green
 - 2026-09-19 — IN REVIEW → REWORK: F1 blocking: auto-suppression from bounce/complaint receipts never wired, contradicting the ticket's own Outcome and T-038's explicit deferral
 - 2026-09-20 — REWORK → IN REVIEW: findings fixed
+- 2026-09-20 — IN REVIEW → REWORK: F5 blocking: round-1's auto-suppression fix shipped with no doc coverage (webhook.adoc, control-plane-cli.adoc, and the review_at default all left unrecorded)
