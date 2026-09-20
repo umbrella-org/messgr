@@ -471,3 +471,4 @@ work)
 - 2026-09-20 — IN REVIEW → REWORK: F5 blocking: round-1's auto-suppression fix shipped with no doc coverage (webhook.adoc, control-plane-cli.adoc, and the review_at default all left unrecorded)
 - 2026-09-20 — REWORK → IN REVIEW: findings fixed
 - 2026-09-20 — IN REVIEW → DONE: round 3: F5 fix verified, no findings; build/lint/docs-check/test all green
+- 2026-09-20 — MERGED: PR #62 (`feat/T-047-webhook-receiver-and-delivery-receipt-ingestion`, `4a363d8`)
