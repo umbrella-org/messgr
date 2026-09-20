@@ -62,7 +62,11 @@ The `comms_event` statement was absent from an earlier version of this design, w
 
 **Named exemption: `customer` itself holds no personal information, only operational preference and sync metadata.** `locale` and `timezone` select a template locale and resolve quiet-hours/scheduling (§4.4, §6) — operational preferences, not personal data. `source_system` and `source_updated_at` are sync bookkeeping for the event-feed consumer (§4.6), not customer-supplied content. Unlike the other five exemptions, `customer` has no `customer_id`/`*_ciphertext`/`*_hmac`/`*_raw` column of its own to be caught by — it is the table those columns *reference* — so the mechanical CI check in §14 must resolve it via the `customer_id` foreign keys other tables declare against it, not by inspecting its own columns.
 
-These six tables — `suppression`, `orphan_event`, `customer_dek`, `customer_alias`, `outbox`, and `customer` — are the complete named-exemption list the mechanical CI check in §14 must carry alongside the covered-table statements above.
+**Named exemption: `webhook_receipt_staging` holds a raw webhook receipt with no `customer_id` column yet.** The next webhook-promote run either resolves one — encrypting the payload into `comms_event`, already covered above — or hands the row to `orphan_event`, already its own named exemption above (§4.4, T-047).
+
+**Named exemption: `access_audit` is evidence of what a compliance user did, not the customer's own data.** It records every `compliance`-role `query-api` access (§11.1) — actor, role, route, and the `customer_id` a search named, when it named one — the same reasoning `suppression`/`orphan_event` above already give for surviving erasure: a bank's audit trail is expected to outlive the record it describes, not be erased alongside it (T-048 decision 8).
+
+These eight tables — `suppression`, `orphan_event`, `customer_dek`, `customer_alias`, `outbox`, `customer`, `webhook_receipt_staging`, and `access_audit` — are the complete named-exemption list the mechanical CI check in §14 must carry alongside the covered-table statements above.
 
 `customer_id` itself is retained as an opaque UUID — it carries no personal information once the projection is redacted, and keeping it preserves the timeline's structural integrity and the ledger's foreign keys.
 
