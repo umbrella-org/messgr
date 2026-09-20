@@ -13,10 +13,11 @@ Last updated: 2026-09-20
 
 ## IN DEVELOPMENT
 
-### messgr (0/1)
+### messgr (1/1)
 
 | id | title | depends-on |
 |---|---|---|
+| T-048 | Query API and UI: AuthProvider, MockProvider, customer/campaign views | [] |
 
 ## IN REVIEW
 
@@ -38,7 +39,6 @@ Last updated: 2026-09-20
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
-| T-048 | Query API and UI: AuthProvider, MockProvider, customer/campaign views | high | high | XL | [] |  |
 
 ## TO DO (impact order, per child)
 

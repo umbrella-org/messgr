@@ -121,15 +121,21 @@ build-order prerequisite step (0–4, including all three gates, T-036/T-037/T-0
    invariant 8: one codebase, no build flags). Whoever wires a real replica into `compose.yml`/CI
    sets the env var; no code changes.
 6. **`GET /comms/{id}` takes `created_at` as a required query parameter
-   (`?created_at=<rfc3339>`), not `id` alone.** `comms_request`'s primary key is
+   (`?created_at=<rfc3339>`), not `id` alone.** **Correction found during T-048's applicability
+   gate (2026-09-20):** this decision originally claimed "there is no index that makes an
+   `id`-only lookup efficient across partitions" — that claim is wrong.
+   `migrations/tenant/0015_comms_request_id_index.sql` (T-041, already merged) added
+   `CREATE INDEX ON comms_request (id)` specifically to serve "DELETE /comms/{id} (and the
+   future GET /comms/{id}, §10)" per its own comment, so an id-only lookup is efficient. The
+   compound-key route is kept anyway, on narrower grounds: `comms_request`'s primary key is
    `(created_at, id)` because the table is partitioned by `created_at` range
-   (`migrations/tenant/0004_ledger_outbox_schema.sql`) — every existing lookup in this codebase
-   (`dispatcher::repo::load_ciphertexts`, `write_terminal`, …) takes that compound key, never `id`
-   alone, and there is no index that makes an `id`-only lookup efficient across partitions. A
-   caller always already has `created_at` from whatever list/timeline view linked to this detail
-   page. Matches this codebase's existing key shape rather than adding a new global index just to
-   satisfy the design doc's route signature literally (review-addendum step 2 item 1: "verbatim
-   from the design is not a defence").
+   (`migrations/tenant/0004_ledger_outbox_schema.sql`), and every existing lookup in this
+   codebase (`dispatcher::repo::load_ciphertexts`, `write_terminal`, …) takes that compound key,
+   never `id` alone. A caller always already has `created_at` from whatever list/timeline view
+   linked to this detail page. Matches this codebase's existing key shape rather than
+   introducing the first `id`-only lookup path alongside it for one route (review-addendum step
+   2 item 1: "verbatim from the design is not a defence" — cuts the other way here too: the
+   existence of 0015's index is not by itself a reason to add a second lookup convention).
 7. **New index `CREATE INDEX ON comms_event (comms_request_id, occurred_at)`.** `comms_event` has
    no existing index on `comms_request_id` alone (only `(customer_id, occurred_at)`), and the
    message-detail event-history lookup is a much higher-frequency path (every support-agent
@@ -550,3 +556,9 @@ Register it in `docs/user-manual.adoc` with `include::user-manual/query-api.adoc
 
 - 2026-09-19 — created (TO DO). source: audit: build-order step 13, remaining gap identified when auditing unticketed steps against the board
 - 2026-09-20 — TO DO → READY: plan complete
+- 2026-09-20 — plan amended inline: applicability-gate audit found Decision 6's stated
+  justification factually wrong (claimed no id-only index exists on `comms_request`; migration
+  0015/T-041 already added one for this exact future route). Kept the compound-key route on
+  narrower grounds (matches existing lookup convention) and corrected the prose; no other
+  findings from the audit.
+- 2026-09-20 — READY → IN DEVELOPMENT: picked up
