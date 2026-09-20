@@ -1,0 +1,122 @@
+= messgr-query-api: read-only REST API and UI
+
+`messgr-query-api` (`T-048`) is the one role-authenticated, read-only surface over the ledger
+(DESIGN.md §11): a bank employee looks up a customer's cross-channel message timeline, inspects a
+single message's rendered content and event history, and runs campaign-reach queries, without
+`psql` access. A published OpenAPI spec plus a server-rendered Askama+htmx UI live in the same
+binary. It reads from a streaming replica (`QUERY_API_DATABASE_URL`) so an unbounded compliance
+search cannot starve ingestion -- see "Running it" below.
+
+== Authentication and roles
+
+Behind an `AuthProvider` trait. Only `MockProvider` ships today -- static identity from process
+config (`AUTH_PROVIDER=mock`, `MOCK_AUTH_ACTOR`, `MOCK_AUTH_ROLE`), no login page, no session
+cookie. It authenticates *every* request from process config, not a per-request credential.
+`OidcProvider` (real IdP, discovery document, JWKS validation, group-to-role mapping, and the
+`tenant_config` schema change it needs) is a **future ticket**, gated on a tenant's IdP actually
+being available.
+
+`MockProvider` is dev-only by construction: it refuses to start (a panic, not a silent fallback)
+if `auth.provider = "mock"` while `MESSGR_PROFILE` is not `dev` -- a mock auth provider reachable
+in production is a full authentication bypass, so this guard shipped in the same commit that
+introduced the trait, not as a follow-up.
+
+Five roles, enforced server-side on every query, never in the UI layer:
+
+[cols="1,4"]
+|===
+| Role | Scope
+
+| `customer_service`
+| Single-customer lookup only. Must own the `customer_id` named by the route (its `Identity.actor`
+  parsed as a `Uuid` and compared against the row's owner, since `MockProvider` carries no other
+  session concept). Cannot list, cannot export, cannot run campaign queries.
+
+| `compliance`
+| Unrestricted search, campaign queries, `/comms/{id}` and `/customers/{id}/timeline`. Every
+  access writes one `access_audit` row -- successful or not, before the handler runs.
+
+| `campaign_ops`
+| `GET /campaigns/{id}/reach` only. No message bodies.
+
+| `comms_ops`
+| `GET /producers/{id}/usage` and `/quota` only. No message bodies, no customer search.
+
+| `admin`
+| No route in this ticket -- its scope (template approval, quiet-hours policy, provider config,
+  producer registry, quota overrides) is T-049's admin panel, the same binary's write surface.
+|===
+
+Tenant resolution is a path prefix, `/t/{tenant_slug}/...`, resolved *before* authentication runs
+-- matching DESIGN.md §11.1's "tenant resolution happens... before the OIDC flow starts."
+
+== Routes
+
+[source]
+----
+GET /t/{tenant_slug}/comms                        filtered list (compliance)
+GET /t/{tenant_slug}/comms/{id}                    detail + event history (?created_at=... required)
+GET /t/{tenant_slug}/customers/{id}/timeline       cross-channel timeline, alias-expanded
+GET /t/{tenant_slug}/campaigns/{id}/reach          aggregate reach/delivery-status counts
+GET /t/{tenant_slug}/producers/{id}/usage          live quota consumption
+GET /t/{tenant_slug}/producers/{id}/quota          configured limits + active override
+GET /t/{tenant_slug}/openapi.yaml                  the OpenAPI document itself (unauthenticated)
+----
+
+Each data route has a server-rendered UI counterpart under the same nested path and the same role
+checks (`GET /t/{tenant_slug}/ui/customers/{id}/timeline`, `/ui/comms/{id}`,
+`/ui/campaigns/{id}/reach}`) -- no separate auth path for the UI vs. the API.
+
+`GET /comms/{id}` takes `created_at` as a required query parameter rather than `id` alone:
+`comms_request`'s primary key is `(created_at, id)` because the table is partitioned by
+`created_at` range, and every existing lookup in this codebase takes that compound key. A caller
+always already has `created_at` from whatever list/timeline view linked to the detail page.
+
+== Compliance access audit
+
+Every `compliance`-role call writes one `access_audit` row (actor, role, route, `customer_id`
+when the route names one directly, and the raw query string) via one middleware layer, before the
+handler runs -- logged regardless of what the handler subsequently returns, since a zero-result or
+failed search is still a compliance access. `access_audit` is a named exemption from erasure
+(`tests/erasure_coverage.rs`): it is evidence of what a compliance user did, not the customer's own
+data, and a bank's audit trail is expected to outlive the record it describes.
+
+== Message-body decryption
+
+Viewing a message's rendered content or destination address decrypts it: `customer_dek::repo::find`
+locates the customer's wrapped DEK, `messgr-query-api`'s own Vault Transit `KeyStore` unwraps it
+against the tenant's mount, and `encryption::decrypt` produces the plaintext. This is a
+tenant-scoped, read-only Transit *unwrap* capability, distinct from `messgr-control`'s platform
+console (a different binary, a different auth realm), which by design holds no Transit policy for
+any tenant mount at all and can never decrypt.
+
+== Running it
+
+Requires `QUERY_API_TLS_CERT_FILE`, `QUERY_API_TLS_KEY_FILE`, and `AUTH_PROVIDER` (only legal
+value today: `mock`, which also requires `MOCK_AUTH_ACTOR`/`MOCK_AUTH_ROLE`), no defaults.
+`QUERY_API_LISTEN_ADDR` defaults to `0.0.0.0:8544`; `QUERY_API_HEALTH_LISTEN_ADDR` defaults to
+`0.0.0.0:8083` and binds a second, plain (non-TLS) listener serving only `GET /healthz`.
+`QUERY_API_DATABASE_URL` points at the streaming replica in production ("reads never touch the
+primary") and falls back to `CONTROL_DATABASE_URL`'s value when unset -- a documented dev-only gap,
+since `compose.yml` stands up one Postgres instance with no replica:
+
+[source,bash]
+----
+just dev-pki-bootstrap
+just dev-pki-issue-server-cert messgr-query-api.internal /tmp/query-api-cert
+
+AUTH_PROVIDER=mock \
+MOCK_AUTH_ACTOR=support-agent-1 \
+MOCK_AUTH_ROLE=compliance \
+QUERY_API_TLS_CERT_FILE=/tmp/query-api-cert/cert.pem \
+QUERY_API_TLS_KEY_FILE=/tmp/query-api-cert/key.pem \
+just query-api-run
+----
+
+Then, with a tenant provisioned:
+
+[source,bash]
+----
+curl -sk --cacert /tmp/query-api-cert/ca.pem --resolve messgr-query-api.internal:8544:127.0.0.1 \
+  https://messgr-query-api.internal:8544/t/<tenant_slug>/comms?channel=sms
+----
