@@ -667,6 +667,60 @@ test's *behaviour* was needed; re-ran anyway for hygiene). `just build`/`just li
 erasure_coverage` — 1/1 pass (unaffected by a docs-only change, run to confirm the `EXEMPT`
 count referenced above is still accurate).
 
+### Scoped re-review — round 2
+
+**Reviewer independence (step 0):** this environment's own git identity matches the branch's
+commits, so the same trigger round 1 recorded applies again — delegated the audits (steps 2–4a)
+to a freshly spawned, adversarial sub-agent with no memory of writing the code, briefed to find
+defects rather than confirm the work. Every finding below was re-verified by hand against the
+actual files before being recorded here (step 0: "delegation buys independence, not accuracy").
+
+**Scope note:** this round's mandatory scope is F1's fix (commit `36689fd`) and the diff that
+closed it (protocol §1). The delegated audit instead re-ran the full four audits over the whole
+branch — the first audit of this implementation not run by whoever authored it. That surfaced
+two blocking defects in the *original* implementation that round 1 missed entirely (F4, F5
+below), alongside the narrower scoped check F1's fix itself required.
+
+**Commands (step 2):** `just build` — pass. `just lint` — pass. `just docs-check` — pass. Full
+`cargo test` (all 39 binaries + lib + doc-tests) — **0 failures**, `tests/dispatcher.rs`
+included. This contradicts round 1's own record ("20 failures, all in ... tests/dispatcher.rs
+... isolated re-run 30/30 pass" under parallel-execution contention) — this round could not
+reproduce that flakiness on an unmodified full run. Noted per the review-addendum's
+"verbatim/self-report is not a defence" principle, which applies equally to a prior review's own
+claims; it changes neither round's verdict, since `tests/query_api.rs`'s 7 tests plus
+`src/auth/mock.rs`'s `#[should_panic]` unit test (8 total, matching the plan) pass either way.
+`cargo test --test query_api` — 7/7. `cargo test --lib auth::mock` — 2/2. `cargo test --test
+erasure_coverage` — 1/1.
+
+**F1's fix verified closed:** `development/design/06-pii-retention.md` §7.2 carries the
+`access_audit` exemption paragraph and the corrected "eight tables" sentence, confirmed against
+the actual `EXEMPT` list in `tests/erasure_coverage.rs` (8 entries, matches). No new defect in
+the fix's own diff — docs-only, nothing else to audit there.
+
+| id | severity | class | disposition | description | evidence | suggestion |
+|---|---|---|---|---|---|---|
+| F4 | blocking | correctness | — | The customer-timeline UI's own "detail" link is malformed and 400s when clicked. `templates/query_api/timeline.html:31` renders `row.created_at` (a `chrono::DateTime<Utc>`) with Askama's default `Display`, which chrono formats as `"2024-01-01 12:00:00 UTC"` — not RFC 3339 — and does not percent-encode it. `handlers::comms_detail`'s `CommsDetailQuery { created_at: DateTime<Utc> }` (handlers.rs:58-60) deserializes via chrono's serde impl, which only accepts RFC 3339. `tests/query_api.rs`'s own `comms_detail_requires_matching_created_at` test proves the team knows this (it hand-builds the URL with `.to_rfc3339()` plus a dedicated `url_encode_query_value` helper for the `+`), but that care was never applied to the template that generates the link a real user clicks. Every row's detail link in the shipped UI is broken. | `templates/query_api/timeline.html:31`; `src/query_api/handlers.rs:58-60,70`; `tests/query_api.rs`'s own encoding helper, never reused in the template | Add an Askama filter (or a wrapper field pre-formatted with `.to_rfc3339()`) and percent-encode the `+`, mirroring the test helper. |
+| F5 | blocking | design | — | Decision 12 ("`customer_service` is restricted at the extractor, not the handler") is not what shipped: the ownership check is inline in four separate handler/view functions (`handlers::comms_detail`, `handlers::customer_timeline`, `views::ui_comms_detail`, `views::ui_customer_timeline`), each its own `match identity.role.as_str() { ... }`, not a shared `FromRequestParts` extractor — one handler even carries the comment "customer_service is restricted at the extractor, not the handler" directly above the inline match that contradicts it. Functionally correct today (verified route-by-route against the role matrix; all 403 paths covered, tests pass and would fail under mutation), but a confirmed design decision was shipped differently without asking, and the stated reason for centralizing (make the check structurally impossible for a future route to omit) no longer holds. | `src/query_api/handlers.rs:76-84,186-190`; `src/query_api/views.rs:41-45,85-89` | Either correct decision 12's text to describe the shipped handler-inline pattern (same precedent as F3), or centralize into a real extractor. This review's recommendation: correct the text — the pattern is tested per-route today and matches this ticket's own F3 precedent, and centralizing now is a larger, unscoped change; raise to the user if the structural risk (a future 5th handler forgetting the check) is judged worth the extra work instead. |
+| F6 | non-blocking | test-gap | noted | No test proves `access_audit_mw`'s `customer_id` extraction actually works. `compliance_role_search_is_audited` (tests/query_api.rs:312-352) only exercises `/comms`, where `customer_id` is `NULL` by construction. The one route that should populate it, `/customers/{id}/timeline`, is never hit by a `compliance`-role test. If `CUSTOMER_ID_ROUTES`/`extract_path_customer_id` (handlers.rs:340-343,405-411) were emptied or broken, no test would fail. | `tests/query_api.rs:312-352`; `src/query_api/handlers.rs:340-343,405-411` | Extend or add a test hitting `/customers/{id}/timeline` as `compliance` and assert the resulting row's `customer_id` equals the path id. |
+| F7 | non-blocking | spec-unclear | noted | `access_audit` never records `customer_id` for `GET /comms/{id}`: that route's `{id}` is a `comms_request_id`, not a `customer_id`, so `CUSTOMER_ID_ROUTES` never matches it — a `compliance` user who decrypts one specific customer's message body gets an audit row with `customer_id = NULL`, even though the handler has already loaded that row's `customer_id` by the time the middleware runs. Not a violation of decision 17 as literally worded (it only promises extraction "from the path when the route names one"), but arguably an audit-completeness gap: the highest-sensitivity access (reading decrypted content) is the one `access_audit` can least attribute to a customer. Raising rather than fixing — a scope/spec question for the user, not an implementation bug. | `src/query_api/handlers.rs:340-343` (`CUSTOMER_ID_ROUTES` covers only the two `.../timeline` shapes) | Ask the user whether `/comms/{id}`'s audit row should also carry `customer_id` (the handler already has it in scope); if yes, batch with any other access_audit follow-up rather than fixing ad hoc. |
+| F8 | non-blocking | docs-gap | fixed inline | Stray trailing brace in the UI-routes paragraph: `` `/ui/campaigns/{id}/reach}` `` had an extra `}` after the path. No behaviour change, prose-only. | `docs/user-manual/query-api.adoc:68` | Fixed inline, commit `e1d9bf0` on the ticket branch. |
+
+Disposition summary: 1 fixed inline (F8), 2 noted (F6, F7), 2 blocking → `5-rework/` (F4, F5).
+No `new ticket`/`folded` dispositions this round.
+
+cost: estimated XL, actual XL
+
+**Docs/governing-document reconciliation (step 7):** F8 fixed inline (docs typo only); no other
+governing-document drift found this round beyond round 1's.
+
+**Impact sweep (step 8):** re-read `tickets/1-to-do/T-049-*.md` again — F4/F5 are both internal
+to this ticket's own UI/handler surface and change nothing T-049's Description assumes about
+`AuthProvider`/role-gating being available. No correction needed.
+
+**Docs-readability pass (step 4b):** conscious skip — no docs-readability reviewer configured in
+this session/host (F8 was a one-character typo, fixed by hand rather than surfaced as a
+readability suggestion).
+
 ## History
 
 - 2026-09-19 — created (TO DO). source: audit: build-order step 13, remaining gap identified when auditing unticketed steps against the board
@@ -688,3 +742,4 @@ count referenced above is still accurate).
 - 2026-09-20 — IN DEVELOPMENT → IN REVIEW: acceptance green
 - 2026-09-20 — IN REVIEW → REWORK: F1 blocking: access_audit missing from DESIGN.md §7.2's erasure/exemption statements (addendum step 2 item 5, AGENTS.md hard invariant 6)
 - 2026-09-20 — REWORK → IN REVIEW: findings fixed
+- 2026-09-20 — IN REVIEW → REWORK: scoped re-review round 2: F4 blocking (malformed detail-link datetime, UI 400s on click), F5 blocking (decision 12 customer_service check shipped inline in 4 handlers, not the confirmed shared extractor); F1's fix verified closed; F8 fixed inline

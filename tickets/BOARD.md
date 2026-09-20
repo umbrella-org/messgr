@@ -20,11 +20,10 @@ Last updated: 2026-09-20
 
 ## IN REVIEW
 
-### messgr (1/1)
+### messgr (0/1)
 
 | id | title | depends-on |
 |---|---|---|
-| T-048 | Query API and UI: AuthProvider, MockProvider, customer/campaign views | [] |
 
 ## REWORK
 
@@ -32,6 +31,7 @@ Last updated: 2026-09-20
 
 | id | title | open findings |
 |---|---|---|
+| T-048 | Query API and UI: AuthProvider, MockProvider, customer/campaign views | scoped re-review round 2: F4 blocking (malformed detail-link datetime, UI 400s on click), F5 blocking (decision 12 cust… |
 
 ## READY (impact order, per child)
 
