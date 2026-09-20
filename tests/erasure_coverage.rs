@@ -172,6 +172,12 @@ const EXEMPT: &[(&str, &str)] = &[
          would resolve one, is a separate ticket (§4.4, §7.2)",
     ),
     (
+        "webhook_receipt_staging",
+        "raw webhook receipt with no customer_id column yet -- the next webhook-promote run \
+         either resolves one (encrypting into comms_event) or hands the row to orphan_event, \
+         which is already its own named exemption above (§4.4, §7.2, T-047)",
+    ),
+    (
         "customer",
         "locale/timezone are operational preferences and source_system/source_updated_at are \
          sync metadata, none of it personal information; caught only via the customer_id FK \

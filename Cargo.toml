@@ -19,6 +19,10 @@ path = "src/bin/ingest.rs"
 name = "messgr-dispatcher"
 path = "src/bin/dispatcher.rs"
 
+[[bin]]
+name = "messgr-webhook"
+path = "src/bin/webhook.rs"
+
 [dependencies]
 tokio = { version = "1", features = ["full"] }
 clap = { version = "4", features = ["derive"] }

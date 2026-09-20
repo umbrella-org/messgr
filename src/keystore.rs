@@ -136,6 +136,26 @@ impl VaultKeyStore {
         Ok(secret.api_key)
     }
 
+    /// Reads a tenant's webhook shared secret from Vault KV v2, at
+    /// `secret/data/<tenant_slug>/webhook` -- the same KV engine and
+    /// per-tenant path-segment convention `provider_config.credential_path`
+    /// values already use (§7.6), just for the one value `messgr-webhook`
+    /// itself resolves (never operator-configured, since there is exactly
+    /// one path per tenant -- T-047).
+    pub async fn read_webhook_secret(
+        &self,
+        tenant_slug: &str,
+    ) -> Result<Zeroizing<Vec<u8>>, KeyStoreError> {
+        #[derive(serde::Deserialize)]
+        struct WebhookSecret {
+            secret: String,
+        }
+        let path = format!("{tenant_slug}/webhook");
+        let secret: WebhookSecret =
+            vaultrs::kv2::read(&self.client, "secret", &path).await?;
+        Ok(Zeroizing::new(secret.secret.into_bytes()))
+    }
+
     /// Authenticates as a tenant's own AppRole instead of the admin
     /// `VAULT_TOKEN` — the seam T-004 deliberately left unwired (PLAN.md's
     /// note under build step 0). Reads `VAULT_ROLE_ID`/`VAULT_WRAPPED_SECRET_ID`

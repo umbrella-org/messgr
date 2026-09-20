@@ -155,6 +155,31 @@ pub fn load_server_config(
     Ok(config)
 }
 
+/// Builds a server-only `rustls::ServerConfig`: the server's own identity,
+/// no client-cert verifier (T-047: `messgr-webhook` authenticates a caller
+/// by its per-tenant signature, not by mTLS — see `load_server_config`'s own
+/// doc comment for the mTLS case this deliberately skips).
+pub fn load_plain_server_config(
+    cert_pem_path: &str,
+    key_pem_path: &str,
+) -> Result<ServerConfig, MtlsError> {
+    if rustls::crypto::CryptoProvider::get_default().is_none() {
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+    }
+
+    let server_certs = read_certs(cert_pem_path)?;
+    if server_certs.is_empty() {
+        return Err(MtlsError::NoServerCertificates);
+    }
+    let server_key = read_private_key(key_pem_path)?;
+
+    let config = ServerConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(server_certs, server_key)?;
+
+    Ok(config)
+}
+
 /// Renders a peer certificate's identity as `CN=<common-name>` — the exact
 /// string `producer::register::register_producer`'s `cert_subject` argument
 /// must equal for a producer to resolve. Deliberately just the Common Name,

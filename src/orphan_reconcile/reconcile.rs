@@ -43,7 +43,7 @@ const ABSORBING_STATUSES: &[&str] = &[
 /// via promotion -- `orphan.event_type` can originate from third-party
 /// (`messgr-webhook`) input, unlike `dispatcher::repo::write_terminal`'s
 /// dispatcher-internal argument of the same name.
-fn is_recognized_event_type(event_type: &str) -> bool {
+pub(crate) fn is_recognized_event_type(event_type: &str) -> bool {
     STATUS_ORDER.contains(&event_type) || ABSORBING_STATUSES.contains(&event_type)
 }
 
@@ -53,7 +53,10 @@ fn is_recognized_event_type(event_type: &str) -> bool {
 /// benign status); otherwise only a strictly later point in `STATUS_ORDER`
 /// advances -- guarding against a late, out-of-order receipt regressing an
 /// already-more-final status, the whole reason `orphan_event` exists.
-fn should_advance(current: Option<&str>, new_event_type: &str) -> bool {
+/// `pub(crate)`, not private -- reused by `webhook_receipt::promote` (T-047)
+/// so both promotion paths share the exact same regression guard instead of
+/// two copies free to drift apart.
+pub(crate) fn should_advance(current: Option<&str>, new_event_type: &str) -> bool {
     match current {
         None => true,
         Some(_) if ABSORBING_STATUSES.contains(&new_event_type) => true,

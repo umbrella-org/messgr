@@ -155,6 +155,29 @@ partition-lifecycle, this command does connect to Vault -- promotion is the payl
 meant to be invoked on a schedule (cron/systemd timer), not run continuously -- this binary does
 not daemonize.
 
+== Webhook receipt promotion
+
+[source,bash]
+----
+cargo run --bin messgr-control -- webhook-promote run --tenant-slug acme
+----
+
+`messgr-webhook` (DESIGN.md §10, T-047) writes every verified receipt it receives into
+`webhook_receipt_staging`, unencrypted -- it holds no tenant's Transit credentials, so encryption
+happens here instead. This command matches each pending row's `provider_ref` against
+`comms_event.provider_ref`, exactly as orphan-event reconciliation does above (reusing the same
+`find_match` query and the same recognized-`event_type` guard): a match is encrypted under the
+matched customer's DEK and promoted into a real `comms_event` row; a row with no match yet is
+handed to `orphan_event` for the orphan-event reconciliation command above to pick up on its own
+schedule. A promoted `bounced` or `complaint` event also upserts a `suppression` row for the
+destination (see "Suppression list" below) -- the automatic half of suppression population T-038
+deferred to this ticket; `review_at` defaults to one year and the upsert never shortens an
+existing entry. Like orphan-event reconciliation, this command does connect to Vault. Safe to re-run;
+meant to be invoked on a schedule (cron/systemd timer) -- start at every 1 minute, the latency
+bound between "provider called the webhook" and "status visible"; tighten it here first if that
+is ever too slow, before reaching for a listener process -- not run continuously; this binary
+does not daemonize.
+
 == Message stats
 
 [source,bash]
@@ -174,9 +197,10 @@ status seen for that channel. A `NULL final_status` (still in flight) is reporte
 `sent`, `failed`, `expired`, and `discarded` (a row swept by an engaged kill switch --
 `src/dispatcher/drain.rs`'s `write_discarded`) -- DESIGN.md §4.4 documents a larger eventual
 vocabulary (`delivered`, `bounced`, `cancelled`, `suppressed_consent`, `suppressed_list`,
-`unverified_address`), but those depend on the webhook-receipt path and gate-chain work that
-hasn't shipped yet (T-020, T-021); this command will report them as soon as the dispatcher
-starts writing them, with no code change required here.
+`unverified_address`). `delivered`/`bounced` now appear too, once `webhook-promote` (T-047,
+above) has run against a matching receipt; the rest depend on gate-chain wiring, and this
+command reports them the moment the dispatcher starts writing them, with no code change
+required here.
 
 This reads Postgres directly, the same trust boundary as every other `messgr-control`
 subcommand (whoever can run the binary already has database access) -- no new authentication
@@ -243,7 +267,10 @@ for every message class with no exemption. `add` computes `destination_hmac` fro
 upserts a row keyed on that hash -- `--destination` is never stored or logged. `--reason` is a
 closed vocabulary: `hard_bounce`, `complaint`, or `regulatory_hold`. `--review-at` is a
 mandatory RFC 3339 timestamp; the entry blocks only while it is still in the future, and once it
-passes the gate query simply stops matching -- no sweep job runs to clean it up.
+passes the gate query simply stops matching -- no sweep job runs to clean it up. `add` is not the
+only writer of this table -- `webhook-promote` (above) also upserts a row automatically for a
+promoted `bounced`/`complaint` receipt, with a one-year `review_at` default and the same
+never-shortens guard.
 
 `remove` is exactly "move `review_at` to now": the same mechanism as letting an entry expire
 naturally, so there is no separate "removed" state. It is rejected if the destination has no

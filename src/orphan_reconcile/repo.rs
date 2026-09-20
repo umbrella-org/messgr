@@ -23,6 +23,7 @@ pub struct Match {
     pub comms_request_created_at: DateTime<Utc>,
     pub customer_id: Uuid,
     pub current_final_status: Option<String>,
+    pub destination_hmac: Vec<u8>,
 }
 
 pub async fn list_pending(pool: &PgPool) -> Result<Vec<PendingOrphan>, sqlx::Error> {
@@ -72,9 +73,9 @@ pub async fn find_match(
     pool: &PgPool,
     provider_ref: &str,
 ) -> Result<Option<Match>, sqlx::Error> {
-    let row = sqlx::query_as::<_, (Uuid, DateTime<Utc>, Uuid, Option<String>)>(
+    let row = sqlx::query_as::<_, (Uuid, DateTime<Utc>, Uuid, Option<String>, Vec<u8>)>(
         r#"
-        SELECT cr.id, cr.created_at, cr.customer_id, cr.final_status
+        SELECT cr.id, cr.created_at, cr.customer_id, cr.final_status, cr.destination_hmac
         FROM comms_event ce
         JOIN comms_request cr ON cr.id = ce.comms_request_id
         WHERE ce.provider_ref = $1 AND ce.provider_ref <> ''
@@ -92,29 +93,51 @@ pub async fn find_match(
             comms_request_created_at,
             customer_id,
             current_final_status,
+            destination_hmac,
         )| Match {
             comms_request_id,
             comms_request_created_at,
             customer_id,
             current_final_status,
+            destination_hmac,
         },
     ))
 }
 
-/// One transaction: inserts the promoted `comms_event` row (ciphertext
-/// already computed by the caller — this module never touches the
-/// DEK/keystore), conditionally advances `comms_request.final_status` per
-/// the caller's `advance` verdict, and deletes the now-redundant
-/// `orphan_event` row.
-pub async fn promote(
-    pool: &PgPool,
-    orphan: &PendingOrphan,
-    m: &Match,
+/// `event_type` values that must feed the suppression list automatically
+/// (T-047 review F1; T-038's own deferral). Only the two receipt-driven
+/// reasons -- `regulatory_hold` is operator-only, there is no receipt event
+/// for it.
+fn auto_suppress_reason(event_type: &str) -> Option<&'static str> {
+    match event_type {
+        "bounced" => Some(crate::suppression::model::reason::HARD_BOUNCE),
+        "complaint" => Some(crate::suppression::model::reason::COMPLAINT),
+        _ => None,
+    }
+}
+
+/// Inserts one promoted `comms_event` row (ciphertext already computed by
+/// the caller — this module never touches the DEK/keystore) and
+/// conditionally advances `comms_request.final_status` per the caller's
+/// `advance` verdict, against an already-open transaction. Shared by
+/// `promote` below (which then deletes the `orphan_event` row) and
+/// `webhook_receipt::repo::promote` (T-047, which deletes the
+/// `webhook_receipt_staging` row instead) — one `INSERT` statement instead
+/// of two copies free to drift apart.
+#[allow(clippy::too_many_arguments)]
+pub async fn insert_comms_event(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    comms_request_id: Uuid,
+    comms_request_created_at: DateTime<Utc>,
+    customer_id: Uuid,
+    destination_hmac: &[u8],
+    occurred_at: DateTime<Utc>,
+    event_type: &str,
+    provider_ref: &str,
+    provider_status: Option<&str>,
     ciphertext: Option<Vec<u8>>,
     advance: bool,
 ) -> Result<(), sqlx::Error> {
-    let mut tx = pool.begin().await?;
-
     sqlx::query(
         r#"
         INSERT INTO comms_event (
@@ -124,14 +147,14 @@ pub async fn promote(
         ON CONFLICT (occurred_at, comms_request_id, event_type, provider_ref) DO NOTHING
         "#,
     )
-    .bind(m.comms_request_id)
-    .bind(m.customer_id)
-    .bind(orphan.occurred_at)
-    .bind(&orphan.event_type)
-    .bind(&orphan.provider_ref)
-    .bind(orphan.provider_status.as_deref())
+    .bind(comms_request_id)
+    .bind(customer_id)
+    .bind(occurred_at)
+    .bind(event_type)
+    .bind(provider_ref)
+    .bind(provider_status)
     .bind(ciphertext)
-    .execute(&mut *tx)
+    .execute(&mut **tx)
     .await?;
 
     if advance {
@@ -139,13 +162,69 @@ pub async fn promote(
             "UPDATE comms_request SET final_status = $1, finalized_at = $2 \
              WHERE created_at = $3 AND id = $4",
         )
-        .bind(&orphan.event_type)
+        .bind(event_type)
         .bind(Utc::now())
-        .bind(m.comms_request_created_at)
-        .bind(m.comms_request_id)
-        .execute(&mut *tx)
+        .bind(comms_request_created_at)
+        .bind(comms_request_id)
+        .execute(&mut **tx)
         .await?;
     }
+
+    // T-047 review F1: a bounce/complaint receipt must feed suppression
+    // automatically, not just advance final_status. `review_at` extends one
+    // year from now (confirmed with the user) and the conflict update only
+    // ever lengthens it (never shortens a longer-standing entry, e.g. a
+    // manually-set regulatory_hold) -- the same fail-safe direction §5
+    // already applies to suppression as a whole.
+    if let Some(reason) = auto_suppress_reason(event_type) {
+        let now = Utc::now();
+        let review_at = now + chrono::Duration::days(365);
+        sqlx::query(
+            r#"
+            INSERT INTO suppression (destination_hmac, reason, added_at, review_at)
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (destination_hmac) DO UPDATE SET
+                reason = EXCLUDED.reason,
+                review_at = EXCLUDED.review_at
+            WHERE EXCLUDED.review_at > suppression.review_at
+            "#,
+        )
+        .bind(destination_hmac)
+        .bind(reason)
+        .bind(now)
+        .bind(review_at)
+        .execute(&mut **tx)
+        .await?;
+    }
+
+    Ok(())
+}
+
+/// One transaction: inserts the promoted `comms_event` row via
+/// `insert_comms_event`, then deletes the now-redundant `orphan_event` row.
+pub async fn promote(
+    pool: &PgPool,
+    orphan: &PendingOrphan,
+    m: &Match,
+    ciphertext: Option<Vec<u8>>,
+    advance: bool,
+) -> Result<(), sqlx::Error> {
+    let mut tx = pool.begin().await?;
+
+    insert_comms_event(
+        &mut tx,
+        m.comms_request_id,
+        m.comms_request_created_at,
+        m.customer_id,
+        &m.destination_hmac,
+        orphan.occurred_at,
+        &orphan.event_type,
+        &orphan.provider_ref,
+        orphan.provider_status.as_deref(),
+        ciphertext,
+        advance,
+    )
+    .await?;
 
     sqlx::query("DELETE FROM orphan_event WHERE id = $1")
         .bind(orphan.id)

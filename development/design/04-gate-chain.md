@@ -23,6 +23,8 @@ Consent enforcement was the single most consequential omission in the first draf
 
 Suppression deliberately keys on the raw `destination_hmac` instead. It is fail-safe (it blocks sending), so over-suppressing a recycled number is the acceptable direction to err; entries carry a review date rather than living forever.
 
+**Automatic suppression from a delivery receipt defaults `review_at` to one year out (T-047).** A `bounced`/`complaint` webhook receipt upserts a suppression row on promotion, not just a manual `suppression add`. No shorter platform default existed anywhere in the codebase to inherit, and the choice is compliance-adjacent, so it was confirmed explicitly rather than assumed. The upsert only ever lengthens an existing entry's `review_at`, never shortens one — the same fail-safe direction as the rest of this gate — so a longer-standing manual entry (e.g. a `regulatory_hold`) is never weakened by a later automatic one.
+
 **The verification gate needs an explicit mode, because its input may not exist.** Whether the master system publishes per-address verification state on the event feed is still an open question. A gate whose input is always NULL either blocks every send or silently passes every send, and the second is what happens by accident. So `tenant_config.verification_mode` is explicit: `enforce` blocks unverified addresses; `observe` allows them but records the outcome and reports a count. A tenant whose feed carries no verification data runs in `observe` **visibly**, rather than believing a control is active when it is not.
 
 Auth class skips verification and consent entirely — an OTP goes to a destination the caller supplied and vouched for (§4.8).
