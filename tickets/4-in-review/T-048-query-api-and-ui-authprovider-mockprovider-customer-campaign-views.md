@@ -648,6 +648,25 @@ actually shipped. No correction needed.
 **Docs-readability pass (step 4b):** conscious skip — no docs-readability reviewer configured in
 this session/host.
 
+### Rework fix record — round 1 (commit 36689fd)
+
+F1 fixed: added a `development/design/06-pii-retention.md` §7.2 "Named exemption: `access_audit`"
+paragraph, mirroring the `suppression`/`orphan_event` style, carrying Decision 8's reasoning
+(evidence of compliance-user activity, not the customer's own data; a bank's audit trail is
+expected to outlive the record it describes). Also folded in F2's `webhook_receipt_staging`
+paragraph at zero extra cost, per F2's own suggestion — correcting the "N tables ... complete
+list" sentence to the actual current `EXEMPT` list (8 entries) required naming both missing
+tables, not just the one this branch introduced; leaving `webhook_receipt_staging` out would
+have left the corrected sentence still false. The summary sentence now reads "these eight tables"
+and lists all eight `EXEMPT` entries by name.
+
+Branch tip before this fix: `e4e336c`. Diff: `git diff e4e336c..36689fd` —
+`development/design/06-pii-retention.md` only (no code touched, so no re-run of the acceptance
+test's *behaviour* was needed; re-ran anyway for hygiene). `just build`/`just lint`/
+`just docs-check` clean; `cargo test --test query_api` — 7/7 pass; `cargo test --test
+erasure_coverage` — 1/1 pass (unaffected by a docs-only change, run to confirm the `EXEMPT`
+count referenced above is still accurate).
+
 ## History
 
 - 2026-09-19 — created (TO DO). source: audit: build-order step 13, remaining gap identified when auditing unticketed steps against the board
@@ -668,3 +687,4 @@ this session/host.
   design holds no Transit policy at all) — this is a wiring gap, not a scope question.
 - 2026-09-20 — IN DEVELOPMENT → IN REVIEW: acceptance green
 - 2026-09-20 — IN REVIEW → REWORK: F1 blocking: access_audit missing from DESIGN.md §7.2's erasure/exemption statements (addendum step 2 item 5, AGENTS.md hard invariant 6)
+- 2026-09-20 — REWORK → IN REVIEW: findings fixed
