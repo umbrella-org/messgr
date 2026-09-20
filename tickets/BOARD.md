@@ -20,10 +20,11 @@ Last updated: 2026-09-20
 
 ## IN REVIEW
 
-### messgr (0/1)
+### messgr (1/1)
 
 | id | title | depends-on |
 |---|---|---|
+| T-047 | Webhook receiver and delivery-receipt ingestion (messgr-webhook) | [] |
 
 ## REWORK
 
@@ -31,7 +32,6 @@ Last updated: 2026-09-20
 
 | id | title | open findings |
 |---|---|---|
-| T-047 | Webhook receiver and delivery-receipt ingestion (messgr-webhook) | F5 blocking: round-1's auto-suppression fix shipped with no doc coverage (webhook.adoc, control-plane-cli.adoc, and the… |
 
 ## READY (impact order, per child)
 

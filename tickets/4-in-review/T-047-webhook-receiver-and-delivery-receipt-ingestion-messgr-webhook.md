@@ -382,6 +382,27 @@ Disposition summary: 1 blocking (F5, routes to rework), 1 noted (F6).
 
 cost: estimated L, actual L (unchanged; round 2 is a re-review, not new implementation work)
 
+### Rework fix record — round 2 (commit `5316425`)
+
+F5: three doc fixes, no code changes.
+
+- `docs/user-manual/webhook.adoc` — new "Auto-suppression" section (event types, the one-year
+  `review_at` default and why, the never-shortens fail-safe rule), placed between "Encryption
+  placement" and "Running it".
+- `docs/user-manual/control-plane-cli.adoc` — "Webhook receipt promotion" now notes the
+  suppression side-effect and links to "Suppression list"; "Suppression list" now notes `add` is
+  not the only writer; the "Message stats" dispatcher-status paragraph no longer claims the
+  webhook-receipt path "hasn't shipped yet" — it now says `delivered`/`bounced` appear once
+  `webhook-promote` has run, and leaves the remaining vocabulary (`suppressed_consent`,
+  `unverified_address`, ...) attributed to gate-chain wiring generally, since this round's scope
+  is F5's docs gap, not re-verifying every other status value's ship state.
+- `development/design/04-gate-chain.md` §5 — new paragraph under the existing suppression
+  discussion recording the one-year auto-suppression `review_at` default as a confirmed decision,
+  same treatment as the encryption-placement decision.
+
+`just build`, `just lint`, `just docs-check` clean; `just test` (full suite) 0 failures,
+including `tests/webhook.rs`'s 5 scenarios (unchanged by this round — docs only).
+
 ## History
 
 - 2026-09-19 — created (TO DO). source: audit: build-order step 12, remaining gap identified when auditing unticketed steps against the board
@@ -391,3 +412,4 @@ cost: estimated L, actual L (unchanged; round 2 is a re-review, not new implemen
 - 2026-09-19 — IN REVIEW → REWORK: F1 blocking: auto-suppression from bounce/complaint receipts never wired, contradicting the ticket's own Outcome and T-038's explicit deferral
 - 2026-09-20 — REWORK → IN REVIEW: findings fixed
 - 2026-09-20 — IN REVIEW → REWORK: F5 blocking: round-1's auto-suppression fix shipped with no doc coverage (webhook.adoc, control-plane-cli.adoc, and the review_at default all left unrecorded)
+- 2026-09-20 — REWORK → IN REVIEW: findings fixed
