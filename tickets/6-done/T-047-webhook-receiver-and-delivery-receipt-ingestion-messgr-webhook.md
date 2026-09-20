@@ -403,6 +403,63 @@ F5: three doc fixes, no code changes.
 `just build`, `just lint`, `just docs-check` clean; `just test` (full suite) 0 failures,
 including `tests/webhook.rs`'s 5 scenarios (unchanged by this round — docs only).
 
+## Review — round 3 (scoped re-review of round 2's F5 fix)
+
+- [x] Reviewer independence settled (step 0): this session began with no memory of writing
+  commit `5316425` (a fresh session, same next-best handoff as rounds 1 and 2). Audits run
+  directly, not delegated further.
+- [x] Implementation audit — round-2 fix diff (`5316425`) read against F5's suggestion;
+  acceptance test re-run (steps 1, 2)
+- [x] Quality audit (step 3)
+- [x] Consistency audit (step 4)
+- [x] Documentation audit — coverage, whole-tree sweep, docs build clean (step 4a)
+- [x] Docs-readability pass — conscious skip: no docs-readability reviewer configured in this
+  session/host (step 4b)
+- [x] Findings recorded with severity, class, and disposition; disposition summary + cost line
+  below (step 5)
+- [x] Ticket moved to `tickets/6-done/`; `## History` appended (step 6)
+- [x] Other references updated; governing documents reconciled, or an explicit note why not
+  (step 7) — no further governing-doc drift found this round
+- [x] Remaining-tickets impact sweep done (step 8) — no `1-to-do/`/`2-ready/` ticket depends on
+  or references T-047
+- [x] Summary + commit message presented for approval; next-ticket suggestion (step 9)
+
+Scope per `resources/review-protocol.md` §1's scoped-re-review rule: F5's fix diff
+(`git show 5316425` — `development/design/04-gate-chain.md`,
+`docs/user-manual/control-plane-cli.adoc`, `docs/user-manual/webhook.adoc`; docs only, no code
+changes), read as new work in its own right, not a re-audit of the whole branch.
+
+Read from `main` (`layout = "in-tree"`) — the feature branch's own worktree copy was stale
+(still showed round 2's `## Review`/`IN REVIEW` history without this round appended), same
+hazard as rounds 1 and 2.
+
+Build/lint/docs-check/test all re-run against
+`feat/T-047-webhook-receiver-and-delivery-receipt-ingestion` — all green: `just build`,
+`just lint`, `just docs-check` clean; `just test` (full suite) 0 failures, including
+`tests/webhook.rs`'s 5 scenarios (unchanged by this round). `pickle board audit` clean on `main`
+(54 tickets, 0 errors, 0 warnings).
+
+Verified independently rather than transcribed (addendum step 2 item 1): the `review_at`
+default and the never-shortens `WHERE EXCLUDED.review_at > suppression.review_at` clause the
+new docs describe against the actual code (`src/orphan_reconcile/repo.rs:181-189`, `now +
+chrono::Duration::days(365)`) — matches the docs' "one year" and "never shortens" claims exactly.
+Cross-checked `03-data-model.md` §4.4 and `04-gate-chain.md` §5, both cited by the new
+`webhook.adoc` section, actually exist and say what the new prose claims. Confirmed the
+"`delivered`/`bounced` now appear too" rewrite in `control-plane-cli.adoc`'s dispatcher-status
+paragraph against `src/orphan_reconcile/reconcile.rs`'s `STATUS_ORDER`/`ABSORBING_STATUSES`
+lists — both values are in fact reachable via `webhook-promote`, so the claim is true, not just
+plausible. Grepped the whole tree for any remaining "hasn't shipped yet" claim — none found.
+
+| id | severity | class | disposition | description | evidence | suggestion |
+|---|---|---|---|---|---|---|
+<!-- no findings this round -->
+
+Disposition summary: no findings this round — F5's fix diff read clean against its own
+suggestion, the code it documents, and the rest of the docs tree.
+
+cost: estimated L, actual L (unchanged; round 3 is a scoped re-review, not new implementation
+work)
+
 ## History
 
 - 2026-09-19 — created (TO DO). source: audit: build-order step 12, remaining gap identified when auditing unticketed steps against the board
@@ -413,3 +470,4 @@ including `tests/webhook.rs`'s 5 scenarios (unchanged by this round — docs onl
 - 2026-09-20 — REWORK → IN REVIEW: findings fixed
 - 2026-09-20 — IN REVIEW → REWORK: F5 blocking: round-1's auto-suppression fix shipped with no doc coverage (webhook.adoc, control-plane-cli.adoc, and the review_at default all left unrecorded)
 - 2026-09-20 — REWORK → IN REVIEW: findings fixed
+- 2026-09-20 — IN REVIEW → DONE: round 3: F5 fix verified, no findings; build/lint/docs-check/test all green

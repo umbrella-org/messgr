@@ -20,11 +20,10 @@ Last updated: 2026-09-20
 
 ## IN REVIEW
 
-### messgr (1/1)
+### messgr (0/1)
 
 | id | title | depends-on |
 |---|---|---|
-| T-047 | Webhook receiver and delivery-receipt ingestion (messgr-webhook) | [] |
 
 ## REWORK
 
@@ -105,6 +104,7 @@ Last updated: 2026-09-20
 | T-043 | Quiet hours with jitter and DST handling | yes — MERGED: PR #59 (`feat/T-043-quiet-hours-with-jitter-and-dst-handling` → `main`, merge commit `43813e3`) |
 | T-044 | Integration test coverage for producer_quota_override's refresh_config SQL path | yes — MERGED: PR #60 merged to `main` (`2eaaacd`) |
 | T-046 | Remaining channels: email and WhatsApp senders | yes — MERGED: PR #61 (`feat/T-046-remaining-channels-email-and-whatsapp-senders`, 65b99f8) into `main` |
+| T-047 | Webhook receiver and delivery-receipt ingestion (messgr-webhook) | no — publish-gated |
 
 ## DROPPED
 
