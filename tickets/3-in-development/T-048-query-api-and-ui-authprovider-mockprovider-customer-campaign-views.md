@@ -174,9 +174,39 @@ build-order prerequisite step (0–4, including all three gates, T-036/T-037/T-0
     scope is template/policy/provider/registry/override *configuration*, not this dashboard;
     T-049 can widen the role list if it turns out to need to — noted as a soft coupling, not
     decided here).
-14. **Message-detail body decryption reuses `customer_dek::repo::find` + `encryption::decrypt`
-    exactly as the dispatcher does** (`src/dispatcher/worker.rs`'s own decrypt call) — no second
-    decrypt path is introduced.
+14. **Message-detail body decryption: `customer_dek::repo::find` → `keystore.unwrap_dek` →
+    `encryption::decrypt`.** **Correction found during Task 4/5 implementation (2026-09-20):**
+    the original wording ("reuses `customer_dek::repo::find` + `encryption::decrypt` exactly as
+    the dispatcher does") skipped the Vault unwrap step the dispatcher's own path actually needs
+    in between (`src/dispatcher/worker.rs` calls `lifecycle::get_or_create_dek`, which internally
+    unwraps via `keystore.unwrap_dek(mount, &row.wrapped_dek)` before `encryption::decrypt` can
+    run — `customer_dek::repo::find` alone only returns the still-wrapped DEK). This binary needs
+    a `KeyStore` it did not otherwise have.
+    - Not `lifecycle::get_or_create_dek`: its *create*-on-miss branch is the wrong behavior for a
+      read surface — a `comms_request` row only exists because ingest already created a DEK for
+      that customer, so a missing `customer_dek` row here is a data-integrity bug, not a "mint a
+      fresh one" case (a freshly minted DEK cannot decrypt ciphertext written under the original
+      one). `comms_query::repo::detail` treats `find` returning `None` as an error, not a
+      fallback.
+    - `AppState` gains `keystore: Arc<dyn KeyStore>`, constructed in Task 4's `query_api.rs`
+      exactly like `webhook.rs` builds its own (`VaultKeyStore::connect(config.profile)`,
+      `VAULT_ADDR`/`VAULT_TOKEN` from the environment) — read-only Transit *unwrap* capability
+      scoped to whatever policy this tenant's AppRole carries, the same posture §11's "rendered
+      content subject to §7" already implies for query-api (unlike `messgr-control`'s platform
+      console, §11.4, which by design holds no Transit policy for any tenant mount at all).
+    - `TenantContext` (Task 4) also carries `vault_mount: String` from the already-fetched
+      `Tenant` row (`tenant::repo::find_by_slug` already loads it; no second query).
+    - No `KeyCache` (`src/key_cache.rs`) added for this ticket — support/compliance lookups are
+      not the hot, whole-outbox-throughput path `KeyCache` was sized for (T-008), so an unwrap
+      per detail view is an acceptable cost for a first cut. `ponytail: no DEK cache on the
+      query-api read path; add one (sized well below the dispatcher's 100k-entry cache) if
+      repeated message-detail views on the same customer show up as Vault-call latency.`
+    - `comms_query::repo::detail` (Task 5) returns the row with its ciphertext fields
+      (`destination_ciphertext`, `payload_ciphertext`) un-decrypted — the decrypt step (DEK
+      find/unwrap/decrypt) runs in the handler (Task 6, which already holds `AppState.keystore`
+      and `TenantContext.vault_mount`), mirroring `dispatcher::repo` (DB-only) vs.
+      `dispatcher::worker` (decrypts) rather than adding a Vault dependency to `comms_query::repo`
+      itself.
 15. **Customer-timeline alias expansion needs a new, separate function, not
     `customer::repo::expand_alias`.** `expand_alias` walks `old_customer_id → customer_id`
     *forward* — it answers "what id is this now, given one that might be stale," which is what
@@ -366,8 +396,10 @@ Register `pub mod auth;` (with `pub mod mock; pub mod provider; pub mod role;` i
 validation and a clear panic on anything else), `MOCK_AUTH_ACTOR`/`MOCK_AUTH_ROLE` (read only when
 `AUTH_PROVIDER=mock`, which is the only case today). Builds `Config::from_env()`, connects
 `control_pool`, constructs `MockProvider::new(config.profile, ...)` behind `Arc<dyn
-AuthProvider>`, builds `webhook::TenantPoolCache::new()` (decision 4), mounts the router (Task 6),
-starts the health listener the same way the other three bins do.
+AuthProvider>`, builds `webhook::TenantPoolCache::new()` (decision 4), builds `Arc<VaultKeyStore>`
+behind `Arc<dyn KeyStore>` exactly like `webhook.rs` does (decision 14 — `VaultKeyStore::connect(config.profile)`,
+`VAULT_ADDR`/`VAULT_TOKEN` from the environment), mounts the router (Task 6), starts the health
+listener the same way the other three bins do.
 
 `src/query_api/mod.rs`:
 
@@ -379,12 +411,14 @@ pub struct AppState {
     pub auth: Arc<dyn AuthProvider>,
     pub pool_cache: Arc<webhook::TenantPoolCache>,
     pub tenant_pool_max_connections: u32,
+    pub keystore: Arc<dyn KeyStore>,
 }
 ```
 
-`src/query_api/tenant.rs`: an axum extractor `TenantContext { tenant_id: Uuid, pool: PgPool }`
-implementing `FromRequestParts<AppState>` — reads the `:tenant_slug` path segment,
-`tenant::repo::find_by_slug(&state.control_pool, &slug)` (404 on `None`), then
+`src/query_api/tenant.rs`: an axum extractor `TenantContext { tenant_id: Uuid, pool: PgPool,
+vault_mount: String }` implementing `FromRequestParts<AppState>` — reads the `:tenant_slug` path
+segment, `tenant::repo::find_by_slug(&state.control_pool, &slug)` (404 on `None`; carries
+`tenant.vault_mount` into the extractor, decision 14 — no second query), then
 `state.pool_cache.get_or_open(&state.control_pool, &state.query_api_database_url, tenant.id,
 &tenant.database_name, state.tenant_pool_max_connections)` (decision 3/4/5).
 
@@ -412,9 +446,11 @@ extractor) — `customer_id: Option<Uuid>`, `channel: Option<String>`, `class: O
   `limit`.
 - `pub async fn detail(pool: &PgPool, created_at: DateTime<Utc>, id: Uuid) -> Result<Option<CommsRequestDetail>, sqlx::Error>`
   (decision 6's compound key) — loads the `comms_request` row plus its `template_id`/
-  `template_version` resolved via `template::repo::find`, and decrypts `payload_ciphertext` via
-  `customer_dek::repo::find` + `encryption::decrypt` (decision 14; `None` for `class = "auth"`
-  rows, which never carry a payload).
+  `template_version` resolved via `template::repo::find`. Returns `payload_ciphertext` and
+  `destination_ciphertext` un-decrypted (`CommsRequestDetail` carries the raw ciphertext fields);
+  decrypting them is `handlers::comms_detail`'s job (decision 14), not this function's — keeps
+  `comms_query::repo` a DB-only layer with no `KeyStore` dependency, mirroring
+  `dispatcher::repo`/`dispatcher::worker`'s own split.
 - `pub async fn events(pool: &PgPool, comms_request_id: Uuid) -> Result<Vec<CommsEventRow>, sqlx::Error>`
   — `SELECT ... FROM comms_event WHERE comms_request_id = $1 ORDER BY occurred_at`, using Task 2's
   new index.
@@ -562,3 +598,11 @@ Register it in `docs/user-manual.adoc` with `include::user-manual/query-api.adoc
   narrower grounds (matches existing lookup convention) and corrected the prose; no other
   findings from the audit.
 - 2026-09-20 — READY → IN DEVELOPMENT: picked up
+- 2026-09-20 — plan amended inline: found during Task 4/5 implementation that Decision 14's
+  wording skipped the Vault-unwrap step the dispatcher's real decrypt path uses
+  (`customer_dek::repo::find` alone returns only the wrapped DEK); `messgr-query-api` had no
+  `KeyStore` wired in at all. Added `AppState.keystore: Arc<dyn KeyStore>` (built exactly like
+  `webhook.rs`'s own `VaultKeyStore::connect`) and `TenantContext.vault_mount`; corrected Task
+  4/5 text accordingly. Confirmed against `development/design/10-query-api-ui.md` §11 that
+  decrypt is intentionally in scope for query-api (unlike the platform console, §11.4, which by
+  design holds no Transit policy at all) — this is a wiring gap, not a scope question.
