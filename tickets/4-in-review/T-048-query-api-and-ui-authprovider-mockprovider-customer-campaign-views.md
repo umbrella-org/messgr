@@ -606,3 +606,4 @@ Register it in `docs/user-manual.adoc` with `include::user-manual/query-api.adoc
   4/5 text accordingly. Confirmed against `development/design/10-query-api-ui.md` §11 that
   decrypt is intentionally in scope for query-api (unlike the platform console, §11.4, which by
   design holds no Transit policy at all) — this is a wiring gap, not a scope question.
+- 2026-09-20 — IN DEVELOPMENT → IN REVIEW: acceptance green
