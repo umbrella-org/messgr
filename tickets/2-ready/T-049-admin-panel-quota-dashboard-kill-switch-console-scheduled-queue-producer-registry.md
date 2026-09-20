@@ -23,9 +23,21 @@ it.
 
 ## Description
 
-Build-order step 14 (§14): the admin panel, same binary and same server-rendered stack as the
-query API/UI (T-048, §11.3) — Askama + htmx, no SPA, matching `templates/query_api/*.html` —
-gated per §11.1's role table, which splits the four items below across two roles, not evenly:
+Build-order step 14 (§14): the admin panel, same binary as the query API/UI (T-048, §11.3),
+server-rendered with Askama — but **not** htmx for reactivity. **Revised at a second refinement
+pass (user-directed): the admin panel uses Datastar, not htmx**, with each of the four views its
+own template extending a shared `templates/admin/base.html` (real Askama `{% extends %}` /
+`{% block %}` inheritance, not client-side composition), and a light/dark theme that follows the
+OS (`prefers-color-scheme`, no manual toggle). T-048's existing read-only UI
+(`templates/query_api/*.html`: timeline, message detail, campaign reach) is untouched and keeps
+htmx — the two hypermedia libraries coexist in one binary because they gate different, disjoint
+route trees, not because either is being replaced. A mockup was built and approved for exactly
+this shape: <https://claude.ai/artifact/E7ESaFHDaWGHmSbjoNuHzS> — its page structure (a shared
+shell + one file per view), color tokens, and component patterns (panels, pills, stat cards,
+inline sparklines) are the reference the real templates should match, the same way
+`stock-exchange/platform/admin`'s own `render.py` cites its approved mockup as the source its
+CSS/markup was built to match exactly. Gated per §11.1's role table, which splits the four items
+below across two roles, not evenly:
 
 - **Quota dashboard** (`comms_ops`). Per producer × channel × class: current-minute/current-day
   consumption vs. limit, a trailing-24h sparkline, blocked/deferred count. Reads `producer_usage`
@@ -72,11 +84,13 @@ all three already have CLI-only configure modules (`template::approve`, `quiet_h
 `producer_quota::configure`. Also out of scope: the platform console (§11.4, already a separate
 binary/auth realm).
 
-`docs/mockups/admin-dashboard.html` (a T-027 static mockup, "Overview" tab only, "Kill switches"
-present only as an inert nav link) is a visual/layout reference for KPI-grid and top-nav styling
-only — its own comment floats "htmx or Datastar" as still open, which predates and is superseded
-by §11 and T-048's shipped decision (Askama + htmx). Follow T-048's stack, not the mockup's
-comment.
+**Correction on the first refinement pass:** this ticket originally said to follow T-048's
+Askama+htmx stack and treat `docs/mockups/admin-dashboard.html` (T-027)'s "htmx or Datastar"
+comment as superseded and stale. That was wrong — reversed at the second refinement pass,
+user-directed: the admin panel *does* use Datastar, the T-027 mockup's open question resolved
+the other way. `docs/mockups/admin-dashboard.html` remains only a KPI-grid/top-nav styling
+reference (T-027, unrelated feature); the approved mockup linked above is the one that governs
+this ticket's actual page structure and tokens.
 
 ## Implementation Plan
 
@@ -167,11 +181,12 @@ commit policy — see Finish.
    producer-scoped cancel is needed.
 7. **New routes are server-rendered UI only — no OpenAPI entries, no JSON contract.** They live
    under `/t/{tenant_slug}/admin/...` (mutations, POST, form-encoded) and
-   `/t/{tenant_slug}/ui/admin/...` (views, GET, HTML/htmx fragments), added to the existing
-   `data_routes` router in `src/query_api/mod.rs` alongside the current six. `openapi/query-api.yaml`
-   documents only the pre-existing REST data routes (per its current scope) and is not extended —
-   these are operator UI actions, not a published API. `docs/user-manual/query-api.adoc` gets a
-   new `== Admin panel` section instead (see Docs update).
+   `/t/{tenant_slug}/ui/admin/...` (views, GET, HTML — Datastar-driven per decision 9, not htmx
+   fragments), added to the existing `data_routes` router in `src/query_api/mod.rs` alongside the
+   current six. `openapi/query-api.yaml` documents only the pre-existing REST data routes (per its
+   current scope) and is not extended — these are operator UI actions, not a published API.
+   `docs/user-manual/query-api.adoc` gets a new `== Admin panel` section instead (see Docs
+   update).
 8. **Producer-registry input surface stays minimal, matching the `psql`-runbook precedent
    T-016/T-042's docs already use for scope_key formats.** The `producer_channel` kill-switch
    scope takes one raw `<producer_id>:<channel>` text field (the literal storage format
@@ -180,6 +195,42 @@ commit policy — see Finish.
    producer). Same minimalism for the quota-override form: the three existing
    `ProducerQuotaOverrideInput` fields (`per_day`, `valid_from`/`valid_to`, `reason`) map directly
    to form fields, no new derived UI state.
+9. **Reactivity is Datastar, not htmx** (user-directed at a second refinement pass, reversing
+   this ticket's own earlier call to follow T-048's htmx precedent — see the Description's
+   correction note). Signals declared per view (`data-signals`), actions via `data-on-click`/
+   `data-on-change`, `data-text`/`data-show` for the reactive bits the mockup fakes with vanilla
+   JS (nav active-state, role-gating, the blast-radius live count, filter-as-you-type on the
+   scheduled queue). No SSE backend for this ticket — every one of the mockup's "live" behaviours
+   is either a value already on the page load (blast radius: computed server-side per the
+   selected scope, re-fetched via a plain `data-on-change` → `@get`) or a same-page DOM update
+   (row removal on cancel/release) — nothing here needs the reference `stock-exchange/platform/admin`
+   project's `/events` SSE stream, so none is built.
+10. **Real Askama template inheritance, one base + one template per view.** New
+    `templates/admin/base.html` (`{% block content %}`, shared shell: brand, nav, role-derived
+    active/disabled nav state, theme `<style>` block) and `templates/admin/{quota,
+    kill_switches, scheduled, producers}.html`, each `{% extends "admin/base.html" %}` —
+    Askama's block syntax matches Jinja2's closely enough that this is the direct real-template
+    counterpart of the mockup's shell (the mockup's `<iframe>` swap was a mockup-only stand-in for
+    "separate page, shared chrome"; a real per-request Askama render doesn't need an iframe, the
+    server renders the extended template whole on every request). The nav's role-based
+    enable/disable (mockup: a client-side role `<select>`) is server-derived here from the real
+    `identity.role` `AuthedUser` already carries — no client-side role switcher in the shipped
+    UI, that was a mockup-only device for showing both roles in one preview.
+11. **Datastar is vendored, not CDN-loaded**, mirroring `handlers::htmx_asset`
+    (`src/query_api/handlers.rs`) exactly: `assets/datastar.js` (pinned version, matching how
+    `assets/htmx.min.js` is already committed), served at `/assets/datastar.js` via a new
+    `handlers::datastar_asset` using the same `include_bytes!` + unauthenticated-static-route
+    pattern already registered for `/assets/htmx.min.js` in `src/query_api/mod.rs`. Consistent
+    with §11's "no separate frontend build/deploy pipeline."
+12. **Theme is system-only, no manual toggle** (user-confirmed). `templates/admin/base.html`'s
+    `<style>` defines light-default CSS custom properties on `:root`, redefined under
+    `@media (prefers-color-scheme: dark)` — no `data-theme` attribute, no toggle control (the
+    mockup's own Artifact-runtime three-state theme handling, and the older T-027
+    `docs/mockups/admin-dashboard.html`'s manual toggle button, are both mockup/reference-only
+    conventions, not carried into the shipped templates). T-048's existing read-only UI
+    (`templates/query_api/*.html`) has no theme handling today and stays that way — only the
+    admin panel gets dark-mode support in this ticket; retrofitting the read views is out of
+    scope.
 
 ### Tasks
 
@@ -227,18 +278,30 @@ current-minute/current-day numbers; this is additive for the sparkline series on
 .route("/admin/producers/{id}/quota/override", post(admin::add_quota_override))
 ```
 New `src/query_api/admin.rs` (handlers, mirroring `views.rs`/`handlers.rs`'s existing
-`AuthedUser`/`TenantContext`/`require_role` pattern per decision 1). Each mutation handler
-returns the refreshed htmx fragment (matching the `Html`/`render()` helper already in
-`views.rs`) rather than a redirect, consistent with the rest of the UI.
+`AuthedUser`/`TenantContext`/`require_role` pattern per decision 1). Each `GET` view handler
+renders its Askama template (`render()` helper, per decision 10); each mutation handler returns
+a small Datastar response (updated signals / a patched fragment, per decision 9) rather than a
+redirect.
 
-#### Task 6 — Templates
+#### Task 6 — Vendor Datastar
 
-New `templates/query_api/admin_quota.html`, `admin_kill_switches.html`,
-`admin_scheduled.html`, `admin_producers.html`, extending `templates/query_api/base.html`
-(existing layout/nav, matching `timeline.html`/`campaign_reach.html`'s structure). Kill-switch
-engage form includes the static "auth traffic is not affected by any switch shown here" note
-(decision 2) and an htmx `hx-get` to `/ui/admin/kill-switches/blast-radius` on scope/scope_key
-input change, showing the count *before* the engage button is enabled.
+Add `assets/datastar.js` (pinned version) alongside the existing `assets/htmx.min.js`. New
+`handlers::datastar_asset` and `.route("/assets/datastar.js", get(handlers::datastar_asset))` in
+`src/query_api/mod.rs`, mirroring the existing `/assets/htmx.min.js` registration exactly
+(decision 11).
+
+#### Task 7 — Templates
+
+New `templates/admin/base.html` (shared shell + theme `<style>`, per decisions 10/12) and
+`templates/admin/{quota,kill_switches,scheduled,producers}.html`, each `{% extends
+"admin/base.html" %}`. Match the approved mockup's structure, tokens, and component patterns
+(<https://claude.ai/artifact/E7ESaFHDaWGHmSbjoNuHzS>) — panel/stat-card/pill conventions, the
+inline-SVG sparklines on the quota view, the blast-radius box on the kill-switch view — adapted
+from the mockup's client-only fakery to real Datastar signals/actions wired to the handlers from
+Task 5 (e.g., the mockup's canned `BLAST` lookup becomes a real `data-on-change` → `@get
+('/ui/admin/kill-switches/blast-radius?...')` call against `blast_radius`, Task 1). Kill-switch
+view includes the static "auth traffic is not affected by any switch shown here" note (decision
+2).
 
 ### Acceptance test
 
@@ -264,7 +327,10 @@ existing `provision_test_tenant`/`build_router`/`MockProvider` helpers (see
 
 - `docs/user-manual/query-api.adoc`: retitle away from "read-only" (no longer accurate once
   admin mutations exist) and add an `== Admin panel` section covering the four views, their
-  role gating, and that the auth kill switch is deliberately absent from it.
+  role gating, that the auth kill switch is deliberately absent from it, and that this section
+  of the UI runs on Datastar (`assets/datastar.js`, decision 11) while the rest of the binary's
+  UI stays on htmx (`assets/htmx.min.js`) — worth stating plainly so a future reader doesn't
+  treat one as a typo for the other.
 - `docs/user-manual/kill-switches.adoc`: "Engaging a switch" / "Releasing a switch" sections
   get a note that the admin panel is now the primary path, with the `psql` runbook kept as the
   documented fallback (matches the Outcome's own wording) — the exact commands stay, since
@@ -307,3 +373,4 @@ existing `provision_test_tenant`/`build_router`/`MockProvider` helpers (see
 - 2026-09-19 — added hard depends-on: [T-048], user-confirmed (shared binary + role-gating, §11.3)
 - 2026-09-20 — refined: user confirmed the auth kill switch stays out-of-band (closes decision-29/still-open-#9 for step 14) and template-approval/quiet-hours/provider-config admin UI is deferred to a follow-up ticket, not built here; re-graded complexity medium → high; Implementation Plan written
 - 2026-09-20 — TO DO → READY: plan complete
+- 2026-09-20 — plan amended inline: revised frontend stack, user-directed — Datastar instead of htmx for the admin panel only, real Askama base.html/{% extends %} per view (not a T-048-htmx-style single template set), system-only light/dark theme. Corrects this ticket's own earlier claim that T-027's mockup's "htmx or Datastar" question was settled in htmx's favor — it was not. Built and got approval on a mockup (https://claude.ai/artifact/E7ESaFHDaWGHmSbjoNuHzS) reflecting the new direction before this edit.
