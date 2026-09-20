@@ -38,6 +38,7 @@ Last updated: 2026-09-20
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
+| T-048 | Query API and UI: AuthProvider, MockProvider, customer/campaign views | high | high | XL | [] |  |
 
 ## TO DO (impact order, per child)
 
@@ -50,7 +51,6 @@ Last updated: 2026-09-20
 | T-051 | SMS provider failover | high | medium | M | [] |  |
 | T-049 | Admin panel: quota dashboard, kill-switch console, scheduled queue, producer registry | high | medium | L | [T-048] |  |
 | T-053 | Bulk campaign path: DEK-unwrap-at-scale and ingest admission rate limiting | high | high | L | [] |  |
-| T-048 | Query API and UI: AuthProvider, MockProvider, customer/campaign views | high | high | XL | [] |  |
 | T-050 | Erasure tooling: crypto-shred and physical-redaction commands, erasure audit log | high | high | XL | [] |  |
 | T-045 | Customer event feed consumer and nightly reconciliation | medium | high | L | [] |  |
 
