@@ -552,6 +552,70 @@ async fn unsigned_or_mis_signed_receipts_are_rejected() {
     teardown(fixture).await;
 }
 
+// Scenario 5 (T-047 rework, review F1): a signed bounce receipt promotes
+// into comms_event same as any other, but also feeds the suppression list
+// automatically -- the gap the review found, since only a manual
+// `messgr-control suppression add` populated it before this fix.
+#[tokio::test]
+async fn a_bounce_receipt_auto_suppresses_the_destination() {
+    let fixture = setup().await;
+    let pool = fixture.tenant_pool().await;
+    let vault = vault_keystore();
+
+    let comms_request_id = Uuid::new_v4();
+    let customer_id = Uuid::new_v4();
+    let created_at = Utc::now();
+    let occurred_at = Utc::now();
+    insert_comms_request(
+        &pool,
+        comms_request_id,
+        customer_id,
+        created_at,
+        Some("sent"),
+    )
+    .await;
+    insert_comms_event(&pool, comms_request_id, customer_id, occurred_at, "abc").await;
+
+    let body = receipt_body("abc", "bounced", occurred_at);
+    let signature = sign(&fixture.webhook_secret, &body);
+
+    let response = fixture
+        .client()
+        .post(fixture.url("mock-provider"))
+        .header("x-webhook-signature", signature)
+        .body(body)
+        .send()
+        .await
+        .expect("sending the signed webhook request failed");
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+
+    run_webhook_promote(
+        &fixture.control_pool,
+        &fixture.control_url,
+        &fixture.tenant_slug,
+        &vault,
+        5,
+    )
+    .await
+    .expect("webhook promote run failed");
+
+    let (reason, review_at): (String, chrono::DateTime<Utc>) = sqlx::query_as(
+        "SELECT reason, review_at FROM suppression WHERE destination_hmac = $1",
+    )
+    .bind(b"hmac".to_vec())
+    .fetch_one(&pool)
+    .await
+    .expect("fetching the auto-created suppression row failed");
+    assert_eq!(reason, "hard_bounce");
+    let expected_review_at = Utc::now() + chrono::Duration::days(365);
+    assert!(
+        (review_at - expected_review_at).num_minutes().abs() < 5,
+        "review_at should land ~1 year out, got {review_at}"
+    );
+
+    teardown(fixture).await;
+}
+
 // Scenario 4: the same signed receipt posted twice -> only one
 // webhook_receipt_staging row.
 #[tokio::test]

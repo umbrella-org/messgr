@@ -87,6 +87,7 @@ pub async fn promote(
         m.comms_request_id,
         m.comms_request_created_at,
         m.customer_id,
+        &m.destination_hmac,
         receipt.occurred_at,
         &receipt.event_type,
         &receipt.provider_ref,

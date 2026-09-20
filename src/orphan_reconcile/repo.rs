@@ -23,6 +23,7 @@ pub struct Match {
     pub comms_request_created_at: DateTime<Utc>,
     pub customer_id: Uuid,
     pub current_final_status: Option<String>,
+    pub destination_hmac: Vec<u8>,
 }
 
 pub async fn list_pending(pool: &PgPool) -> Result<Vec<PendingOrphan>, sqlx::Error> {
@@ -72,9 +73,9 @@ pub async fn find_match(
     pool: &PgPool,
     provider_ref: &str,
 ) -> Result<Option<Match>, sqlx::Error> {
-    let row = sqlx::query_as::<_, (Uuid, DateTime<Utc>, Uuid, Option<String>)>(
+    let row = sqlx::query_as::<_, (Uuid, DateTime<Utc>, Uuid, Option<String>, Vec<u8>)>(
         r#"
-        SELECT cr.id, cr.created_at, cr.customer_id, cr.final_status
+        SELECT cr.id, cr.created_at, cr.customer_id, cr.final_status, cr.destination_hmac
         FROM comms_event ce
         JOIN comms_request cr ON cr.id = ce.comms_request_id
         WHERE ce.provider_ref = $1 AND ce.provider_ref <> ''
@@ -92,13 +93,27 @@ pub async fn find_match(
             comms_request_created_at,
             customer_id,
             current_final_status,
+            destination_hmac,
         )| Match {
             comms_request_id,
             comms_request_created_at,
             customer_id,
             current_final_status,
+            destination_hmac,
         },
     ))
+}
+
+/// `event_type` values that must feed the suppression list automatically
+/// (T-047 review F1; T-038's own deferral). Only the two receipt-driven
+/// reasons -- `regulatory_hold` is operator-only, there is no receipt event
+/// for it.
+fn auto_suppress_reason(event_type: &str) -> Option<&'static str> {
+    match event_type {
+        "bounced" => Some(crate::suppression::model::reason::HARD_BOUNCE),
+        "complaint" => Some(crate::suppression::model::reason::COMPLAINT),
+        _ => None,
+    }
 }
 
 /// Inserts one promoted `comms_event` row (ciphertext already computed by
@@ -115,6 +130,7 @@ pub async fn insert_comms_event(
     comms_request_id: Uuid,
     comms_request_created_at: DateTime<Utc>,
     customer_id: Uuid,
+    destination_hmac: &[u8],
     occurred_at: DateTime<Utc>,
     event_type: &str,
     provider_ref: &str,
@@ -154,6 +170,33 @@ pub async fn insert_comms_event(
         .await?;
     }
 
+    // T-047 review F1: a bounce/complaint receipt must feed suppression
+    // automatically, not just advance final_status. `review_at` extends one
+    // year from now (confirmed with the user) and the conflict update only
+    // ever lengthens it (never shortens a longer-standing entry, e.g. a
+    // manually-set regulatory_hold) -- the same fail-safe direction §5
+    // already applies to suppression as a whole.
+    if let Some(reason) = auto_suppress_reason(event_type) {
+        let now = Utc::now();
+        let review_at = now + chrono::Duration::days(365);
+        sqlx::query(
+            r#"
+            INSERT INTO suppression (destination_hmac, reason, added_at, review_at)
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (destination_hmac) DO UPDATE SET
+                reason = EXCLUDED.reason,
+                review_at = EXCLUDED.review_at
+            WHERE EXCLUDED.review_at > suppression.review_at
+            "#,
+        )
+        .bind(destination_hmac)
+        .bind(reason)
+        .bind(now)
+        .bind(review_at)
+        .execute(&mut **tx)
+        .await?;
+    }
+
     Ok(())
 }
 
@@ -173,6 +216,7 @@ pub async fn promote(
         m.comms_request_id,
         m.comms_request_created_at,
         m.customer_id,
+        &m.destination_hmac,
         orphan.occurred_at,
         &orphan.event_type,
         &orphan.provider_ref,
