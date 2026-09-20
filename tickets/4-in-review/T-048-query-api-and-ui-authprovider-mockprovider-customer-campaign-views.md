@@ -163,11 +163,23 @@ build-order prerequisite step (0–4, including all three gates, T-036/T-037/T-0
     `require_role` check, never in template logic** (§11.1: "enforced server-side on every query,
     never in the UI layer"). The role → endpoint matrix (Task 6) is the single place that
     encodes which of the five roles may call which route.
-12. **`customer_service` is restricted at the extractor, not the handler.** It must supply
-    `customer_id` and that id must match the route's own `{id}` (on `/comms/{id}` — whose owning
-    `customer_id` is loaded and compared — and `/customers/{id}/timeline`); it gets a `403` from
-    `GET /comms` (list/search), `GET /campaigns/{id}/reach`, and both `/producers/*` routes
-    outright, before any repo call.
+12. **`customer_service` ownership is checked inline in each of the four handlers/views that need
+    it, via a shared `identity_owns` predicate — not a `FromRequestParts` extractor.**
+    **Correction found during round-2 rework (2026-09-20, finding F5):** this decision originally
+    read "restricted at the extractor, not the handler." What shipped is a shared
+    `handlers::identity_owns(identity, customer_id) -> bool` function, called from a
+    `match identity.role.as_str() { ... }` inline in `handlers::comms_detail`,
+    `handlers::customer_timeline`, `views::ui_comms_detail`, and `views::ui_customer_timeline`
+    — functionally correct and covered route-by-route (verified against every role, tests pass
+    and would fail under mutation), but not the structural guarantee a shared extractor gives:
+    nothing stops a future fifth route from forgetting the inline check. Kept as-is rather than
+    centralized: today's four call sites are small and tested, and building the extractor now is
+    a larger, unscoped change relative to what F5 asked for — if the structural risk becomes worth
+    closing, that is separate follow-up work, not owed by this ticket. It must supply `customer_id`
+    and that id must match the route's own `{id}` (on `/comms/{id}` — whose owning `customer_id` is
+    loaded and compared — and `/customers/{id}/timeline`); it gets a `403` from `GET /comms`
+    (list/search), `GET /campaigns/{id}/reach`, and both `/producers/*` routes outright, before any
+    repo call.
 13. **`GET /producers/{id}/usage` and `/quota` reuse `producer_quota::repo::load_current_usage`
     / `load_one` / the existing `ProducerQuota` model directly** — thin handlers, no new query
     logic. Scoped to `comms_ops` only, matching §11.1's role table literally (`admin`'s listed
@@ -721,6 +733,34 @@ to this ticket's own UI/handler surface and change nothing T-049's Description a
 this session/host (F8 was a one-character typo, fixed by hand rather than surfaced as a
 readability suggestion).
 
+### Rework fix record — round 2 (commit e3b0858)
+
+F4 fixed: `templates/query_api/timeline.html:31`'s detail link now renders
+`row.created_at.to_rfc3339()|urlencode` instead of Askama's default `Display`, matching the
+RFC 3339 + percent-encoded shape `handlers::comms_detail`'s `?created_at=` parser (and the
+acceptance suite's own `url_encode_query_value` helper) requires. Added
+`ui_timeline_detail_link_is_followable` (`tests/query_api.rs`) — renders the real `/ui/...`
+page, extracts the `?created_at=` value straight out of the generated HTML (not re-derived from
+the seeded timestamp), and asserts `GET /comms/{id}` with that exact value returns `200`; this
+test fails against the pre-fix template (confirmed by inspection: the old `{{ row.created_at }}`
+output is neither RFC 3339 nor percent-encoded, so the parse the route requires would reject it).
+
+F5 disposition: **corrected the decision text**, this review's own recommendation — the shipped
+per-handler pattern (shared `identity_owns` predicate, not a `FromRequestParts` extractor) is
+tested route-by-route today, and centralizing now would be a larger, unscoped change. Decision
+12 above rewritten to describe what shipped, with the F5 finding and its reasoning folded in.
+Also corrected the stale comment directly above `handlers::comms_detail`'s inline check
+(`src/query_api/handlers.rs:76-79`), which had claimed "restricted at the extractor, not the
+handler" — the exact contradiction F5 flagged — to describe the actual inline/shared-predicate
+shape.
+
+Branch tip before this round's fixes: `e1d9bf0`. Diff: `git diff e1d9bf0..e3b0858` —
+`src/query_api/handlers.rs` (comment only), `templates/query_api/timeline.html` (F4's fix),
+`tests/query_api.rs` (new regression test). `just build`/`just lint`/`just docs-check` clean;
+`cargo test --test query_api` — 8/8 pass (new test included); `cargo test --test dispatcher`
+(isolated, per round 1's flakiness note) — 30/30 pass; full `cargo test` (all binaries) — 0
+failures.
+
 ## History
 
 - 2026-09-19 — created (TO DO). source: audit: build-order step 13, remaining gap identified when auditing unticketed steps against the board
@@ -743,3 +783,4 @@ readability suggestion).
 - 2026-09-20 — IN REVIEW → REWORK: F1 blocking: access_audit missing from DESIGN.md §7.2's erasure/exemption statements (addendum step 2 item 5, AGENTS.md hard invariant 6)
 - 2026-09-20 — REWORK → IN REVIEW: findings fixed
 - 2026-09-20 — IN REVIEW → REWORK: scoped re-review round 2: F4 blocking (malformed detail-link datetime, UI 400s on click), F5 blocking (decision 12 customer_service check shipped inline in 4 handlers, not the confirmed shared extractor); F1's fix verified closed; F8 fixed inline
+- 2026-09-20 — REWORK → IN REVIEW: findings fixed
