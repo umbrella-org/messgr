@@ -11,7 +11,7 @@ pub mod granularity {
     pub const DAY: &str = "day";
 }
 
-#[derive(Debug, Clone, sqlx::FromRow)]
+#[derive(Debug, Clone, serde::Serialize, sqlx::FromRow)]
 pub struct ProducerQuota {
     pub producer_id: Uuid,
     pub channel: String,
@@ -69,7 +69,7 @@ pub struct ProducerQuotaOverrideInput {
 
 /// One `producer_usage` row, either a live in-process snapshot being
 /// flushed or a row read back at startup to rebuild one.
-#[derive(Debug, Clone, sqlx::FromRow)]
+#[derive(Debug, Clone, serde::Serialize, sqlx::FromRow)]
 pub struct UsageRow {
     pub producer_id: Uuid,
     pub channel: String,

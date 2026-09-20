@@ -1,0 +1,29 @@
+{% extends "query_api/base.html" %}
+
+{% block title %}Campaign reach — {{ campaign_id }}{% endblock %}
+
+{% block content %}
+<h1>Campaign reach</h1>
+<p>Campaign: <code>{{ campaign_id }}</code></p>
+
+{% if counts.is_empty() %}
+<p>No messages found for this campaign.</p>
+{% else %}
+<table>
+    <thead>
+        <tr>
+            <th>Status</th>
+            <th>Count</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for row in counts %}
+        <tr>
+            <td>{{ row.final_status.as_deref().unwrap_or("in flight") }}</td>
+            <td>{{ row.count }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endif %}
+{% endblock %}

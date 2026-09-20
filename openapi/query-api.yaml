@@ -1,0 +1,81 @@
+openapi: 3.0.3
+info:
+  title: messgr query-api
+  version: "1.0.0"
+  description: >
+    Read-only REST API over the messgr ledger (DESIGN.md §11, T-048).
+    Role-authenticated; every route below except this document itself
+    requires an authenticated identity with an allowed role.
+servers:
+  - url: /t/{tenant_slug}
+    variables:
+      tenant_slug:
+        default: acme
+paths:
+  /comms:
+    get:
+      summary: Filtered list of comms_request rows
+      description: compliance only.
+      parameters:
+        - { name: customer_id, in: query, schema: { type: string, format: uuid } }
+        - { name: channel, in: query, schema: { type: string } }
+        - { name: class, in: query, schema: { type: string } }
+        - { name: campaign_id, in: query, schema: { type: string } }
+        - { name: producer_id, in: query, schema: { type: string, format: uuid } }
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+        - { name: status, in: query, schema: { type: string } }
+        - { name: scheduled, in: query, schema: { type: boolean } }
+      responses:
+        "200": { description: OK }
+        "403": { description: role not permitted }
+  /comms/{id}:
+    get:
+      summary: A single comms_request row, plus its rendered content and event history
+      description: customer_service (own customer only) and compliance.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: created_at, in: query, required: true, schema: { type: string, format: date-time } }
+      responses:
+        "200": { description: OK }
+        "403": { description: role not permitted }
+        "404": { description: not found }
+  /customers/{id}/timeline:
+    get:
+      summary: A customer's cross-channel message timeline, alias-expanded
+      description: customer_service (own customer only) and compliance.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: OK }
+        "403": { description: role not permitted }
+  /campaigns/{id}/reach:
+    get:
+      summary: Aggregate reach/delivery-status counts for a campaign
+      description: compliance and campaign_ops.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200": { description: OK }
+        "403": { description: role not permitted }
+  /producers/{id}/usage:
+    get:
+      summary: Live quota consumption, current minute + day windows
+      description: comms_ops only.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: OK }
+        "403": { description: role not permitted }
+  /producers/{id}/quota:
+    get:
+      summary: Configured limits and any active override
+      description: comms_ops only.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: channel, in: query, required: true, schema: { type: string } }
+        - { name: class, in: query, required: true, schema: { type: string } }
+      responses:
+        "200": { description: OK }
+        "403": { description: role not permitted }
+        "404": { description: not found }

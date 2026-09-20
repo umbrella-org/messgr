@@ -247,6 +247,14 @@ dispatcher-run:
 webhook-run:
     cargo run --bin messgr-webhook
 
+# Run messgr-query-api (the read-only REST API + Askama/htmx UI, T-048).
+# Requires QUERY_API_TLS_CERT_FILE, QUERY_API_TLS_KEY_FILE, AUTH_PROVIDER
+# (only "mock" today), and MOCK_AUTH_ACTOR/MOCK_AUTH_ROLE to be set (see
+# .env.example); QUERY_API_LISTEN_ADDR defaults to 0.0.0.0:8544.
+[group('control-plane')]
+query-api-run:
+    cargo run --bin messgr-query-api
+
 # Run the partition lifecycle (create-ahead, move to slow tablespace,
 # detach + drop) once for a tenant. Meant to be invoked on a schedule
 # (cron/systemd timer) -- this does not loop.

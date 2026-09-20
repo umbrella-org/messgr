@@ -1,0 +1,38 @@
+{% extends "query_api/base.html" %}
+
+{% block title %}Customer timeline — {{ customer_id }}{% endblock %}
+
+{% block content %}
+<h1>Customer timeline</h1>
+<p>Customer: <code>{{ customer_id }}</code></p>
+
+{% if rows.is_empty() %}
+<p>No messages found.</p>
+{% else %}
+<table>
+    <thead>
+        <tr>
+            <th>Sent at</th>
+            <th>Channel</th>
+            <th>Class</th>
+            <th>Campaign</th>
+            <th>Status</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for row in rows %}
+        <tr>
+            <td>{{ row.created_at }}</td>
+            <td>{{ row.channel }}</td>
+            <td>{{ row.class }}</td>
+            <td>{{ row.campaign_id.as_deref().unwrap_or("-") }}</td>
+            <td>{{ row.final_status.as_deref().unwrap_or("in flight") }}</td>
+            <td>
+                <a href="../../comms/{{ row.id }}?created_at={{ row.created_at }}">detail</a>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endif %}
+{% endblock %}
