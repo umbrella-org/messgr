@@ -183,6 +183,12 @@ const EXEMPT: &[(&str, &str)] = &[
          sync metadata, none of it personal information; caught only via the customer_id FK \
          other tables declare against it, not by its own columns (§7.2)",
     ),
+    (
+        "access_audit",
+        "evidence of what a compliance user did, not the customer's own data -- same reasoning \
+         as suppression/orphan_event's exemptions above; a bank's audit trail is expected to \
+         outlive the record it describes (§11.1, T-048 decision 8)",
+    ),
 ];
 
 async fn customer_linkable_tables(pool: &PgPool) -> Vec<String> {

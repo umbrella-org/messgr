@@ -1,3 +1,6 @@
+pub mod access_audit;
+pub mod auth;
+pub mod comms_query;
 pub mod config;
 pub mod consent;
 pub mod customer;
@@ -20,6 +23,7 @@ pub mod producer;
 pub mod producer_quota;
 pub mod profile;
 pub mod provider_config;
+pub mod query_api;
 pub mod quiet_hours;
 pub mod sender;
 pub mod stats;

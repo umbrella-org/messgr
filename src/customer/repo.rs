@@ -44,6 +44,36 @@ pub async fn expand_alias(pool: &PgPool, id: Uuid) -> Result<Uuid, sqlx::Error> 
     Ok(current)
 }
 
+/// The reverse of `expand_alias`: given a canonical `customer_id`, every id
+/// that was ever merged into it (T-048 decision 15 — the customer-timeline
+/// view needs this direction, not `expand_alias`'s forward walk, so ledger
+/// rows written under a since-superseded id still show up). Bounded by the
+/// same `ALIAS_HOP_LIMIT` recursion depth `expand_alias` uses. Always
+/// includes `canonical_id` itself (depth 0), even when it was never merged
+/// into.
+pub async fn alias_set(
+    pool: &PgPool,
+    canonical_id: Uuid,
+) -> Result<Vec<Uuid>, sqlx::Error> {
+    sqlx::query_scalar(
+        r#"
+        WITH RECURSIVE aliases(id, depth) AS (
+            SELECT $1::uuid, 0
+            UNION ALL
+            SELECT ca.old_customer_id, a.depth + 1
+            FROM customer_alias ca
+            JOIN aliases a ON ca.customer_id = a.id
+            WHERE a.depth < $2
+        )
+        SELECT DISTINCT id FROM aliases
+        "#,
+    )
+    .bind(canonical_id)
+    .bind(i32::from(ALIAS_HOP_LIMIT))
+    .fetch_all(pool)
+    .await
+}
+
 pub async fn find_customer_by_external_id(
     pool: &PgPool,
     system: &str,

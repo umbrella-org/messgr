@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>{% block title %}messgr query-api{% endblock %}</title>
+    <script src="/assets/htmx.min.js"></script>
+</head>
+<body>
+    <header>
+        <nav>
+            <strong>messgr query-api</strong>
+            — signed in as <code>{{ actor }}</code> (<code>{{ role }}</code>)
+        </nav>
+    </header>
+    <main>
+        {% block content %}{% endblock %}
+    </main>
+</body>
+</html>

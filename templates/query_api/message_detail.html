@@ -1,0 +1,45 @@
+{% extends "query_api/base.html" %}
+
+{% block title %}Message {{ detail.id }}{% endblock %}
+
+{% block content %}
+<h1>Message detail</h1>
+<dl>
+    <dt>id</dt><dd>{{ detail.id }}</dd>
+    <dt>sent at</dt><dd>{{ detail.created_at }}</dd>
+    <dt>customer</dt><dd>{{ detail.customer_id }}</dd>
+    <dt>channel</dt><dd>{{ detail.channel }}</dd>
+    <dt>class</dt><dd>{{ detail.class }}</dd>
+    <dt>template</dt><dd>{{ detail.template_id }} v{{ detail.template_version }}</dd>
+    <dt>campaign</dt><dd>{{ detail.campaign_id.as_deref().unwrap_or("-") }}</dd>
+    <dt>destination</dt><dd>{{ detail.destination }}</dd>
+    <dt>status</dt><dd>{{ detail.final_status.as_deref().unwrap_or("in flight") }}</dd>
+</dl>
+
+<h2>Rendered content</h2>
+<pre>{{ detail.body.as_deref().unwrap_or("(no payload -- auth-class message)") }}</pre>
+
+<h2>Event history</h2>
+{% if events.is_empty() %}
+<p>No events recorded yet.</p>
+{% else %}
+<table>
+    <thead>
+        <tr>
+            <th>Occurred at</th>
+            <th>Event</th>
+            <th>Provider status</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for event in events %}
+        <tr>
+            <td>{{ event.occurred_at }}</td>
+            <td>{{ event.event_type }}</td>
+            <td>{{ event.provider_status.as_deref().unwrap_or("-") }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endif %}
+{% endblock %}

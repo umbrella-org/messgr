@@ -23,6 +23,10 @@ path = "src/bin/dispatcher.rs"
 name = "messgr-webhook"
 path = "src/bin/webhook.rs"
 
+[[bin]]
+name = "messgr-query-api"
+path = "src/bin/query_api.rs"
+
 [dependencies]
 tokio = { version = "1", features = ["full"] }
 clap = { version = "4", features = ["derive"] }
@@ -59,6 +63,7 @@ x509-parser = "0.18"
 aes-gcm = "0.11"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 rand = "0.10"
+askama = "0.12"
 
 [dev-dependencies]
 wiremock = "0.6"
