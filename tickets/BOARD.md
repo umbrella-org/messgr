@@ -9,7 +9,7 @@ hand — edit the tickets. Hand-written planning notes live in [`NOTES.md`](NOTE
 **WIP limits (per child-project):**
 - `messgr`: `3-in-development/` ≤ 1 · `4-in-review/` ≤ 1
 
-Last updated: 2026-09-19
+Last updated: 2026-09-20
 
 ## IN DEVELOPMENT
 
@@ -20,10 +20,11 @@ Last updated: 2026-09-19
 
 ## IN REVIEW
 
-### messgr (0/1)
+### messgr (1/1)
 
 | id | title | depends-on |
 |---|---|---|
+| T-047 | Webhook receiver and delivery-receipt ingestion (messgr-webhook) | [] |
 
 ## REWORK
 
@@ -31,7 +32,6 @@ Last updated: 2026-09-19
 
 | id | title | open findings |
 |---|---|---|
-| T-047 | Webhook receiver and delivery-receipt ingestion (messgr-webhook) | F1 blocking: auto-suppression from bounce/complaint receipts never wired, contradicting the ticket's own Outcome and T-… |
 
 ## READY (impact order, per child)
 

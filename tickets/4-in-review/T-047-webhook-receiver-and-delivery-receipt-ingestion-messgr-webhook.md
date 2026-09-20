@@ -308,6 +308,24 @@ Disposition summary: 1 blocking (F1, routes to rework), 2 fixed inline (F2, F3),
 
 cost: estimated L, actual L
 
+### Rework fix record — round 1 (commit `669ea28`)
+
+F1: `orphan_reconcile::repo::insert_comms_event` — the shared funnel both `orphan_reconcile::repo::promote`
+and `webhook_receipt::repo::promote` already route through — now upserts a `suppression` row when
+the promoted `event_type` is `bounced`/`complaint`, in the same transaction as the `comms_event`
+insert. `Match` gained `destination_hmac` (from `comms_request`, per F1's own suggestion) to key
+the row. `review_at` is `now() + 365 days` (confirmed with the user: no existing default existed
+anywhere in the codebase — `suppression add`'s `--review-at` is operator-supplied with no fallback
+— and this is a compliance-adjacent policy call, not one to assume). The conflict update only
+lengthens `review_at` (`WHERE EXCLUDED.review_at > suppression.review_at`), never shortens a
+longer-standing entry such as a manually-set `regulatory_hold`, matching §5's fail-safe direction
+for suppression as a whole.
+
+New acceptance scenario: `tests/webhook.rs::a_bounce_receipt_auto_suppresses_the_destination`
+(a signed `bounced` receipt promotes, then a matching `suppression` row appears with
+`reason = hard_bounce` and `review_at` ~1 year out). `just build`, `just lint`, `just docs-check`,
+`just test` all green, including this new test and the existing four scenarios.
+
 ## History
 
 - 2026-09-19 — created (TO DO). source: audit: build-order step 12, remaining gap identified when auditing unticketed steps against the board
@@ -315,3 +333,4 @@ cost: estimated L, actual L
 - 2026-09-19 — READY → IN DEVELOPMENT: picked up
 - 2026-09-19 — IN DEVELOPMENT → IN REVIEW: acceptance green
 - 2026-09-19 — IN REVIEW → REWORK: F1 blocking: auto-suppression from bounce/complaint receipts never wired, contradicting the ticket's own Outcome and T-038's explicit deferral
+- 2026-09-20 — REWORK → IN REVIEW: findings fixed
