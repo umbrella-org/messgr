@@ -346,7 +346,44 @@ existing per-binary pages.
 
 ## Review
 
-<!-- empty until IN REVIEW -->
+- [x] Reviewer independence settled (step 0): **independent** — fresh session (post-`/clear`),
+  no memory of authoring this branch; audits run directly, nothing delegated.
+- [x] Implementation audit — acceptance test re-run, tasks & criteria verified (steps 1, 2):
+  `cargo test --test sms_sender` (4/4 pass), full `just test` (all suites green, no
+  regressions), `just build` clean.
+- [x] Quality audit (step 3): tests are mutation-resistant (paired assertions, not bare
+  `is_err()`); see findings below for the one gap this audit found.
+- [x] Consistency audit (step 4): cross-checked against `AGENTS.md` hard invariants 1/3/4/5/10,
+  the gate-chain's auth exemptions (§5), and existing `KeyStore`/`ingest`/`dispatcher` patterns;
+  see findings below.
+- [x] Documentation audit (step 4a): `just docs-check` clean; `docs/user-manual/sms-sender.adoc`,
+  `kill-switches.adoc`, `control-plane-cli.adoc` reviewed for coverage and accuracy — all
+  correct. One pre-existing staleness found elsewhere in the tree (F4).
+- [x] Docs-readability pass (step 4b): **conscious skip** — no docs-readability reviewer
+  configured in this host.
+- [x] Findings recorded below with severity, class, and disposition (step 5).
+- [x] Ticket moved per step 6.
+- [x] Governing documents reconciled or reason given (step 7): `02-otp.md`, `03-data-model.md`,
+  `14-decisions-and-open-questions.md` corrections in this branch verified accurate against the
+  actual implementation. No further governing-doc edit made by this review — F3's gap doesn't
+  fit the "made false by this branch" bar for an inline fix; recorded as a finding for the
+  eventual erasure ticket (build-order step 15) to pick up instead.
+- [x] Remaining-tickets impact sweep done (step 8): T-051, T-053, T-054 (the only tickets
+  referencing T-052, all still in `1-to-do/`, unrefined) re-read; no assumption they encode was
+  invalidated by what actually shipped.
+- [x] Summary + commit message & MR attributes presented for approval (step 9) — see below.
+
+| id | severity | class | disposition | description | evidence | suggestion |
+|---|---|---|---|---|---|---|
+| F1 | blocking | correctness | — | The OTP send is not actually resilient to a Vault or Postgres outage, contradicting decision 9 / §3's "the send still succeeds" and this ticket's own Outcome ("customer login stops depending on the messaging platform at all"). `handler.rs` calls `get_or_create_dek(...).await?` — which, on a DEK cache-miss, hits `customer_dek` (Postgres) and Vault — *before* the provider call, with a bare `?` and no buffer/fallback: a miss during an outage aborts the whole request (500), nothing sent, nothing buffered. Separately, `provider::send`'s `keystore.read_provider_credential` call is per-request with no cache at all, so a Vault outage blocks every send regardless of DEK-cache state. | `src/sms_sender/handler.rs` (`get_or_create_dek(...).await?` precedes `provider::send`, no fallback); `src/sms_sender/provider.rs` (`read_provider_credential` called fresh every request — contrast `AuthEnabledCache`/`ProviderConfigCache`, which both cache against exactly this kind of outage); `tests/sms_sender.rs`'s `postgres_write_failure_buffers_and_drain_recovers_it` pre-warms the DEK cache specifically "rather than fetched through the (now-broken) pool" — its own comment says this proves only the audit write, not DEK resolution, is what the test breaks; `development/design/04-gate-chain.md`: "the whole design of the OTP path is that it has no dependency on Postgres or Vault being reachable"; real `dek_cache` TTL is 1 hour (`src/tenant/registry.rs:31`), so any customer who hasn't triggered a send in the last hour hits this on their very next OTP. | Cache the provider credential the same way T-054 already specifies for cloud's `otp-api` (fetch at startup, refresh on a timer, not per-request — `02-otp.md`'s own §3.1 correction); give DEK resolution the same best-effort treatment decision 9 gives the audit write, or explicitly narrow decision 9's promise to the warm-cache case if a real fix isn't feasible here. |
+| F2 | blocking | correctness | — | `repo::write_audit_record` binds `finalized_at` to the same query parameter as `created_at` (`$3`, reused at the end of the `VALUES` list), so every row this binary ever writes gets `finalized_at == created_at` — never the actual time the DEK/HMAC work and provider call finished. Silently wrong data in a bank audit ledger, exposed verbatim through `query_api`'s `finalized_at` field. No test in `tests/sms_sender.rs` asserts `finalized_at` at all. | `src/sms_sender/repo.rs`: `VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULL, $9, $10, NULL, $11, NULL, NULL, $12, $3)` — finalized_at bound to `$3` = `created_at`; compare `src/dispatcher/repo.rs`'s own `UPDATE ... SET final_status = $1, finalized_at = $2` using a freshly-captured `now`, and `03-data-model.md`: "setting `final_status` and `finalized_at` when the outbox row reaches a terminal state." | Bind a `Utc::now()` captured at write time instead of reusing `created_at`; add a regression assertion (e.g. `finalized_at >= created_at` under a delay, or simply `!=`) to the acceptance test. |
+| F3 | non-blocking | spec-unclear | noted | The new local-disk buffer file (`sms-sender-buffer.jsonl`) is a customer-data storage location — `customer_id`, `tenant_id`, DEK-encrypted `destination_ciphertext`/`destination_hmac` — invisible to the schema-based erasure mechanism `DESIGN.md` §7.2 describes and `tests/erasure_coverage.rs` will eventually check (build-order step 15, not built yet). A record buffered during an outage and drained *after* that customer's DEK is later crypto-shredded lands in Postgres as an ordinary, non-tombstoned row. Erasure isn't built yet, so nothing ships wrong today — this is a design-doc gap, not a live bug — but neither `DESIGN.md` nor this ticket flags it for whoever builds step 15. | `src/sms_sender/buffer.rs` (plain JSON-lines file on local disk); `development/design/06-pii-retention.md` §7.2 (schema-based erasure statements, no filesystem equivalent); `tests/erasure_coverage.rs`'s own header comment ("that module does not exist yet"). | Add a Still Open item to `14-decisions-and-open-questions.md` for build-order step 15 to account for out-of-band buffer files (this one, and any future equivalent) when it designs the erasure job. |
+| F4 | non-blocking | docs-gap | noted | `docs/user-manual/introduction.adoc`'s "Status" section ("Three binaries exist today: `messgr-control`, `messgr-ingest`, `messgr-dispatcher`...") and its `version`-subcommand list are already stale — `messgr-webhook` and `messgr-query-api` shipped (T-047/T-048) and are already missing from both. This ticket adds `messgr-sms-sender` as a fourth undocumented case. Pre-existing staleness this branch didn't cause, so not "fixed inline" territory under the rules' causation test. | `docs/user-manual/introduction.adoc` lines 11-19, 22-23. | Whoever next touches that page's Status section should refresh the binary list (ingest, dispatcher, webhook, query-api, sms-sender). Not on its own worth a dedicated ticket. |
+
+Disposition summary: 2 blocking (F1, F2) — not dispositioned, fixed via rework. 2 non-blocking:
+`noted` ×2 (F3, F4).
+
+cost: estimated L, actual L.
 
 ## History
 
@@ -355,3 +392,4 @@ existing per-binary pages.
 - 2026-09-21 — READY → IN DEVELOPMENT: picked up
 - 2026-09-21 — plan amended inline: added `ProviderConfigCache` (decision 7) so provider selection survives a tenant-DB outage independently of the audit write, matching decision 9 and the acceptance test's "provider call is unaffected" requirement — `provider_config::repo::list` was being read fresh from the same pool the audit write buffers around
 - 2026-09-21 — IN DEVELOPMENT → IN REVIEW: acceptance green
+- 2026-09-21 — IN REVIEW → REWORK: 2 blocking findings: OTP send not actually resilient to a Vault/Postgres outage (F1); finalized_at bound to created_at (F2)

@@ -20,11 +20,10 @@ Last updated: 2026-09-21
 
 ## IN REVIEW
 
-### messgr (1/1)
+### messgr (0/1)
 
 | id | title | depends-on |
 |---|---|---|
-| T-052 | OTP fast path: sms-sender bypassing the queue | [] |
 
 ## REWORK
 
@@ -32,6 +31,7 @@ Last updated: 2026-09-21
 
 | id | title | open findings |
 |---|---|---|
+| T-052 | OTP fast path: sms-sender bypassing the queue | 2 blocking findings: OTP send not actually resilient to a Vault/Postgres outage (F1); finalized_at bound to created_at … |
 
 ## READY (impact order, per child)
 
