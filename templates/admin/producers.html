@@ -1,0 +1,123 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Producer registry{% endblock %}
+
+{% block content %}
+<h1>Producer registry</h1>
+
+<div class="panel">
+    <h2>Register a producer</h2>
+    <form data-on-submit__prevent="@post('/t/{{ tenant_slug }}/admin/producers', {contentType: 'form'})">
+        <div class="field"><label>Name</label><input type="text" name="name" required></div>
+        <div class="field"><label>Cert subject</label><input type="text" name="cert_subject" required></div>
+        <div class="field"><label>Owner team</label><input type="text" name="owner_team" required></div>
+        <div class="field"><label>Contact</label><input type="text" name="contact" required></div>
+        <button type="submit" class="primary">Register</button>
+    </form>
+</div>
+
+<div class="panel">
+    <h2>Producers</h2>
+    {% if producers.is_empty() %}
+    <p class="note">No producers registered.</p>
+    {% else %}
+    <table>
+        <thead><tr><th>Name</th><th>Cert subject</th><th>Owner team</th><th>Contact</th><th>Enabled</th><th></th></tr></thead>
+        <tbody>
+            {% for p in producers %}
+            <tr>
+                <td>{{ p.name }}</td>
+                <td>{{ p.cert_subject }}</td>
+                <td>{{ p.owner_team }}</td>
+                <td>{{ p.contact }}</td>
+                <td>{% if p.enabled %}<span class="pill">enabled</span>{% else %}<span class="pill">disabled</span>{% endif %}</td>
+                <td>
+                    {% if p.enabled %}
+                    <form class="inline" data-on-submit__prevent="@post('/t/{{ tenant_slug }}/admin/producers/{{ p.id }}/disable', {contentType: 'form'})">
+                        <button type="submit" class="danger">Disable</button>
+                    </form>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+</div>
+
+<div class="panel">
+    <h2>Set quota</h2>
+    <form data-on-submit__prevent="@post('/t/{{ tenant_slug }}/admin/producers/'+$producerId+'/quota', {contentType: 'form'})"
+          data-signals="{producerId: ''}">
+        <div class="field"><label>Producer id</label><input type="text" data-bind="producerId" required></div>
+        <div class="field"><label>Channel</label><input type="text" name="channel" required></div>
+        <div class="field"><label>Class</label><input type="text" name="class" required></div>
+        <div class="field"><label>Per minute (blank = no limit)</label><input type="number" name="per_minute"></div>
+        <div class="field"><label>Per day (blank = no limit)</label><input type="number" name="per_day"></div>
+        <div class="field">
+            <label>Enforcement</label>
+            <select name="enforcement">
+                <option value="soft">soft</option>
+                <option value="hard">hard</option>
+            </select>
+        </div>
+        <button type="submit" class="primary">Set quota</button>
+    </form>
+    {% if quotas.is_empty() %}
+    <p class="note">No quotas configured.</p>
+    {% else %}
+    <table>
+        <thead><tr><th>Producer</th><th>Channel</th><th>Class</th><th>Per minute</th><th>Per day</th><th>Enforcement</th></tr></thead>
+        <tbody>
+            {% for q in quotas %}
+            <tr>
+                <td>{{ q.producer_name }}</td>
+                <td>{{ q.channel }}</td>
+                <td>{{ q.class }}</td>
+                <td>{{ q.per_minute_display }}</td>
+                <td>{{ q.per_day_display }}</td>
+                <td>{{ q.enforcement }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+</div>
+
+<div class="panel">
+    <h2>Add a time-boxed quota override</h2>
+    <form data-on-submit__prevent="@post('/t/{{ tenant_slug }}/admin/producers/'+$overrideProducerId+'/quota/override', {contentType: 'form'})"
+          data-signals="{overrideProducerId: ''}">
+        <div class="field"><label>Producer id</label><input type="text" data-bind="overrideProducerId" required></div>
+        <div class="field"><label>Channel</label><input type="text" name="channel" required></div>
+        <div class="field"><label>Class</label><input type="text" name="class" required></div>
+        <div class="field"><label>Per day</label><input type="number" name="per_day" required></div>
+        <div class="field"><label>Valid from</label><input type="datetime-local" name="valid_from" required></div>
+        <div class="field"><label>Valid to</label><input type="datetime-local" name="valid_to" required></div>
+        <div class="field"><label>Approved by</label><input type="text" name="approved_by" required></div>
+        <div class="field"><label>Reason</label><input type="text" name="reason" required></div>
+        <button type="submit" class="primary">Add override</button>
+    </form>
+    {% if overrides.is_empty() %}
+    <p class="note">No overrides configured.</p>
+    {% else %}
+    <table>
+        <thead><tr><th>Producer</th><th>Channel</th><th>Class</th><th>Per day</th><th>Valid from</th><th>Valid to</th><th>Approved by</th><th>Reason</th></tr></thead>
+        <tbody>
+            {% for o in overrides %}
+            <tr>
+                <td>{{ o.producer_name }}</td>
+                <td>{{ o.channel }}</td>
+                <td>{{ o.class }}</td>
+                <td>{{ o.per_day }}</td>
+                <td>{{ o.valid_from }}</td>
+                <td>{{ o.valid_to }}</td>
+                <td>{{ o.approved_by }}</td>
+                <td>{{ o.reason }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+</div>
+{% endblock %}

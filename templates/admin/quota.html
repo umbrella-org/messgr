@@ -1,0 +1,35 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Quota dashboard{% endblock %}
+
+{% block content %}
+<h1>Quota dashboard</h1>
+{% if rows.is_empty() %}
+<p>No producer quotas configured.</p>
+{% else %}
+<div class="stat-cards">
+    {% for row in rows %}
+    <div class="panel">
+        <h3>{{ row.producer_name }} <span class="pill">{{ row.channel }}</span> <span class="pill">{{ row.class }}</span></h3>
+        <div class="stat-cards">
+            <div class="stat-card">
+                <div class="label">This minute</div>
+                <div class="value">{{ row.minute_display }}</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">Today</div>
+                <div class="value">{{ row.day_display }}</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">Blocked (trailing 24h)</div>
+                <div class="value">{{ row.blocked_24h }}</div>
+            </div>
+        </div>
+        <svg width="240" height="40" viewBox="0 0 240 40" aria-label="trailing 24h sent volume">
+            <polyline points="{{ row.sparkline_points }}" fill="none" stroke="var(--accent)" stroke-width="2"/>
+        </svg>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+{% endblock %}

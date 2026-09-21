@@ -1,0 +1,51 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Scheduled queue{% endblock %}
+
+{% block content %}
+<h1>Scheduled queue</h1>
+
+<div class="panel" data-signals="{producerId: '{{ filter_producer_id }}', campaignId: '{{ filter_campaign_id }}'}">
+    <form data-on-submit__prevent
+          data-on-change__debounce.400ms="@get('/t/{{ tenant_slug }}/ui/admin/scheduled?producer_id='+$producerId+'&campaign_id='+$campaignId)">
+        <div class="field">
+            <label for="producer_id">Producer id</label>
+            <input id="producer_id" type="text" data-bind="producerId">
+        </div>
+        <div class="field">
+            <label for="campaign_id">Campaign id</label>
+            <input id="campaign_id" type="text" data-bind="campaignId">
+        </div>
+    </form>
+</div>
+
+<div class="panel">
+    {% if rows.is_empty() %}
+    <p class="note">No pending messages match this filter.</p>
+    {% else %}
+    <table>
+        <thead>
+            <tr><th>Due</th><th>Channel</th><th>Class</th><th>Producer</th><th>Campaign</th><th>Expires</th><th></th></tr>
+        </thead>
+        <tbody>
+            {% for row in rows %}
+            <tr>
+                <td>{{ row.next_attempt_at }}</td>
+                <td>{{ row.channel }}</td>
+                <td>{{ row.class }}</td>
+                <td>{{ row.producer_id }}</td>
+                <td>{{ row.campaign_id.as_deref().unwrap_or("-") }}</td>
+                <td>{% match row.expires_at %}{% when Some with (t) %}{{ t }}{% when None %}-{% endmatch %}</td>
+                <td>
+                    <form class="inline" data-on-submit__prevent="@post('/t/{{ tenant_slug }}/admin/scheduled/{{ row.comms_request_id }}/cancel', {contentType: 'form'})">
+                        <input type="hidden" name="producer_id" value="{{ row.producer_id }}">
+                        <button type="submit" class="danger">Cancel</button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+</div>
+{% endblock %}
