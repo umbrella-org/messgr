@@ -88,12 +88,14 @@ new traffic.
 
 Auth/OTP shares no process with the dispatcher (AGENTS.md hard invariant 1, §3), so nothing
 above reaches it -- a `global` kill switch does not stop customer login. Disabling auth is a
-separate, tenant-scoped column in the *control* database, `tenant.auth_enabled`. As of `T-016`
-it exists as schema only: `sms-sender`/`otp-api` (build-order step 17), its only intended
-reader, isn't built yet, so nothing polls or fails open on it today. The two-person approval
-DESIGN.md's Still-Open #9 asked about is, for now, an out-of-band human process this runbook
-records rather than a tool enforces (decision 29): both approvers confirm to each other outside
-any tool, then one of them runs both statements in the same transaction:
+separate, tenant-scoped column in the *control* database, `tenant.auth_enabled`. As of `T-052`,
+`messgr-sms-sender` is this column's reader: it polls the control database every 5 seconds and
+fails *open* (auth stays enabled) on a read failure or a timeout, per the migration's own
+mandate -- a control-database outage must never silently disable customer login. `otp-api`
+(cloud, build-order step 19) is not built yet. The two-person approval DESIGN.md's Still-Open #9
+asked about is, for now, an out-of-band human process this runbook records rather than a tool
+enforces (decision 29): both approvers confirm to each other outside any tool, then one of them
+runs both statements in the same transaction:
 
 [source,sql]
 ----

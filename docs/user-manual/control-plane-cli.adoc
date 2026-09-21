@@ -248,6 +248,12 @@ Only the highest-priority row per channel is resolved at startup -- failover-on-
 resolved out of scope for now (this ticket's own Description item 4); the ordered-list schema
 exists so a second provider is a config change later, not something this ticket wires up.
 
+`messgr-sms-sender` (T-052) is a second reader with different behaviour: it walks the whole
+`sms` list, in priority order, synchronously within each OTP send, trying the next row
+immediately on failure -- a live customer is waiting, so this is deliberately smaller than
+`messgr-dispatcher`'s own future circuit-breaker/half-open-probe design for queued traffic. See
+"messgr-sms-sender" below.
+
 == Suppression list
 
 [source,bash]
