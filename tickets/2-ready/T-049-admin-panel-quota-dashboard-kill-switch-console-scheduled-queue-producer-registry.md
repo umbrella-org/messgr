@@ -134,8 +134,13 @@ commit policy — see Finish.
    from private to `pub(crate)` in their modules (`src/producer/register.rs`,
    `src/producer_quota/configure.rs`) and call them directly from the new handlers with
    `tenant.pool`, `tenant.tenant_id`, and `identity.actor` — no new tenant pool, no duplicate
-   `tenant_repo::find_by_slug` lookup. `list_producers`, `list_producer_quota`,
-   `list_producer_quota_overrides` already take a pool directly; call them unchanged.
+   `tenant_repo::find_by_slug` lookup. **Correction (applicability-gate finding, pre-pickup):**
+   `list_producers` (`producer/register.rs`), `list_producer_quota`, `list_producer_quota_overrides`
+   (`producer_quota/configure.rs`) do **not** take a pool directly — they are CLI-shaped wrappers
+   with the same fresh-pool-per-call cost this decision fixes for the mutation paths. List
+   handlers call the lower-level `producer::repo::list(pool)`, `producer_quota::repo::list(pool)`,
+   and `producer_quota::repo::list_overrides(pool)` directly with `tenant.pool` instead — these
+   are already `pub`, no visibility bump needed, unlike the `*_inner` mutation functions above.
 4. **Kill-switch engage/release is new code in `src/kill_switch/`, mirroring the existing
    configure-module shape** (`producer_quota/configure.rs` is the closest precedent: a
    `ConfigureError`/outcome enum, an `audit_*` helper calling `platform_audit::record`). Add
@@ -245,7 +250,9 @@ needed by `blast_radius`).
 
 `src/producer/register.rs`: `register_producer_inner`, `disable_producer_inner` → `pub(crate)`.
 `src/producer_quota/configure.rs`: `set_producer_quota_inner` → `pub(crate)`. No behaviour
-change — visibility only.
+change — visibility only. List handlers (Task 5) need no bump here — they call
+`producer::repo::list`, `producer_quota::repo::list`, `producer_quota::repo::list_overrides`
+directly, already `pub` (decision 3 correction).
 
 #### Task 3 — Scheduled-queue query module
 
@@ -374,3 +381,4 @@ existing `provision_test_tenant`/`build_router`/`MockProvider` helpers (see
 - 2026-09-20 — refined: user confirmed the auth kill switch stays out-of-band (closes decision-29/still-open-#9 for step 14) and template-approval/quiet-hours/provider-config admin UI is deferred to a follow-up ticket, not built here; re-graded complexity medium → high; Implementation Plan written
 - 2026-09-20 — TO DO → READY: plan complete
 - 2026-09-20 — plan amended inline: revised frontend stack, user-directed — Datastar instead of htmx for the admin panel only, real Askama base.html/{% extends %} per view (not a T-048-htmx-style single template set), system-only light/dark theme. Corrects this ticket's own earlier claim that T-027's mockup's "htmx or Datastar" question was settled in htmx's favor — it was not. Built and got approval on a mockup (https://claude.ai/artifact/E7ESaFHDaWGHmSbjoNuHzS) reflecting the new direction before this edit.
+- 2026-09-21 — plan amended inline: applicability-gate finding (non-blocking, fix-now-inline) — decision 3 wrongly claimed `list_producers`/`list_producer_quota`/`list_producer_quota_overrides` take a pool directly; they are CLI-shaped wrappers like the mutation functions. Corrected decision 3 and Task 2 to have list handlers call `producer::repo::list`/`producer_quota::repo::list`/`producer_quota::repo::list_overrides` directly with `tenant.pool` instead (already `pub`, no visibility bump needed).
