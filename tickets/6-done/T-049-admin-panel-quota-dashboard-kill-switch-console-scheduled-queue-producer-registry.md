@@ -454,3 +454,7 @@ cost: estimated L, actual L
   noted (F2 pre-existing build-order omission, F3-F5 test-coverage gaps, F6 plan-vs-shipped
   Datastar response-shape note). No follow-up ticket spawned. Publishing pending user approval of
   the commit message / MR attributes below.
+- 2026-09-21 — commit message and MR attributes approved by user; branch pushed and
+  [PR #64](https://github.com/umbrella-org/messgr/pull/64) opened against `main`, keeping the
+  branch's existing 6 atomic commits rather than squashing (root-path child default). Merging
+  remains the human's.
