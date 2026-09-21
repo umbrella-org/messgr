@@ -128,6 +128,25 @@ pub async fn load_current_usage(
     .await
 }
 
+/// Trailing-window minute-granularity rows for the quota dashboard's
+/// sparkline (T-049 Task 4) — additive to `load_current_usage`, which still
+/// serves the current-minute/current-day numbers. The trailing-24h window is
+/// computed by the caller (`Utc::now() - Duration::hours(24)`).
+pub async fn load_usage_history(
+    pool: &PgPool,
+    since: DateTime<Utc>,
+) -> Result<Vec<UsageRow>, sqlx::Error> {
+    sqlx::query_as::<_, UsageRow>(
+        "SELECT producer_id, channel, class, granularity, window_start, sent, blocked \
+         FROM producer_usage \
+         WHERE granularity = 'minute' AND window_start >= $1 \
+         ORDER BY window_start",
+    )
+    .bind(since)
+    .fetch_all(pool)
+    .await
+}
+
 /// One `INSERT ... ON CONFLICT DO UPDATE` per row, in one transaction — each
 /// row's `sent`/`blocked` is the in-process counter's own current total for
 /// that window, an overwrite snapshot, not an increment (the in-memory value

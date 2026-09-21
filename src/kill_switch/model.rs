@@ -35,7 +35,7 @@ pub struct KillSwitch {
 /// second key. The literal format is `"<producer_id>:<channel>"`;
 /// `docs/user-manual/kill-switches.adoc` documents the exact value a `psql`
 /// operator must write.
-fn split_producer_channel(scope_key: &str) -> Option<(Uuid, &str)> {
+pub(crate) fn split_producer_channel(scope_key: &str) -> Option<(Uuid, &str)> {
     let (producer, channel) = scope_key.split_once(':')?;
     let producer_id = Uuid::parse_str(producer).ok()?;
     Some((producer_id, channel))

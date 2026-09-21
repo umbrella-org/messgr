@@ -1,0 +1,78 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Kill switches{% endblock %}
+
+{% block content %}
+<h1>Kill switches</h1>
+<p class="note">Auth traffic is never affected by any switch shown here — the auth kill switch stays
+out of band, engaged/released only via the <code>psql</code> runbook.</p>
+
+<div class="panel" data-signals="{scope: 'global', scopeKey: '', onQueued: 'hold'}">
+    <h2>Engage a kill switch</h2>
+    <form data-on-submit__prevent="@post('/t/{{ tenant_slug }}/admin/kill-switches', {contentType: 'form'})">
+        <div class="field">
+            <label for="scope">Scope</label>
+            <select id="scope" name="scope" data-bind="scope"
+                    data-on-change="@get('/t/{{ tenant_slug }}/ui/admin/kill-switches/blast-radius?scope='+$scope+'&scope_key='+$scopeKey)">
+                <option value="global">global</option>
+                <option value="channel">channel</option>
+                <option value="producer">producer</option>
+                <option value="producer_channel">producer_channel</option>
+                <option value="campaign">campaign</option>
+            </select>
+        </div>
+        <div class="field">
+            <label for="scope_key">Scope key (channel name / producer id / "producer_id:channel" / campaign id — blank for global)</label>
+            <input id="scope_key" type="text" name="scope_key" data-bind="scopeKey"
+                   data-on-change="@get('/t/{{ tenant_slug }}/ui/admin/kill-switches/blast-radius?scope='+$scope+'&scope_key='+$scopeKey)">
+        </div>
+        <div class="field">
+            <label for="on_queued">On queued</label>
+            <select id="on_queued" name="on_queued" data-bind="onQueued">
+                <option value="hold">hold</option>
+                <option value="discard">discard</option>
+            </select>
+        </div>
+        <div class="field">
+            <label for="reason">Reason (mandatory)</label>
+            <input id="reason" type="text" name="reason" required>
+        </div>
+
+        <div id="blast-radius" class="panel">
+            <p class="note">Change scope to preview the blast radius before engaging.</p>
+        </div>
+
+        <button type="submit" class="primary">Engage</button>
+    </form>
+</div>
+
+<div class="panel">
+    <h2>Active switches</h2>
+    {% if active.is_empty() %}
+    <p class="note">No switches currently engaged.</p>
+    {% else %}
+    <table>
+        <thead>
+            <tr><th>Scope</th><th>Scope key</th><th>On queued</th><th>Engaged by</th><th>Engaged at</th><th>Reason</th><th></th></tr>
+        </thead>
+        <tbody>
+            {% for row in active %}
+            <tr>
+                <td>{{ row.scope }}</td>
+                <td>{{ row.scope_key.as_deref().unwrap_or("-") }}</td>
+                <td>{{ row.on_queued }}</td>
+                <td>{{ row.engaged_by }}</td>
+                <td>{{ row.engaged_at }}</td>
+                <td>{{ row.reason }}</td>
+                <td>
+                    <form class="inline" data-on-submit__prevent="@post('/t/{{ tenant_slug }}/admin/kill-switches/{{ row.id }}/release', {contentType: 'form'})">
+                        <button type="submit" class="danger">Release</button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+</div>
+{% endblock %}

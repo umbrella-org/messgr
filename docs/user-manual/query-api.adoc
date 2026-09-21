@@ -1,11 +1,13 @@
-= messgr-query-api: read-only REST API and UI
+= messgr-query-api: REST API, read-only UI, and admin panel
 
-`messgr-query-api` (`T-048`) is the one role-authenticated, read-only surface over the ledger
-(DESIGN.md §11): a bank employee looks up a customer's cross-channel message timeline, inspects a
-single message's rendered content and event history, and runs campaign-reach queries, without
-`psql` access. A published OpenAPI spec plus a server-rendered Askama+htmx UI live in the same
-binary. It reads from a streaming replica (`QUERY_API_DATABASE_URL`) so an unbounded compliance
-search cannot starve ingestion -- see "Running it" below.
+`messgr-query-api` (`T-048`) is the one role-authenticated surface over the ledger (DESIGN.md
+§11): a bank employee looks up a customer's cross-channel message timeline, inspects a single
+message's rendered content and event history, and runs campaign-reach queries, without `psql`
+access. A published OpenAPI spec plus a server-rendered Askama+htmx UI live in the same binary.
+It reads from a streaming replica (`QUERY_API_DATABASE_URL`) so an unbounded compliance search
+cannot starve ingestion -- see "Running it" below. **No longer read-only as of `T-049`**: the same
+binary also carries the operator-facing admin panel (its own route tree, its own two roles) --
+see "Admin panel" below.
 
 == Authentication and roles
 
@@ -43,8 +45,9 @@ Five roles, enforced server-side on every query, never in the UI layer:
 | `GET /producers/{id}/usage` and `/quota` only. No message bodies, no customer search.
 
 | `admin`
-| No route in this ticket -- its scope (template approval, quiet-hours policy, provider config,
-  producer registry, quota overrides) is T-049's admin panel, the same binary's write surface.
+| No route in *this* table -- its scope is the admin panel ("Admin panel" below): producer
+  registry and quota overrides, as of `T-049`. Template approval, quiet-hours policy, and
+  provider config are not yet exposed there -- a follow-up ticket, not this one.
 |===
 
 Tenant resolution is a path prefix, `/t/{tenant_slug}/...`, resolved *before* authentication runs
@@ -89,6 +92,50 @@ against the tenant's mount, and `encryption::decrypt` produces the plaintext. Th
 tenant-scoped, read-only Transit *unwrap* capability, distinct from `messgr-control`'s platform
 console (a different binary, a different auth realm), which by design holds no Transit policy for
 any tenant mount at all and can never decrypt.
+
+== Admin panel
+
+`T-049` adds four operator-facing views, server-rendered in the same binary, gated per §11.1's
+role table -- `comms_ops` and `admin` are disjoint here, neither a superset of the other:
+
+[cols="1,2,2"]
+|===
+| View | Role | What it does
+
+| Quota dashboard
+| `comms_ops`
+| Read-only: per producer x channel x class current-minute/current-day consumption vs. limit, a
+  trailing-24h sparkline, blocked count. Reads `producer_usage` directly (Postgres, not
+  Prometheus) -- the operational view must not depend on the monitoring stack being healthy.
+
+| Kill-switch console
+| `comms_ops`
+| Engage/release by scope, with a mandatory reason and a live blast-radius count (queued-message
+  count by class) shown before engaging. **The auth kill switch is not here** -- see below.
+
+| Scheduled queue
+| `comms_ops`
+| Pending future-dated `outbox` rows by producer/campaign/due window, with cancel actions.
+
+| Producer registry
+| `admin`
+| Register/disable producers, set quotas, grant time-boxed quota overrides.
+|===
+
+Routes live under `/t/{tenant_slug}/admin/...` (mutations) and `/t/{tenant_slug}/ui/admin/...`
+(views) -- operator UI only, not published in `openapi.yaml`, which documents only the REST data
+routes above.
+
+**The auth kill switch stays fully out-of-band.** This panel never reads or writes
+`tenant.auth_enabled` and builds no dual-control workflow for it -- see
+`docs/user-manual/kill-switches.adoc`'s own section on the auth switch, unchanged by this ticket.
+The T-016 `psql` runbook for engaging/releasing the switches this panel *does* cover becomes the
+documented fallback, not the only way to do it.
+
+This section of the UI runs on **Datastar** (`assets/datastar.js`), not htmx. The rest of this
+binary's UI -- the read-only timeline/message-detail/campaign-reach views above -- stays on
+**htmx** (`assets/htmx.min.js`). The two hypermedia libraries coexist in one binary because they
+gate disjoint route trees, not because either is being replaced; this is deliberate, not a typo.
 
 == Running it
 

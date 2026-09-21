@@ -1,0 +1,15 @@
+<div id="blast-radius" class="panel">
+    <h3>Blast radius</h3>
+    {% if rows.is_empty() %}
+    <p class="note">No queued messages match this scope.</p>
+    {% else %}
+    <table>
+        <thead><tr><th>Class</th><th>Queued count</th></tr></thead>
+        <tbody>
+            {% for row in rows %}
+            <tr><td>{{ row.0 }}</td><td>{{ row.1 }}</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+</div>

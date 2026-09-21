@@ -15,3 +15,13 @@ pub struct IdPath {
 pub struct CampaignIdPath {
     pub id: String,
 }
+
+/// The admin panel's templates (T-049) build absolute
+/// `/t/{tenant_slug}/...` links/form-actions rather than relative ones —
+/// simpler to get right across four nested pages than reasoning about `../`
+/// depth per page. `TenantContext` resolves and discards the slug, so
+/// handlers that need it for template rendering extract it separately.
+#[derive(Debug, Deserialize)]
+pub struct TenantSlugPath {
+    pub tenant_slug: String,
+}

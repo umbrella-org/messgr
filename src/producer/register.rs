@@ -258,7 +258,7 @@ async fn classify_registration(
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn register_producer_inner(
+pub(crate) async fn register_producer_inner(
     control_pool: &PgPool,
     tenant_pool: &PgPool,
     tenant_id: Uuid,
@@ -409,7 +409,7 @@ pub async fn disable_producer(
     result
 }
 
-async fn disable_producer_inner(
+pub(crate) async fn disable_producer_inner(
     control_pool: &PgPool,
     tenant_pool: &PgPool,
     tenant_id: Uuid,

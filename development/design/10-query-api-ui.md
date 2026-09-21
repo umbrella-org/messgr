@@ -79,7 +79,7 @@ The panel reads Postgres deliberately. Prometheus metrics are also emitted for a
 
 **Kill-switch console.** Engage and release by scope, with a mandatory reason. Before engaging, the panel shows the blast radius: how many queued messages the scope currently matches, broken down by class. Engaging without that number in front of you is how a marketing kill accidentally holds a statement run.
 
-Permanently displayed on this screen: *auth traffic is not affected by any switch shown here* (§5.2). The one control that does affect it is separated, styled differently, and requires two-person approval.
+Permanently displayed on this screen: *auth traffic is not affected by any switch shown here* (§5.2). **Correction (T-049 review):** this section previously implied the control that does affect auth traffic appears on this same screen, just separated and styled differently. Resolved the other way, user-confirmed at T-049's refinement: the auth kill switch has **no representation on this panel at all** — it stays fully out-of-band, engaged and released only via the T-016 `psql` runbook (decision 29), still requiring two-person approval, procedurally enforced and recorded in `platform_audit` rather than gated by any UI control here or elsewhere (§14, still-open #9).
 
 **Scheduled queue view.** Pending future-dated messages by producer, campaign, and due window, with cancel actions. This is the screen someone reaches for when a campaign goes out wrong and needs pulling before it fires.
 
