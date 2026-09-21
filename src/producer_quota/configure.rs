@@ -193,7 +193,7 @@ pub async fn set_producer_quota(
     result
 }
 
-async fn set_producer_quota_inner(
+pub(crate) async fn set_producer_quota_inner(
     control_pool: &PgPool,
     tenant_pool: &PgPool,
     tenant_id: Uuid,

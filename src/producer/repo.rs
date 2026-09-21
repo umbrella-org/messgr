@@ -60,6 +60,27 @@ pub async fn find_by_cert_subject_tx(
     .await
 }
 
+/// Resolves a producer id to its row — the admin panel's disable route
+/// (T-049) names a producer by id, but `disable_producer_inner` (T-005) is
+/// name-shaped like the rest of the CLI-era API; this bridges the two
+/// without duplicating `disable_producer_inner`'s control/tenant audit
+/// logic.
+pub async fn find_by_id(
+    pool: &PgPool,
+    id: Uuid,
+) -> Result<Option<Producer>, sqlx::Error> {
+    sqlx::query_as::<_, Producer>(
+        r#"
+        SELECT id, name, cert_subject, owner_team, contact, enabled, created_at
+        FROM producer
+        WHERE id = $1
+        "#,
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await
+}
+
 pub async fn list(pool: &PgPool) -> Result<Vec<Producer>, sqlx::Error> {
     sqlx::query_as::<_, Producer>(
         r#"
