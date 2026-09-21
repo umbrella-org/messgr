@@ -146,6 +146,18 @@ require T-051 to be merged first — see the Description's provider-selection de
    circuit-breaker state, no cross-request memory of a down provider — see the Description's
    provider-selection note for why this is deliberately smaller than what T-051 will eventually
    build for the dispatcher.
+
+   **Plan amended inline during implementation.** As written, this loads `provider_config` fresh
+   from `tenant.pool` on every send — the same pool decision 9's audit write uses. That makes
+   provider *selection*, not just the audit write, depend on the tenant database being reachable,
+   contradicting decision 9's "the send still succeeds" (02-otp.md §3) and this ticket's own
+   acceptance test, which requires the provider call to be unaffected by a tenant-DB outage.
+   Added `sms_sender::provider::ProviderConfigCache`: a per-tenant, last-known-snapshot cache
+   (`HashMap<Uuid, Vec<ProviderConfig>>` behind an `RwLock`), refreshed opportunistically on every
+   send rather than a poll timer (no natural place to enumerate every tenant this multi-tenant
+   process might serve) — the same "fail to the last successful read" shape `AuthEnabledCache`/
+   `KillSwitchCache` already use elsewhere in this codebase. `AppState` gained one field,
+   `provider_config_cache: Arc<ProviderConfigCache>`.
 8. **`tenant.auth_enabled` is read from the control database, fail-open.** One process-wide
    `AuthEnabledCache` (`HashMap<Uuid, bool>` behind an `RwLock`, mirroring
    `kill_switch::cache::KillSwitchCache`'s shape but *not* reusing it directly — `auth_enabled`
@@ -341,3 +353,4 @@ existing per-binary pages.
 - 2026-09-19 — created (TO DO). source: audit: build-order step 17, remaining gap identified when auditing unticketed steps against the board
 - 2026-09-21 — TO DO → READY: plan complete
 - 2026-09-21 — READY → IN DEVELOPMENT: picked up
+- 2026-09-21 — plan amended inline: added `ProviderConfigCache` (decision 7) so provider selection survives a tenant-DB outage independently of the audit write, matching decision 9 and the acceptance test's "provider call is unaffected" requirement — `provider_config::repo::list` was being read fresh from the same pool the audit write buffers around
