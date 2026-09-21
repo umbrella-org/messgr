@@ -354,3 +354,4 @@ existing per-binary pages.
 - 2026-09-21 — TO DO → READY: plan complete
 - 2026-09-21 — READY → IN DEVELOPMENT: picked up
 - 2026-09-21 — plan amended inline: added `ProviderConfigCache` (decision 7) so provider selection survives a tenant-DB outage independently of the audit write, matching decision 9 and the acceptance test's "provider call is unaffected" requirement — `provider_config::repo::list` was being read fresh from the same pool the audit write buffers around
+- 2026-09-21 — IN DEVELOPMENT → IN REVIEW: acceptance green
