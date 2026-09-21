@@ -33,6 +33,11 @@ column (e.g. `"3fa85f64-5717-4562-b3fc-2c963f66afa6:sms"`)
 
 == Engaging a switch
 
+As of `T-049`, the admin panel's kill-switch console (`docs/user-manual/query-api.adoc`) is the
+primary way to engage a switch -- it shows the blast radius before engaging and requires a
+reason, the same as this runbook. This `psql` form is the documented fallback: it stays exact and
+unchanged, since `auth_enabled` (below) and any panel-unreachable scope still need it.
+
 [source,sql]
 ----
 INSERT INTO kill_switch (id, scope, scope_key, on_queued, engaged_by, engaged_at, reason)
@@ -59,6 +64,9 @@ one channel; `channel` stops every producer on that channel; `campaign` stops on
 `global` stops everything (auth/OTP excepted -- see below, regardless of scope).
 
 == Releasing a switch
+
+As with engaging, the admin panel's kill-switch console is now the primary path to release a
+switch. This `psql` form remains the documented fallback.
 
 [source,sql]
 ----
