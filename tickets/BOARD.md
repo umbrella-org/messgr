@@ -9,14 +9,15 @@ hand — edit the tickets. Hand-written planning notes live in [`NOTES.md`](NOTE
 **WIP limits (per child-project):**
 - `messgr`: `3-in-development/` ≤ 1 · `4-in-review/` ≤ 1
 
-Last updated: 2026-09-20
+Last updated: 2026-09-21
 
 ## IN DEVELOPMENT
 
-### messgr (0/1)
+### messgr (1/1)
 
 | id | title | depends-on |
 |---|---|---|
+| T-049 | Admin panel: quota dashboard, kill-switch console, scheduled queue, producer registry | [T-048] |
 
 ## IN REVIEW
 
@@ -38,7 +39,6 @@ Last updated: 2026-09-20
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
-| T-049 | Admin panel: quota dashboard, kill-switch console, scheduled queue, producer registry | high | high | L | [T-048] |  |
 
 ## TO DO (impact order, per child)
 
