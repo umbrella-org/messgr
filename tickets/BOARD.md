@@ -13,10 +13,11 @@ Last updated: 2026-09-21
 
 ## IN DEVELOPMENT
 
-### messgr (0/1)
+### messgr (1/1)
 
 | id | title | depends-on |
 |---|---|---|
+| T-052 | OTP fast path: sms-sender bypassing the queue | [] |
 
 ## IN REVIEW
 
@@ -38,7 +39,6 @@ Last updated: 2026-09-21
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
-| T-052 | OTP fast path: sms-sender bypassing the queue | critical | high | L | [] |  |
 
 ## TO DO (impact order, per child)
 

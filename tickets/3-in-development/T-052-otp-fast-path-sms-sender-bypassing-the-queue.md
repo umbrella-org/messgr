@@ -340,3 +340,4 @@ existing per-binary pages.
 
 - 2026-09-19 — created (TO DO). source: audit: build-order step 17, remaining gap identified when auditing unticketed steps against the board
 - 2026-09-21 — TO DO → READY: plan complete
+- 2026-09-21 — READY → IN DEVELOPMENT: picked up
