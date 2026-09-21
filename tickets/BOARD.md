@@ -38,6 +38,7 @@ Last updated: 2026-09-21
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
+| T-052 | OTP fast path: sms-sender bypassing the queue | critical | high | L | [] |  |
 
 ## TO DO (impact order, per child)
 
@@ -45,7 +46,6 @@ Last updated: 2026-09-21
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
-| T-052 | OTP fast path: sms-sender bypassing the queue | critical | high | L | [] |  |
 | T-054 | Cloud enablement: messgr-otp, platform console, platform kill switches, offboarding modes, second region | critical | high | XL | [T-052] |  |
 | T-051 | SMS provider failover | high | medium | M | [] |  |
 | T-053 | Bulk campaign path: DEK-unwrap-at-scale and ingest admission rate limiting | high | high | L | [] |  |
