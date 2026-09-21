@@ -372,7 +372,72 @@ existing `provision_test_tenant`/`build_router`/`MockProvider` helpers (see
 
 ## Review
 
-<!-- empty until IN REVIEW -->
+**Reviewer independence (step 0):** independent — fresh session, no memory of authoring this
+branch (the implementation commits predate this session). Audits run directly by this reviewer,
+not delegated.
+
+**Implementation audit (step 2):** every task and confirmed decision verified against the actual
+tree (not the prose) — decisions 1–12 and Tasks 1–7 all match the shipped code. Two claims
+independently checked rather than transcribed, per the addendum's item 1: the auto-generated
+unique-index name `kill_switch_scope_coalesce_idx` (decision 4) was confirmed against a live
+Postgres 18 instance (`docker exec messgr-postgres`) by applying `migrations/tenant/0009_kill_switch.sql`
+and provoking the constraint violation directly — the DETAIL line names exactly this constraint;
+and `outbox`'s `(producer_id, next_attempt_at)` / `(campaign_id, next_attempt_at)` indexes
+(decision 6) were confirmed present in `migrations/tenant/0004_ledger_outbox_schema.sql:54-55`.
+Acceptance test re-run verbatim: `cargo test --test admin_panel` — 3 passed, 0 failed. Full suite:
+`just test` — all green. `just lint` (fmt-check + clippy -D warnings) and `just build` — clean.
+`just docs-check` — clean, including after this review's own DESIGN.md edit below.
+
+**Quality audit (step 3):** idiomatic, matches existing module conventions (`ConfigureError`,
+`audit_*` helpers) exactly as decisions 3/4 specified. Validation replicated in `admin.rs` for
+`set_producer_quota`/`add_quota_override` (bypassing the CLI-shaped wrappers per decision 3) was
+checked line-for-line against the wrapper functions it bypasses
+(`producer_quota::configure::set_producer_quota`/`add_producer_quota_override`) — identical
+rejection conditions, identical audit action strings. Askama auto-escaping is in effect
+everywhere (no `|safe` filter used), so no XSS injection risk from user-supplied `reason`/`name`/
+etc. fields.
+
+**Consistency audit (step 4):** no caller/callee drift found (`*_inner` signatures match their
+call sites exactly). One finding below (F1) — see disposition.
+
+**Documentation audit (step 4a):** `docs/user-manual/query-api.adoc` and
+`docs/user-manual/kill-switches.adoc` both updated and accurate; `docs-check` clean. Whole-tree
+sweep found no other stale "read-only" claim about this binary. `development/design/14-decisions-and-open-questions.md`
+still-open #9 correctly resolved for step 14, leaving the `otp-api`/step-17 half open as intended.
+
+**Findings:**
+
+| id | severity | class | disposition | description | evidence | suggestion |
+|---|---|---|---|---|---|---|
+| F1 | non-blocking | stale-xref | fixed inline | `development/design/10-query-api-ui.md` §11.3 implied the auth-affecting kill-switch control was a separated, differently-styled element on the same admin-panel screen; T-049 (user-confirmed) built the panel with no auth-switch representation at all, contradicting that prose | `development/design/10-query-api-ui.md:82` (pre-fix) | corrected in this review, DESIGN.md version bumped 10 → 11, committed on this ticket's feature branch (`82b47d3`) |
+| F2 | non-blocking | stale-xref | noted | `development/design/13-build-order.md` step 14's outcome line lists "quota dashboard, kill-switch console, scheduled queue" and omits "producer registry", even though §11.3 and this ticket both include it | `development/design/13-build-order.md:22`, pre-existing since `858d008` (2026-09-03), not made false by this branch — fails the fixed-inline causation bar | leave for whoever next touches that line; not worth a solo ticket |
+| F3 | non-blocking | test-gap | noted | The quota dashboard (`ui_quota_dashboard`: per-row usage aggregation, `build_sparkline`) has no test coverage, direct or indirect — the only one of the panel's four views with none | `tests/admin_panel.rs` has no reference to `/ui/admin/quota`; manually traced the aggregation logic and found no defect | promote to a ticket if a real bug ever surfaces here |
+| F4 | non-blocking | test-gap | noted | `disable_producer` (`POST /admin/producers/{id}/disable`) has no HTTP-level test; `producer_registry_is_admin_only_and_quota_override_round_trips` exercises register/quota/override but not disable | `tests/admin_panel.rs` has no reference to `/disable` | same as F3 |
+| F5 | non-blocking | test-gap | noted | The scheduled-queue acceptance test doesn't assert the exact row count or the `next_attempt_at` ordering the ticket's own acceptance-test text asked for ("assert exactly two returned, ordered by next_attempt_at") — it only checks presence/absence by id | `tests/admin_panel.rs:573-589`, `scheduled_queue_filters_by_producer_and_cancel_removes_row` | same as F3 |
+| F6 | non-blocking | design | noted | Decision 9 / Task 5 describe mutation handlers returning "a small Datastar response ... a patched fragment"; in the shipped code only `ui_blast_radius` returns a small fragment — the other six mutation handlers (engage/release/cancel/register/disable/set-quota/add-override) each re-render and return the *full* admin page. Functionally correct (verified against the vendored `assets/datastar.js`: `datastar-patch-elements` morphs a full `</html>` document against `document.documentElement` when no selector is given, exactly the same idiomorph-style full-page-swap pattern htmx/Turbo use), just heavier than the plan's own description | `src/query_api/admin.rs` (`kill_switches_page`/`scheduled_page`/`producers_page` return full `Template`-rendered pages, not fragments); `assets/datastar.js`'s `vt` function | no action; correct by design, just a plan-vs-shipped prose mismatch worth a future reader knowing about |
+
+Disposition summary: 1 fixed inline (F1), 5 noted (F2, F3, F4, F5, F6). No findings folded, no follow-up ticket spawned — none of the noted items passed the "would this actually be scheduled" promotion test on its own, and they don't share enough of a theme to batch into one.
+
+cost: estimated L, actual L
+
+### Checklist
+
+- [x] Reviewer independence settled (step 0): independent — fresh session, no memory of authoring
+- [x] Implementation audit — acceptance test re-run, tasks & criteria verified (steps 1, 2)
+- [x] Quality audit (step 3)
+- [x] Consistency audit (step 4)
+- [x] Documentation audit — coverage, whole-tree sweep, docs build clean (step 4a)
+- [x] Docs-readability pass — conscious skip: no docs-readability reviewer available in this
+      session/host
+- [x] Findings recorded with severity, class, and disposition; disposition summary + cost line present (step 5)
+- [x] Ticket moved to `tickets/6-done/`; `## History` appended (step 6)
+- [x] Other references updated; governing document (DESIGN.md §11.3) reconciled in this review (step 7)
+- [x] Remaining-tickets impact sweep done (step 8): checked every `1-to-do/`/`2-ready/` ticket
+      referencing T-049 (T-051, T-054, T-055) — none need a plan correction; T-055's own prose
+      already anticipates T-049 landing first
+- [x] Summary + child-project commit message & MR attributes presented for approval; remote-base
+      check to run before push; overarching-repo bookkeeping committed per policy; next-ticket
+      suggestion given (step 9)
 
 ## History
 
@@ -384,3 +449,8 @@ existing `provision_test_tenant`/`build_router`/`MockProvider` helpers (see
 - 2026-09-21 — plan amended inline: applicability-gate finding (non-blocking, fix-now-inline) — decision 3 wrongly claimed `list_producers`/`list_producer_quota`/`list_producer_quota_overrides` take a pool directly; they are CLI-shaped wrappers like the mutation functions. Corrected decision 3 and Task 2 to have list handlers call `producer::repo::list`/`producer_quota::repo::list`/`producer_quota::repo::list_overrides` directly with `tenant.pool` instead (already `pub`, no visibility bump needed).
 - 2026-09-21 — READY → IN DEVELOPMENT: picked up
 - 2026-09-21 — IN DEVELOPMENT → IN REVIEW: acceptance green
+- 2026-09-21 — IN REVIEW → DONE: no blocking findings. 1 finding fixed inline (F1: DESIGN.md
+  §11.3 reconciled, version bumped 10 → 11, committed on the feature branch as `82b47d3`), 5
+  noted (F2 pre-existing build-order omission, F3-F5 test-coverage gaps, F6 plan-vs-shipped
+  Datastar response-shape note). No follow-up ticket spawned. Publishing pending user approval of
+  the commit message / MR attributes below.
