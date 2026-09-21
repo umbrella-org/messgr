@@ -1,6 +1,6 @@
 # messgr — Design
 
-**Version 10** · 2026-09-19 · T-043 review: §4/§6.1 corrected — `03-data-model.md` still described `quiet_hours_policy` as "not yet created", and `14-decisions-and-open-questions.md`'s Still-open #2 still posed "windows per region" as an undecided value rather than a structurally unreachable one; both now match T-043's shipped `scope = 'default'`-only resolver and `05-send-timing.md`'s existing correction note
+**Version 11** · 2026-09-21 · T-049 review: §11.3 corrected — the kill-switch console's description implied the auth-affecting control was a separated, differently-styled element on the same screen; T-049 resolved still-open #9 for step 14 the other way (user-confirmed), building no auth-switch representation into the panel at all, so the prose now matches what shipped
 
 Centralized communications orchestration and audit ledger for customer messaging across SMS, email, and WhatsApp.
 
