@@ -458,3 +458,4 @@ cost: estimated L, actual L
   [PR #64](https://github.com/umbrella-org/messgr/pull/64) opened against `main`, keeping the
   branch's existing 6 atomic commits rather than squashing (root-path child default). Merging
   remains the human's.
+- 2026-09-21 — MERGED: PR #64 merged to `main` (`4de480d`)
