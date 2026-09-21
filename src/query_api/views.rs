@@ -1,7 +1,7 @@
 use askama::Template;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use axum::response::{Html, IntoResponse, Response};
+use axum::response::{IntoResponse, Response};
 use uuid::Uuid;
 
 use crate::auth::role;
@@ -12,17 +12,8 @@ use super::AppState;
 use super::auth_mw::{AuthedUser, require_role};
 use super::handlers::{database_error, decrypt_detail, identity_owns};
 use super::path::{CampaignIdPath, IdPath};
+use super::render;
 use super::tenant::TenantContext;
-
-fn render<T: Template>(template: T) -> Response {
-    match template.render() {
-        Ok(html) => Html(html).into_response(),
-        Err(err) => {
-            tracing::error!(%err, "query-api: template render failed");
-            StatusCode::INTERNAL_SERVER_ERROR.into_response()
-        }
-    }
-}
 
 #[derive(Template)]
 #[template(path = "query_api/timeline.html")]

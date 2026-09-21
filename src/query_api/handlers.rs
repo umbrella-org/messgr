@@ -242,7 +242,10 @@ fn day_window_start(tz: Tz, now: DateTime<Utc>) -> DateTime<Utc> {
 /// `tenant_config` row at all (T-007 decision 4: no auto-seeding).
 const DEFAULT_QUOTA_DAY_BOUNDARY_TZ: &str = "UTC";
 
-async fn current_windows(
+/// `pub(crate)`: also used by `admin::ui_quota_dashboard` (T-049) — reused
+/// rather than duplicated, since the quota-day-boundary timezone logic it
+/// wraps is exactly what `producer_usage`'s window columns must agree with.
+pub(crate) async fn current_windows(
     pool: &sqlx::PgPool,
 ) -> Result<(DateTime<Utc>, DateTime<Utc>), sqlx::Error> {
     let tz_name = tenant_config_repo::load(pool)
@@ -328,6 +331,16 @@ pub async fn htmx_asset() -> impl IntoResponse {
     (
         [(header::CONTENT_TYPE, "application/javascript")],
         Bytes::from_static(include_bytes!("../../assets/htmx.min.js")),
+    )
+}
+
+/// Vendored, not CDN-loaded (T-049 decision 11) — same reasoning and same
+/// `include_bytes!` pattern as `htmx_asset`, for the admin panel's own
+/// route tree only.
+pub async fn datastar_asset() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "application/javascript")],
+        Bytes::from_static(include_bytes!("../../assets/datastar.js")),
     )
 }
 
