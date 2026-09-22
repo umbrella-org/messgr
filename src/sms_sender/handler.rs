@@ -148,23 +148,44 @@ async fn persist_send_outcome(
             persist_or_buffer(&tenant.pool, &app.buffer_path, &record).await;
         }
         None => {
-            let pending_record = PendingAuditRecord {
-                tenant_id: tenant.tenant.id,
-                comms_request_id,
-                created_at,
-                customer_id,
-                producer_id,
-                destination: destination.to_string(),
-                final_status,
-                provider_ref,
-                provider_status,
-            };
-            if let Err(io_err) = pending::append(&app.pending_path, &pending_record) {
-                tracing::error!(
-                    %io_err,
-                    %comms_request_id,
-                    "sms-sender: buffering the pending-crypto audit record also failed -- record is lost"
-                );
+            // Encrypted under a key derived from the tenant's already-cached
+            // pepper (F5 rework) -- never the customer DEK, whose
+            // unavailability is exactly why this branch was taken.
+            let key = pending::derive_key(&tenant.pepper);
+            match encryption::encrypt(
+                &key,
+                comms_request_id.as_bytes(),
+                destination.as_bytes(),
+            ) {
+                Ok(destination_ciphertext) => {
+                    let pending_record = PendingAuditRecord {
+                        tenant_id: tenant.tenant.id,
+                        comms_request_id,
+                        created_at,
+                        customer_id,
+                        producer_id,
+                        destination_ciphertext,
+                        final_status,
+                        provider_ref,
+                        provider_status,
+                    };
+                    if let Err(io_err) =
+                        pending::append(&app.pending_path, &pending_record)
+                    {
+                        tracing::error!(
+                            %io_err,
+                            %comms_request_id,
+                            "sms-sender: buffering the pending-crypto audit record also failed -- record is lost"
+                        );
+                    }
+                }
+                Err(err) => {
+                    tracing::error!(
+                        %err,
+                        %comms_request_id,
+                        "sms-sender: encrypting the pending-crypto buffer record failed -- record is lost"
+                    );
+                }
             }
         }
     }

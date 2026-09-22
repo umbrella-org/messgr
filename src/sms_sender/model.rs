@@ -62,6 +62,10 @@ pub struct AuditRecord {
 /// (`pending.rs`) and retried until the crypto step succeeds, at which
 /// point it becomes an ordinary `AuditRecord` and follows the same
 /// write-or-buffer path (`buffer.rs`) as every other send.
+///
+/// `destination_ciphertext` is encrypted under `pending::derive_key`, not
+/// the customer DEK that's unavailable in exactly the outage this buffer
+/// exists for (F5 rework) -- it is never written to disk in plaintext.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PendingAuditRecord {
     pub tenant_id: Uuid,
@@ -69,7 +73,7 @@ pub struct PendingAuditRecord {
     pub created_at: DateTime<Utc>,
     pub customer_id: Uuid,
     pub producer_id: Uuid,
-    pub destination: String,
+    pub destination_ciphertext: Vec<u8>,
     pub final_status: String,
     pub provider_ref: String,
     pub provider_status: Option<String>,

@@ -956,6 +956,10 @@ async fn dek_resolution_failure_still_sends_and_buffers_pending() {
         "the pending record must carry this send's comms_request_id"
     );
     assert!(
+        !pending_contents.contains("+15550500"),
+        "F5 regression: the destination must never be persisted to the pending-crypto buffer file in plaintext"
+    );
+    assert!(
         std::fs::read_to_string(&fixture.buffer_path)
             .unwrap_or_default()
             .trim()

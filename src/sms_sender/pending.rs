@@ -10,6 +10,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
+use hmac::{Hmac, KeyInit, Mac};
+use sha2::Sha256;
 use sqlx::PgPool;
 
 use crate::customer_dek::lifecycle::get_or_create_dek;
@@ -20,6 +22,21 @@ use crate::tenant::registry::TenantRegistry;
 
 use super::model::{AuditRecord, PendingAuditRecord};
 use super::{buffer, repo};
+
+/// Derives the key a `PendingAuditRecord`'s `destination_ciphertext` is
+/// encrypted under, from the tenant's HMAC pepper -- already resolved and
+/// held in memory on `TenantContext` for the life of the process, unlike
+/// the customer DEK, which requires exactly the Postgres/Vault round trip
+/// this buffer exists because just failed (F5 rework). Domain-separated
+/// from `destination_hmac::compute`'s own use of the same pepper by the
+/// label below, so the two never produce comparable output from the same
+/// input.
+pub fn derive_key(pepper: &[u8]) -> Vec<u8> {
+    let mut mac = <Hmac<Sha256>>::new_from_slice(pepper)
+        .expect("HMAC accepts a key of any length");
+    mac.update(b"sms-sender:pending-buffer-destination-key");
+    mac.finalize().into_bytes().to_vec()
+}
 
 /// Serializes one record as a JSON line and appends+flushes synchronously
 /// before returning -- same durability shape as `buffer::append`.
@@ -117,12 +134,40 @@ pub async fn drain(
         };
 
         let aad = record.comms_request_id.as_bytes();
-        let destination_hmac =
-            destination_hmac::compute(&tenant.pepper, &record.destination);
+        let pending_key = derive_key(&tenant.pepper);
+        let destination_bytes = match encryption::decrypt(
+            &pending_key,
+            aad,
+            &record.destination_ciphertext,
+        ) {
+            Ok(bytes) => bytes,
+            Err(err) => {
+                tracing::error!(
+                    %err,
+                    comms_request_id = %record.comms_request_id,
+                    "sms-sender: pending-crypto drain could not decrypt the buffered destination, keeping for next pass"
+                );
+                remaining.push(record);
+                continue;
+            }
+        };
+        let destination = match String::from_utf8(destination_bytes) {
+            Ok(destination) => destination,
+            Err(err) => {
+                tracing::error!(
+                    %err,
+                    comms_request_id = %record.comms_request_id,
+                    "sms-sender: pending-crypto drain decrypted a non-UTF-8 destination, keeping for next pass"
+                );
+                remaining.push(record);
+                continue;
+            }
+        };
+        let destination_hmac = destination_hmac::compute(&tenant.pepper, &destination);
         let destination_ciphertext = match encryption::encrypt(
             &dek,
             aad,
-            record.destination.as_bytes(),
+            destination.as_bytes(),
         ) {
             Ok(ciphertext) => ciphertext,
             Err(err) => {
