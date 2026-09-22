@@ -1,9 +1,10 @@
 //! Writes to `platform_audit` (DESIGN.md §4.11) for any platform-level
-//! action. Provisioning (`src/tenant/provision.rs`) is the only caller
-//! today; suspension and break-glass content access (§7.6, §11.4) call this
-//! same function once those subsystems exist. Not tenant-scoped —
-//! `tenant_id` is nullable because some platform actions (e.g. a
-//! platform-wide kill switch) have none.
+//! action. Provisioning (`src/tenant/provision.rs`) and tenant destroy
+//! (`src/tenant/offboard.rs`, T-059) are today's callers; suspension and
+//! break-glass content access (§7.6, §11.4) call this same function once
+//! those subsystems exist. Not tenant-scoped — `tenant_id` is nullable
+//! because some platform actions (e.g. a platform-wide kill switch) have
+//! none.
 
 use chrono::Utc;
 use serde_json::Value;
