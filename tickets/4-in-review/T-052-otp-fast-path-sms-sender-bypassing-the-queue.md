@@ -385,6 +385,30 @@ Disposition summary: 2 blocking (F1, F2) — not dispositioned, fixed via rework
 
 cost: estimated L, actual L.
 
+### Rework fix record — round 1 (commit 9d7510b)
+
+- **F1** (OTP send not resilient to a Vault/Postgres outage): `handler::send_otp` reordered so
+  `provider::send` runs first, unconditionally — `get_or_create_dek`'s Postgres/Vault work no
+  longer sits ahead of it with a bare `?`. DEK resolution + HMAC + encryption now run after the
+  send, in a new `persist_send_outcome`/`compute_destination_crypto` pair; on failure the send's
+  outcome is buffered as a `PendingAuditRecord` (`src/sms_sender/pending.rs`, new file) instead of
+  aborting the request, retried by a new drain loop the same shape as `buffer.rs`'s existing one.
+  Separately, `ProviderConfigCache` (`src/sms_sender/provider.rs`) now also caches the last
+  successfully read provider credential per `credential_path`, falling back to it on a Vault
+  read failure — `read_provider_credential` was previously called fresh every request with no
+  fallback at all, so a Vault outage blocked every send regardless of DEK-cache state, which is
+  the other half of F1's evidence. New acceptance test
+  `dek_resolution_failure_still_sends_and_buffers_pending` (`tests/sms_sender.rs`) proves the
+  send still succeeds and the record lands in the pending-crypto buffer, then reaches
+  `comms_request`/`comms_event` after a drain pass.
+- **F2** (`finalized_at` bound to `created_at`): `repo::write_audit_record` now captures a fresh
+  `Utc::now()` at write time and binds it as its own parameter instead of reusing `created_at`'s
+  placeholder. `send_otp_writes_ledger_and_calls_provider_exactly_once` extended with
+  `finalized_at != created_at` / `finalized_at >= created_at` assertions.
+
+`just build`, `just test`, `just lint`, `just docs-check` all clean (`cargo test` 63+ passing,
+no regressions).
+
 ## History
 
 - 2026-09-19 — created (TO DO). source: audit: build-order step 17, remaining gap identified when auditing unticketed steps against the board
@@ -393,3 +417,4 @@ cost: estimated L, actual L.
 - 2026-09-21 — plan amended inline: added `ProviderConfigCache` (decision 7) so provider selection survives a tenant-DB outage independently of the audit write, matching decision 9 and the acceptance test's "provider call is unaffected" requirement — `provider_config::repo::list` was being read fresh from the same pool the audit write buffers around
 - 2026-09-21 — IN DEVELOPMENT → IN REVIEW: acceptance green
 - 2026-09-21 — IN REVIEW → REWORK: 2 blocking findings: OTP send not actually resilient to a Vault/Postgres outage (F1); finalized_at bound to created_at (F2)
+- 2026-09-22 — REWORK → IN REVIEW: findings fixed

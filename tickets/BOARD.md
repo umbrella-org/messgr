@@ -9,7 +9,7 @@ hand — edit the tickets. Hand-written planning notes live in [`NOTES.md`](NOTE
 **WIP limits (per child-project):**
 - `messgr`: `3-in-development/` ≤ 1 · `4-in-review/` ≤ 1
 
-Last updated: 2026-09-21
+Last updated: 2026-09-22
 
 ## IN DEVELOPMENT
 
@@ -20,10 +20,11 @@ Last updated: 2026-09-21
 
 ## IN REVIEW
 
-### messgr (0/1)
+### messgr (1/1)
 
 | id | title | depends-on |
 |---|---|---|
+| T-052 | OTP fast path: sms-sender bypassing the queue | [] |
 
 ## REWORK
 
@@ -31,7 +32,6 @@ Last updated: 2026-09-21
 
 | id | title | open findings |
 |---|---|---|
-| T-052 | OTP fast path: sms-sender bypassing the queue | 2 blocking findings: OTP send not actually resilient to a Vault/Postgres outage (F1); finalized_at bound to created_at … |
 
 ## READY (impact order, per child)
 
