@@ -1,0 +1,49 @@
+{% extends "platform_console/base.html" %}
+
+{% block title %}Platform audit{% endblock %}
+
+{% block content %}
+<h1>Platform audit trail</h1>
+
+<div class="panel" data-signals="{tenantId: '{{ filter_tenant_id }}', action: '{{ filter_action }}'}">
+    <form data-on-submit__prevent
+          data-on-change__debounce.400ms="@get('/ui/audit?tenant_id='+$tenantId+'&action='+$action)">
+        <div class="field">
+            <label for="tenant_id">Tenant id</label>
+            <input id="tenant_id" type="text" data-bind="tenantId">
+        </div>
+        <div class="field">
+            <label for="action">Action</label>
+            <input id="action" type="text" data-bind="action">
+        </div>
+    </form>
+</div>
+
+<div class="panel">
+    {% if rows.is_empty() %}
+    <p class="note">No matching audit entries.</p>
+    {% else %}
+    <table>
+        <thead>
+            <tr><th>At</th><th>Actor</th><th>Action</th><th>Tenant</th><th>Detail</th></tr>
+        </thead>
+        <tbody>
+            {% for row in rows %}
+            <tr>
+                <td>{{ row.at }}</td>
+                <td>{{ row.actor }}</td>
+                <td>{{ row.action }}</td>
+                <td>{% match row.tenant_id %}{% when Some with (id) %}{{ id }}{% when None %}-{% endmatch %}</td>
+                <td><code>{{ row.detail }}</code></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <p class="note">
+        page {{ page }}
+        {% if page > 1 %}&mdash; <a href="/ui/audit?tenant_id={{ filter_tenant_id }}&action={{ filter_action }}&page={{ page - 1 }}">previous</a>{% endif %}
+        &mdash; <a href="/ui/audit?tenant_id={{ filter_tenant_id }}&action={{ filter_action }}&page={{ page + 1 }}">next</a>
+    </p>
+    {% endif %}
+</div>
+{% endblock %}

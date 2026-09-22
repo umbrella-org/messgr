@@ -10,8 +10,10 @@ use messgr::db;
 use messgr::idempotency_sweep::run_for_tenant as run_idempotency_sweep;
 use messgr::ingest::model::class;
 use messgr::keystore::VaultKeyStore;
+use messgr::mtls;
 use messgr::orphan_reconcile::reconcile::run_for_tenant as run_orphan_reconcile;
 use messgr::partition_lifecycle::lifecycle::run_for_tenant as run_partition_lifecycle;
+use messgr::platform_auth::mock::MockPlatformProvider;
 use messgr::producer::dev_pki;
 use messgr::producer::register::{disable_producer, list_producers, register_producer};
 use messgr::producer_quota::configure::{
@@ -206,6 +208,20 @@ enum Command {
         /// all-time.
         #[arg(long)]
         since: Option<chrono::NaiveDate>,
+    },
+    /// Start the platform console (T-057, DESIGN.md §11.4): a long-lived
+    /// HTTP server for provider staff, in a separate auth realm from the
+    /// tenant admin panel. Connects a `control_pool` only -- this binary
+    /// never opens a `KeyStore`.
+    Serve {
+        #[arg(long = "listen-addr", default_value = "0.0.0.0:8545")]
+        listen_addr: std::net::SocketAddr,
+        #[arg(long = "health-listen-addr", default_value = "0.0.0.0:8084")]
+        health_listen_addr: std::net::SocketAddr,
+        #[arg(long = "cert-file")]
+        cert_file: String,
+        #[arg(long = "key-file")]
+        key_file: String,
     },
     /// Print the binary name and version, then exit.
     Version,
@@ -1728,6 +1744,66 @@ async fn run(
                 for row in rows.iter().filter(|r| r.channel == channel) {
                     println!("{channel} status={} count={}", row.status, row.count);
                 }
+            }
+        }
+        Command::Serve {
+            listen_addr,
+            health_listen_addr,
+            cert_file,
+            key_file,
+        } => {
+            let mock_auth_actor = std::env::var("PLATFORM_MOCK_AUTH_ACTOR")
+                .map_err(|_| "PLATFORM_MOCK_AUTH_ACTOR must be set".to_string())?;
+            let mock_auth_role = std::env::var("PLATFORM_MOCK_AUTH_ROLE")
+                .map_err(|_| "PLATFORM_MOCK_AUTH_ROLE must be set".to_string())?;
+
+            let auth: std::sync::Arc<
+                dyn messgr::platform_auth::provider::PlatformAuthProvider,
+            > = std::sync::Arc::new(MockPlatformProvider::new(
+                config.profile,
+                mock_auth_actor,
+                mock_auth_role,
+            ));
+
+            let app_state = messgr::platform_console::AppState {
+                control_pool: control_pool.clone(),
+                base_db_url: config.control_database_url.clone(),
+                auth,
+            };
+            let app = messgr::platform_console::router(app_state);
+
+            let tls_config = mtls::load_plain_server_config(&cert_file, &key_file)
+                .map_err(|err| {
+                    format!(
+                        "failed to load TLS material (--cert-file/--key-file): {err}"
+                    )
+                })?;
+            let rustls_config = axum_server::tls_rustls::RustlsConfig::from_config(
+                std::sync::Arc::new(tls_config),
+            );
+
+            let mut handles = Vec::new();
+
+            handles.push(tokio::spawn(async move {
+                let listener = tokio::net::TcpListener::bind(health_listen_addr)
+                    .await
+                    .expect("failed to bind --health-listen-addr");
+                tracing::info!(%health_listen_addr, "messgr-control platform console health listener up");
+                axum::serve(listener, messgr::health::router())
+                    .await
+                    .expect("health server error");
+            }));
+
+            handles.push(tokio::spawn(async move {
+                tracing::info!(%listen_addr, "messgr-control platform console listening");
+                axum_server::bind_rustls(listen_addr, rustls_config)
+                    .serve(app.into_make_service())
+                    .await
+                    .expect("server error");
+            }));
+
+            for handle in handles {
+                let _ = handle.await;
             }
         }
         Command::Version => unreachable!("handled before Config::from_env() above"),

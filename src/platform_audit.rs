@@ -6,10 +6,20 @@
 //! because some platform actions (e.g. a platform-wide kill switch) have
 //! none.
 
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use serde_json::Value;
 use sqlx::PgPool;
 use uuid::Uuid;
+
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct PlatformAuditRow {
+    pub id: Uuid,
+    pub actor: String,
+    pub action: String,
+    pub tenant_id: Option<Uuid>,
+    pub detail: Value,
+    pub at: DateTime<Utc>,
+}
 
 pub async fn record(
     pool: &PgPool,
@@ -33,4 +43,34 @@ pub async fn record(
     .execute(pool)
     .await
     .map(|_| ())
+}
+
+/// Newest first, optionally filtered by `tenant_id`/`action` -- the
+/// platform console's audit view (T-057). `action` matches exactly, not a
+/// substring search: the action strings this table holds are a small,
+/// known vocabulary (`tenant.suspend`, `tenant.offboard_destroy`, ...), not
+/// free text.
+pub async fn list(
+    pool: &PgPool,
+    tenant_id: Option<Uuid>,
+    action: Option<&str>,
+    limit: i64,
+    offset: i64,
+) -> Result<Vec<PlatformAuditRow>, sqlx::Error> {
+    sqlx::query_as::<_, PlatformAuditRow>(
+        r#"
+        SELECT id, actor, action, tenant_id, detail, at
+        FROM platform_audit
+        WHERE ($1::uuid IS NULL OR tenant_id = $1)
+          AND ($2::text IS NULL OR action = $2)
+        ORDER BY at DESC
+        LIMIT $3 OFFSET $4
+        "#,
+    )
+    .bind(tenant_id)
+    .bind(action)
+    .bind(limit)
+    .bind(offset)
+    .fetch_all(pool)
+    .await
 }

@@ -144,6 +144,31 @@ pub async fn mark_status(
         .map(|_| ())
 }
 
+/// Every registered tenant, newest first — the platform console's tenant
+/// list (T-057); no caller before this ticket needed a bare list-all.
+pub async fn list(pool: &PgPool) -> Result<Vec<Tenant>, sqlx::Error> {
+    sqlx::query_as::<_, Tenant>(
+        r#"
+        SELECT id, slug, region, database_name, vault_mount, vault_role_id, vault_pepper_wrapped, webhook_token, status, created_at
+        FROM tenant
+        ORDER BY created_at DESC
+        "#,
+    )
+    .fetch_all(pool)
+    .await
+}
+
+/// `tenant_id` -> applied `tenant_schema_version.version`, for the platform
+/// console's drift column (T-057) — a tenant with no row yet (never
+/// migrated) is simply absent from the map, not an error.
+pub async fn schema_versions(pool: &PgPool) -> Result<Vec<(Uuid, i32)>, sqlx::Error> {
+    sqlx::query_as::<_, (Uuid, i32)>(
+        "SELECT tenant_id, version FROM tenant_schema_version",
+    )
+    .fetch_all(pool)
+    .await
+}
+
 pub async fn record_schema_version(
     pool: &PgPool,
     tenant_id: Uuid,
