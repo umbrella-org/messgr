@@ -28,18 +28,21 @@ added to the existing `messgr-control` binary** (`src/bin/control.rs`) — a dif
 `messgr-query-api`, satisfying §11.4 without inventing a third binary. `messgr-control` today is
 a pure CLI with no HTTP server at all; this ticket adds one.
 
-Shows: tenant lifecycle (provision, suspend, offboard — read/trigger, reusing
-`tenant::provision::provision_tenant` and T-059's destroy path rather than duplicating either),
-`tenant_schema_version` drift across the fleet, per-tenant health/volume (T-028's existing
+Shows: tenant lifecycle (provision, suspend — read/trigger, reusing
+`tenant::provision::provision_tenant`; offboard is visible but stays a disabled "coming soon"
+action — see decision 4a below, `destroy_tenant` needs a `VaultClient` this server must never
+hold), `tenant_schema_version` drift across the fleet, per-tenant health/volume (T-028's existing
 `stats::tenant_message_stats` query), platform kill switches (T-058), and the `platform_audit`
 trail.
 
-**Metadata only, never content, by construction.** This server holds only a `control_pool`
-connection (`CONTROL_DATABASE_URL`) — it never opens a tenant pool and never holds a `KeyStore`
-handle at all, so there is no code path by which it could reach a tenant's Transit mount or
-decrypt a payload. It can see metadata (volume, health, lifecycle state), and that visibility
-must be disclosed to tenants as such (§11.4: "operators see metadata and every access is
-audited").
+**Never decrypts content, never holds a `KeyStore`, by construction.** This server holds only a
+`control_pool` connection (`CONTROL_DATABASE_URL`) and never holds a `KeyStore` handle at all, so
+there is no code path by which it could reach a tenant's Transit mount or decrypt a payload. (The
+reused T-028 health query does open a short-lived tenant-database connection to read
+`comms_request` counts — metadata, no payload columns, same pattern T-028's CLI subcommand
+already uses in production; "never opens a tenant pool" was overstated in an earlier draft of
+this ticket.) It can see metadata (volume, health, lifecycle state), and that visibility must be
+disclosed to tenants as such (§11.4: "operators see metadata and every access is audited").
 
 **New, separate auth realm — not `auth::provider::AuthProvider` reused.** That trait's `Identity`
 carries a `tenant_id` (`src/auth/provider.rs`) — it is shaped for a request that is always
@@ -71,9 +74,11 @@ git checkout -b feat/T-057-platform-console-tenant-lifecycle-health-platform-aud
 
 ### Prerequisite gate (hard)
 
-None. T-028 (`messgr-control stats`) and T-049 (tenant admin panel, for the Askama+htmx pattern
-to mirror) are both done and merged. T-058 (platform kill switches) has not landed — this ticket
-ships without the kill-switch pane and adds it later (soft coupling, Description).
+None. T-028 (`messgr-control stats`) and T-049 (tenant admin panel, for the Askama+Datastar
+pattern to mirror — T-049 shipped Datastar, not htmx; an earlier draft of this ticket said htmx)
+are both done and merged. T-058 (platform kill switches) has not landed — this ticket ships
+without the kill-switch pane and adds it later (soft coupling, Description). T-059 (tenant
+offboarding destroy path) has landed but is **not** wired into this console — see decision 4a.
 
 ### Confirmed design decisions (do not deviate without asking)
 
@@ -92,10 +97,20 @@ ships without the kill-switch pane and adds it later (soft coupling, Description
    mirroring `auth::mock::MockProvider`'s `profile.is_dev()`-guarded constructor exactly. A single
    `operator` role constant for now (decision, this refinement) — do not build a role hierarchy
    speculatively.
-4. **The server holds a `control_pool` only — never a tenant pool, never a `KeyStore`.** This is
-   what makes "cannot read content" true by construction rather than by an application-level
-   check that could be bypassed by a future change. Do not add a `KeyStore` field to this
-   binary's app state under any circumstance.
+4. **The server holds a `control_pool` — never a `KeyStore`.** This is what makes "cannot read
+   content" true by construction rather than by an application-level check that could be
+   bypassed by a future change. Do not add a `KeyStore` field to this binary's app state under
+   any circumstance. (The T-028 health query's short-lived tenant-DB connection, task 2, is not a
+   `KeyStore` and carries no Transit access — it's the same metadata-only pattern T-028's CLI
+   subcommand already uses.)
+4a. **Offboard-trigger stays a permanent stub, not a T-059-landed stub.** Applicability check on
+    pickup found `tenant::offboard::destroy_tenant` (T-059, merged) takes a `&VaultClient`
+    (`src/tenant/offboard.rs:26-31`) — a Transit-capable credential. Wiring it into this console
+    would violate decision 4 and §11.4's "operators hold no Transit policy for any tenant mount"
+    claim, regardless of whether T-059 has landed. The offboard-trigger action in the console
+    stays a disabled/"coming soon" UI element indefinitely; actual destroy execution stays on the
+    `messgr-control` CLI path T-059 already shipped, run by a human out-of-band. Do not call
+    `destroy_tenant` from `platform_console` or give its app state a `VaultClient`.
 5. **`platform_audit` gets a row for every console action that changes state** (suspend, offboard
    trigger, kill-switch engage/release once T-058 lands), via the existing
    `crate::platform_audit::record` function — same call shape `tenant::provision::provision_tenant`
@@ -112,12 +127,11 @@ existing enum — same shape, no need for a second one — `PlatformAuthProvider
 
 #### Task 2 — `src/platform_console/` module (views)
 - `tenants.rs`: list tenants (`tenant::repo::list` — add if it doesn't already exist as a bare
-  list-all query) with status, region, `tenant_schema_version` (join), created_at. A
-  suspend/offboard-trigger action posts to a new route, calling `tenant::repo::mark_*`
-  (extend `src/tenant/repo.rs` with `mark_suspended`/status-transition helpers if not already
-  present) and T-059's destroy path for the offboard-trigger action once T-059 lands (soft
-  coupling — until then, offboard-trigger is a visible but disabled/"coming soon" action, not a
-  half-built destructive one).
+  list-all query) with status, region, `tenant_schema_version` (join), created_at. A suspend
+  action posts to a new route, calling `tenant::repo::mark_*` (extend `src/tenant/repo.rs` with
+  `mark_suspended`/status-transition helpers if not already present) and writes a
+  `platform_audit` row. Offboard-trigger renders as a disabled/"coming soon" action —
+  permanently, per decision 4a, not until T-059 lands — and is not wired to `destroy_tenant`.
 - `health.rs`: one view calling `crate::stats::tenant_message_stats` per tenant (T-028) — the
   same query the CLI subcommand already uses, no new SQL.
 - `audit.rs`: paginated `platform_audit` read (newest first, filterable by `tenant_id`/`action`).
@@ -126,8 +140,9 @@ existing enum — same shape, no need for a second one — `PlatformAuthProvider
 
 #### Task 3 — Templates
 `templates/platform_console/base.html`, `tenants.html`, `health.html`, `audit.html` — Askama,
-following `templates/admin/base.html`'s structure (htmx fragment swaps, no client-side
-framework, `prefers-color-scheme` only, per §11's stated stack and T-027's UI precedent).
+following `templates/admin/base.html`'s actual shipped structure (Datastar, `/assets/datastar.js`,
+not htmx — T-049 diverged from §11's stale htmx text; T-055 will reconcile the doc), no other
+client-side framework, `prefers-color-scheme` only.
 
 #### Task 4 — Router + `Command::Serve`
 `src/platform_console/mod.rs::router(app_state) -> Router` wiring the four views plus a login
@@ -179,3 +194,4 @@ disclosure). Run `just docs-check`.
   independently-schedulable components bundled under build-order step 19; user confirmed
   splitting
 - 2026-09-22 — TO DO → READY: plan complete: new serve subcommand on messgr-control (not a new binary, satisfying §11.4's separate-binary-from-the-tenant-admin-panel requirement), new PlatformAuthProvider realm (control_pool only, never a tenant pool/KeyStore)
+- 2026-09-22 — plan amended inline: applicability gate (fresh sub-agent audit) on pickup found T-059's `destroy_tenant` (merged since this ticket went READY) requires a `VaultClient`, conflicting with decision 4's "never a KeyStore" invariant and §11.4 — offboard-trigger changed from "stub until T-059 lands" to a permanent stub (decision 4a added), never wired to `destroy_tenant`; Task 3's template precedent corrected from htmx to Datastar to match what T-049 actually shipped; Description's "never opens a tenant pool" claim softened to "never holds a KeyStore" since the reused T-028 health query does open a short-lived tenant-DB connection for metadata (non-blocking finding, disposition: fixed inline). User approved both routing decisions (offboard-trigger stays a stub; Task 3 follows Datastar).
