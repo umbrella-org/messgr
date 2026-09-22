@@ -209,3 +209,4 @@ after `sms-sender.adoc`. Run `just docs-check`.
   flagged, informational only, that T-060's region-wiring plan will need to add `messgr-otp` as
   a 7th binary once this lands — no action here, noted for T-060's own pickup.
 - 2026-09-22 — READY → IN DEVELOPMENT: picked up
+- 2026-09-22 — IN DEVELOPMENT → IN REVIEW: acceptance green
