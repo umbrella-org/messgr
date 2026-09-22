@@ -170,3 +170,4 @@ yet built (cross-reference the Description). Run `just docs-check`.
   terminate-and-archive until pricing is decided)
 - 2026-09-22 — TO DO → READY: plan complete: destroy_vault/destroy_tenant as the inverse of T-001/T-004's provision path, DROP DATABASE ... WITH (FORCE) on Postgres 18; archive mode confirmed out of scope pending pricing (item #13)
 - 2026-09-22 — READY → IN DEVELOPMENT: picked up; applicability gate passed (1 non-blocking drift: Task 1's stated idempotency precedent doesn't match ensure_transit_mount's actual list-check approach — note-and-close)
+- 2026-09-22 — IN DEVELOPMENT → IN REVIEW: acceptance green: just build/test/lint/docs-check clean, manual offboard-destroy verified against dev compose stack (db dropped, vault mount gone, confirm-slug guard rejects mismatch, idempotent re-run succeeds)
