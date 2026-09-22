@@ -32,7 +32,9 @@ use messgr::template::approve::{
     approve_template, list_template_versions, render_preview, show_template,
 };
 use messgr::template::model::channel;
+use messgr::tenant::offboard::destroy_tenant;
 use messgr::tenant::provision::provision_tenant;
+use messgr::tenant::repo::find_by_slug;
 use messgr::tenant_config::configure::{set_tenant_config, show_tenant_config};
 use messgr::tenant_config::model::{TenantConfigInput, verification_mode};
 use messgr::webhook_receipt::promote::run_for_tenant as run_webhook_promote;
@@ -63,6 +65,22 @@ enum Command {
         /// Operator identity recorded on the platform_audit row. No auth
         /// realm exists yet for messgr-control, so this is supplied
         /// explicitly rather than inferred.
+        #[arg(long)]
+        actor: String,
+    },
+    /// Destroys a tenant: its Vault Transit key, its database, and its
+    /// AppRole are all removed (DESIGN.md §7.6, §7.7, T-059). Immediate and
+    /// irreversible in practice, subject only to the §7.3 backup-retention
+    /// window. Terminate-and-archive is not built yet. Safe to re-run.
+    OffboardDestroy {
+        #[arg(long = "tenant-slug")]
+        tenant_slug: String,
+        /// Must repeat `--tenant-slug` back -- a destructive, effectively
+        /// irreversible operation should not be one flag away from running
+        /// by accident.
+        #[arg(long = "confirm-slug")]
+        confirm_slug: String,
+        /// Operator identity recorded on the platform_audit row.
         #[arg(long)]
         actor: String,
     },
@@ -790,6 +808,40 @@ async fn run(
                      tenant's dispatcher deployment (`vault unwrap`); do not store this line anywhere"
                 );
             }
+        }
+        Command::OffboardDestroy {
+            tenant_slug,
+            confirm_slug,
+            actor,
+        } => {
+            if confirm_slug != tenant_slug {
+                return Err(format!(
+                    "--confirm-slug {confirm_slug:?} does not match --tenant-slug {tenant_slug:?}; \
+                     refusing to destroy tenant"
+                ));
+            }
+
+            // Connecting to Vault is startup-class regardless of call site
+            // (decision 2) — left as `.expect()`.
+            let vault_keystore = VaultKeyStore::connect(config.profile).expect(
+                "failed to connect to Vault (has VAULT_ADDR/VAULT_TOKEN been set?)",
+            );
+            let tenant = find_by_slug(&control_pool, &tenant_slug)
+                .await
+                .map_err(|err| {
+                    format!("failed to look up tenant {tenant_slug:?}: {err}")
+                })?
+                .ok_or_else(|| {
+                    format!("no tenant registered with slug {tenant_slug:?}")
+                })?;
+
+            destroy_tenant(&control_pool, tenant.id, &actor, vault_keystore.client())
+                .await
+                .map_err(|err| {
+                    format!("failed to destroy tenant {tenant_slug:?}: {err}")
+                })?;
+
+            println!("destroyed tenant {tenant_slug} ({})", tenant.id);
         }
         // No Vault client is connected for producer operations — they touch
         // neither Transit nor AppRole, the same reason `Migrate` does not.
@@ -2302,6 +2354,34 @@ mod tests {
             result.is_err(),
             "an invalid --start-local value must fail to parse"
         );
+    }
+
+    #[test]
+    fn offboard_destroy_parses_every_flag() {
+        let cli = Cli::try_parse_from([
+            "messgr-control",
+            "offboard-destroy",
+            "--tenant-slug",
+            "acme",
+            "--confirm-slug",
+            "acme",
+            "--actor",
+            "operator@example.com",
+        ])
+        .expect("parsing offboard-destroy must succeed");
+
+        let Command::OffboardDestroy {
+            tenant_slug,
+            confirm_slug,
+            actor,
+        } = cli.command
+        else {
+            panic!("expected Command::OffboardDestroy");
+        };
+
+        assert_eq!(tenant_slug, "acme");
+        assert_eq!(confirm_slug, "acme");
+        assert_eq!(actor, "operator@example.com");
     }
 
     #[test]

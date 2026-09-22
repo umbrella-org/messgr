@@ -125,8 +125,19 @@ pub async fn insert_provisioning(
 }
 
 pub async fn mark_active(pool: &PgPool, tenant_id: Uuid) -> Result<(), sqlx::Error> {
+    mark_status(pool, tenant_id, status::ACTIVE).await
+}
+
+/// Sets `tenant.status` to an arbitrary legal value — `mark_active`'s general
+/// form, for callers (T-059's `destroy_tenant`) that need a status other
+/// than `active`.
+pub async fn mark_status(
+    pool: &PgPool,
+    tenant_id: Uuid,
+    status: &str,
+) -> Result<(), sqlx::Error> {
     sqlx::query("UPDATE tenant SET status = $1 WHERE id = $2")
-        .bind(status::ACTIVE)
+        .bind(status)
         .bind(tenant_id)
         .execute(pool)
         .await

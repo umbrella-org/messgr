@@ -14,6 +14,7 @@ use messgr::profile::Profile;
 use messgr::tenant::provision::provision_tenant;
 use messgr::tenant::vault as tenant_vault;
 use sqlx::{Executor, PgPool};
+use vaultrs::transit::data;
 
 fn control_database_url() -> String {
     dotenvy::dotenv().ok();
@@ -416,4 +417,72 @@ async fn login_as_tenant_authenticates_and_can_create_a_dek_on_its_own_mount() {
     assert_eq!(dek.plaintext.len(), 32);
 
     drop_test_tenant(&control_pool, admin.client(), &db_name, &slug).await;
+}
+
+#[tokio::test]
+async fn destroy_vault_removes_the_mount_key_policy_and_approle() {
+    let admin = VaultKeyStore::connect(Profile::Dev)
+        .expect("connecting to dev-mode Vault failed");
+    let slug = unique_name("test_tenant_vault_destroy");
+
+    tenant_vault::provision_vault(admin.client(), &slug, true)
+        .await
+        .expect("provision_vault failed");
+
+    let mount_path = format!("transit/{slug}");
+    let mounts = vaultrs::sys::mount::list(admin.client())
+        .await
+        .expect("listing mounts failed");
+    assert!(
+        mounts.contains_key(&format!("{mount_path}/")),
+        "precondition: the mount must exist before destroying it"
+    );
+
+    // Mutation guard: if `destroy_vault` ever stops setting the key's
+    // `deletion_allowed` flag before deleting it, Vault refuses the delete
+    // and this call returns an error instead of succeeding.
+    tenant_vault::destroy_vault(admin.client(), &slug)
+        .await
+        .expect("destroy_vault failed");
+
+    let mounts = vaultrs::sys::mount::list(admin.client())
+        .await
+        .expect("listing mounts failed");
+    assert!(
+        !mounts.contains_key(&format!("{mount_path}/")),
+        "destroy_vault must unmount the tenant's Transit engine"
+    );
+
+    let result = data::decrypt(
+        admin.client(),
+        &mount_path,
+        "messgr-dek",
+        "vault:v1:bogus",
+        None,
+    )
+    .await;
+    assert!(
+        result.is_err(),
+        "a decrypt call against a destroyed mount must fail"
+    );
+}
+
+#[tokio::test]
+async fn destroy_vault_is_idempotent() {
+    let admin = VaultKeyStore::connect(Profile::Dev)
+        .expect("connecting to dev-mode Vault failed");
+    let slug = unique_name("test_tenant_vault_destroy_idempotent");
+
+    tenant_vault::provision_vault(admin.client(), &slug, true)
+        .await
+        .expect("provision_vault failed");
+
+    tenant_vault::destroy_vault(admin.client(), &slug)
+        .await
+        .expect("first destroy_vault call failed");
+    tenant_vault::destroy_vault(admin.client(), &slug)
+        .await
+        .expect(
+            "second destroy_vault call against an already-destroyed tenant must not error",
+        );
 }

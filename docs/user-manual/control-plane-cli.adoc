@@ -424,3 +424,32 @@ NOTE: The `(template_id, version, locale)` primary key does not include `channel
 the same `template_id`/`version`/`locale` for two different channels collides. Give each channel
 its own version (or its own `template_id`) if you need channel-specific bodies at the same
 nominal version.
+
+== Offboarding
+
+[source,bash]
+----
+cargo run --bin messgr-control -- offboard-destroy \
+    --tenant-slug acme --confirm-slug acme --actor operator@example.com
+----
+
+`offboard-destroy` (DESIGN.md §7.7, T-059) fully terminates a tenant: its Vault Transit key,
+mount, ACL policy, and AppRole are destroyed, its database is dropped
+(`DROP DATABASE ... WITH (FORCE)`), and its `tenant` row is marked `offboarding_destroy` -- the
+inverse of provisioning. Vault is destroyed first, so the tenant's data becomes permanently
+unreadable *immediately*, before the database is touched.
+
+WARNING: This is immediate and, in practice, irreversible -- there is no undo. `--confirm-slug`
+must repeat `--tenant-slug` back exactly, so a destructive operation is never one flag away from
+running by accident. The tenant's data is unreadable the instant this command returns, but a
+database backup taken before the run still holds the wrapped keys it was encrypted under until
+that backup itself ages out of retention (§7.3) -- "unreadable now" is not "purged from every
+backup now".
+
+Safe to re-run against an already-destroyed tenant: every step tolerates its target already being
+gone.
+
+**Terminate-and-archive** -- retaining the database and key for the tenant's remaining retention
+period, with producers/UI disabled and dispatchers stopped, converting to destroy after an
+explicit end date -- is not built. §7.7 leaves it pending a pricing decision (design-doc still-open
+item #13); `offboard-destroy` only ever destroys.
