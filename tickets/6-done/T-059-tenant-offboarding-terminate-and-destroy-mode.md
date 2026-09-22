@@ -191,3 +191,4 @@ cost: estimated M, actual M
 - 2026-09-22 — READY → IN DEVELOPMENT: picked up; applicability gate passed (1 non-blocking drift: Task 1's stated idempotency precedent doesn't match ensure_transit_mount's actual list-check approach — note-and-close)
 - 2026-09-22 — IN DEVELOPMENT → IN REVIEW: acceptance green: just build/test/lint/docs-check clean, manual offboard-destroy verified against dev compose stack (db dropped, vault mount gone, confirm-slug guard rejects mismatch, idempotent re-run succeeds)
 - 2026-09-22 — IN REVIEW → DONE: validated: full test suite green (42/42), build/lint/docs-check clean, mutation-tested destroy_vault's deletion_allowed step, manually verified confirm-slug guard; 1 non-blocking finding (stale doc comment) fixed inline
+- 2026-09-22 — MERGED: PR #67 (`feat/T-059-tenant-offboarding-terminate-and-destroy-mode`, `f22d718`)
