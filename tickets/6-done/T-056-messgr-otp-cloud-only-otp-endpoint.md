@@ -274,3 +274,4 @@ cost: estimated M, actual M
 - 2026-09-22 — READY → IN DEVELOPMENT: picked up
 - 2026-09-22 — IN DEVELOPMENT → IN REVIEW: acceptance green
 - 2026-09-22 — IN REVIEW → DONE: verified: implementation matches plan exactly (decisions 1-6 confirmed, verbatim-reuse claim spot-checked), build/lint/test/docs clean (tests/otp.rs 3/3, mutation-test assertion present); 4 non-blocking findings fixed inline (design-doc + docs-tree staleness this branch caused), 1 noted (pre-existing unrelated test flake); no blocking findings
+- 2026-09-22 — MERGED: PR #66 (`feat/T-056-messgr-otp-cloud-only-otp-endpoint`, `46ebe65`)

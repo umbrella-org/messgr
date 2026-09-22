@@ -109,7 +109,7 @@ Last updated: 2026-09-22
 | T-048 | Query API and UI: AuthProvider, MockProvider, customer/campaign views | yes — MERGED: PR #63 merged to `main` (`adaced5`) |
 | T-049 | Admin panel: quota dashboard, kill-switch console, scheduled queue, producer registry | yes — MERGED: PR #64 merged to `main` (`4de480d`) |
 | T-052 | OTP fast path: sms-sender bypassing the queue | yes — MERGED: PR #65 (`feat/T-052-otp-fast-path-sms-sender-bypassing-the-queue`, `8182cf7`) |
-| T-056 | messgr-otp: cloud-only OTP endpoint | no — publish-gated |
+| T-056 | messgr-otp: cloud-only OTP endpoint | yes — MERGED: PR #66 (`feat/T-056-messgr-otp-cloud-only-otp-endpoint`, `46ebe65`) |
 
 ## DROPPED
 
