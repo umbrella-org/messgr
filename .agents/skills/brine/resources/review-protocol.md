@@ -104,15 +104,27 @@ implemented the ticket and stronger reasoning. Once the verdict is reached, the 
 (record, move, publish) are mechanical and do not need that tier — offer to drop back down rather
 than carrying the heavier session through the publish steps by default.
 
+## 0a. In-tree stale-branch check
+
+Under `layout = "in-tree"` only: once the ticket's own `feat/T-NNN-<slug>` branch is checked out,
+run `pickle doctor`. It fails open (silent skip) when no matching feature branch is checked out
+yet, so running it unconditionally here is safe. A `WARNING: ticket T-NNN: this branch has it in
+"X" but <base> has it in "Y" — rebase onto <base> ...` (or the equivalent History-drift warning)
+means this worktree's ticket copy is stale: rebase onto `<base>` before continuing, then re-run
+`pickle doctor` to confirm it is now clean. Under the default `umbrella` layout this check does
+not apply (`checkStaleTicketBranch` is a no-op outside `in-tree`) — skip straight to step 1.
+
 ## 1. Load context
 
-- Locate the ticket: `tickets/4-in-review/T-NNN-*.md`. Under `layout = "in-tree"`, read it **as it
-  exists on the base branch** — if the feature branch is already checked out,
-  `git show <base>:tickets/4-in-review/T-NNN-*.md` rather than the worktree copy, since a stale
-  read there makes a review audit the wrong plan (see the box above). Under the default `umbrella`
-  layout the child's branch is never the hazard — read the ticket from the overarching project's
-  worktree directly, unless *that* worktree is itself on a feature branch of its own, in which
-  case read it from its base branch the same way (see the box above). Then read it in full:
+- Locate the ticket. Under `layout = "in-tree"`, always resolve its actual current path from the
+  base branch first — `git ls-tree -r --name-only <base> -- tickets | grep -- "/T-NNN-"` — then
+  read it with `git show <base>:<that path>`, unconditionally (not gated on whether a feature
+  branch happens to be checked out yet, and not assuming `4-in-review/` or any other directory):
+  the worktree copy can be stale or in the wrong status directory, which makes a review audit the
+  wrong plan (see the box above). Under the default `umbrella` layout the child's branch is never
+  the hazard — read the ticket from the overarching project's worktree directly, unless *that*
+  worktree is itself on a feature branch of its own, in which case read it from its base branch the
+  same way. Then read it in full:
   `## Description`,
   `## Implementation Plan` (its acceptance test, tasks, and confirmed decisions are the
   checklist for step 2), and `## History`.
@@ -422,6 +434,7 @@ filed per step 6c instead of taking a disposition.
 ### Checklist (paste into the ticket's `## Review` section)
 
 - [ ] Reviewer independence settled (step 0): audits run independently, delegated, or a recorded conscious skip — name which
+- [ ] In-tree stale-branch check (step 0a, in-tree layout only): pickle doctor run, no unresolved stale-ticket-branch warning — or n/a under umbrella
 - [ ] Implementation audit — acceptance test re-run, tasks & criteria verified; on a scoped re-review, the diff that closed the findings also read for new defects (steps 1, 2)
 - [ ] Quality audit (step 3)
 - [ ] Consistency audit (step 4)
