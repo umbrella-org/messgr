@@ -160,7 +160,26 @@ yet built (cross-reference the Description). Run `just docs-check`.
 
 ## Review
 
-<!-- empty until IN REVIEW -->
+- [x] Reviewer independence settled (step 0): fresh session, no memory of authoring the branch — audits run directly, not delegated
+- [x] In-tree stale-branch check (step 0a): `pickle doctor` found the checked-out `feat/T-059-…` branch stale (had the ticket in `3-in-development`, main had `4-in-review`); rebased onto `main`, re-ran `pickle doctor` — clean
+- [x] Implementation audit — acceptance test re-run, tasks & criteria verified (step 2): `just build`/`just lint`/`just test`/`just docs-check` all clean (full suite: 42 test groups, 0 failed); manually re-verified the `--confirm-slug` mismatch guard rejects (`cargo run --bin messgr-control -- offboard-destroy --tenant-slug foo --confirm-slug bar --actor reviewer` → `error: --confirm-slug "bar" does not match --tenant-slug "foo"; refusing to destroy tenant`); mutation-tested `destroy_vault`'s `deletion_allowed` step by temporarily removing it — `destroy_vault_removes_the_mount_key_policy_and_approle` went red as the ticket's acceptance test required, then reverted (working tree confirmed clean before re-verifying the real suite)
+- [x] Quality audit (step 3): idiomatic, matches `provision_tenant`'s inverse shape; Vault-then-database ordering and idempotency (decisions 1, 3) hold under test; `repo::mark_status` correctly generalizes `mark_active`
+- [x] Consistency audit (step 4): `destroy_tenant`/`destroy_vault` match the Description's stated inverse of `provision_tenant`/`provision_vault`; §7.2 erasure-statement reasoning (whole-tenant DROP DATABASE supersedes per-table statements) checked and correct; one stale doc comment found (F1) and fixed inline
+- [x] Documentation audit (step 4a): `docs/user-manual/control-plane-cli.adoc` "Offboarding" section covers the subcommand, irreversibility, and the §7.3 backup-window caveat; `just docs-check` clean; registered via `docs/user-manual.adoc`'s existing include
+- [ ] Docs-readability pass (step 4b): no docs-readability reviewer available in this environment — conscious skip
+- [x] Findings recorded with severity, class, and disposition (step 5); disposition summary and cost line below
+- [x] Ticket moved to `tickets/6-done/` (step 6); `## History` appended
+- [x] Other references updated; governing documents reconciled (step 7): no `DESIGN.md` claim was made false by this branch — §7.7 already documents both offboarding modes as prose, not implementation status, so it needed no edit; `src/platform_audit.rs`'s stale caller-list doc comment was reconciled (F1)
+- [x] Remaining-tickets impact sweep done (step 8): only `T-057` (2-ready) references T-059 — it already hedges its `mark_*` helper assumption with "if not already present" and its `destroy_tenant` call shape is unaffected; no patch needed
+- [x] Summary + commit message & MR attributes presented for approval (step 9)
+
+| id | severity | class | disposition | description | evidence | suggestion |
+|---|---|---|---|---|---|---|
+| F1 | non-blocking | stale-xref | fixed inline | `src/platform_audit.rs`'s module doc comment said "Provisioning … is the only caller today" — no longer true once this branch added `tenant::offboard::destroy_tenant` as a second caller | `src/platform_audit.rs:1-6` (pre-fix) | fixed inline: doc comment now lists both callers |
+
+Disposition summary: 1 non-blocking finding — fixed inline (F1). 0 blocking findings.
+
+cost: estimated M, actual M
 
 ## History
 
@@ -171,3 +190,4 @@ yet built (cross-reference the Description). Run `just docs-check`.
 - 2026-09-22 — TO DO → READY: plan complete: destroy_vault/destroy_tenant as the inverse of T-001/T-004's provision path, DROP DATABASE ... WITH (FORCE) on Postgres 18; archive mode confirmed out of scope pending pricing (item #13)
 - 2026-09-22 — READY → IN DEVELOPMENT: picked up; applicability gate passed (1 non-blocking drift: Task 1's stated idempotency precedent doesn't match ensure_transit_mount's actual list-check approach — note-and-close)
 - 2026-09-22 — IN DEVELOPMENT → IN REVIEW: acceptance green: just build/test/lint/docs-check clean, manual offboard-destroy verified against dev compose stack (db dropped, vault mount gone, confirm-slug guard rejects mismatch, idempotent re-run succeeds)
+- 2026-09-22 — IN REVIEW → DONE: validated: full test suite green (42/42), build/lint/docs-check clean, mutation-tested destroy_vault's deletion_allowed step, manually verified confirm-slug guard; 1 non-blocking finding (stale doc comment) fixed inline
