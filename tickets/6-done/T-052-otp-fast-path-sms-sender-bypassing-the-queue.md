@@ -502,3 +502,4 @@ cost: estimated L, actual L.
 - 2026-09-22 — IN REVIEW → REWORK: 1 blocking finding (round 2): pending-crypto buffer persists plaintext PII to disk (F5)
 - 2026-09-22 — REWORK → IN REVIEW: findings fixed
 - 2026-09-22 — IN REVIEW → DONE: round 3: 0 blocking findings; F6 (non-zeroized pending-buffer key) fixed inline
+- 2026-09-22 — MERGED: PR #65 (`feat/T-052-otp-fast-path-sms-sender-bypassing-the-queue`, `8182cf7`)
