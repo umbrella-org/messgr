@@ -247,6 +247,14 @@ dispatcher-run:
 sms-sender-run:
     cargo run --bin messgr-sms-sender
 
+# Run messgr-otp (POST /otp, T-056): the cloud-only OTP endpoint. Requires
+# OTP_TLS_CERT_FILE, OTP_TLS_KEY_FILE, OTP_TLS_CLIENT_CA_FILE, and
+# OTP_BASE_URL to be set (see .env.example); OTP_LISTEN_ADDR defaults to
+# 0.0.0.0:8446.
+[group('control-plane')]
+otp-run:
+    cargo run --bin messgr-otp
+
 # Run messgr-webhook (POST /webhook/:webhook_token/:provider). Requires
 # WEBHOOK_TLS_CERT_FILE and WEBHOOK_TLS_KEY_FILE to be set (see
 # .env.example); WEBHOOK_LISTEN_ADDR defaults to 0.0.0.0:8543. The

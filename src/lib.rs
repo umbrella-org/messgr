@@ -17,6 +17,7 @@ pub mod keystore;
 pub mod kill_switch;
 pub mod mtls;
 pub mod orphan_reconcile;
+pub mod otp;
 pub mod outbox_query;
 pub mod partition_lifecycle;
 pub mod platform_audit;

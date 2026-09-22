@@ -1,0 +1,124 @@
+= messgr-otp: `POST /otp`
+
+`messgr-otp` (`T-056`) is the cloud variant of the OTP fast path (`02-otp.md` §3.1, AGENTS.md
+hard invariant 1): a tenant's own auth service calls it synchronously, over the network, to send
+a one-time code. No queue, no gate chain, no dispatcher -- a marketing incident, a full outbox,
+or a dead dispatcher can never stop a customer from logging in. The send still appears in
+messgr's ledger and UI, same as any other message.
+
+**This is weaker than the on-prem story.** On-prem `messgr-sms-sender` is a single-tenant
+service on the bank's own internal network; `messgr-otp` crosses a real multi-tenant network/
+trust boundary to a shared regional service, adding a network hop between a tenant and their SMS
+provider that on-prem has neither. Tenants for whom OTP latency and availability are paramount
+should be told they can keep auth on-premise while using cloud for everything else -- the ledger
+accepts backfilled auth records from either source.
+
+== What it does
+
+`POST /otp` takes `customer_id`, `destination`, and `body` (the OTP code text). Identity is
+resolved from the caller's mTLS client certificate exactly as on-prem `messgr-sms-sender` does
+(see "messgr-sms-sender"): the tenant's auth service is registered as an ordinary producer, no
+new identity mechanism.
+
+Provider credentials are **not** read from Vault on the request path. `OtpProviderCache` resolves
+each tenant's `provider_config` rows and their Vault credentials once, the first time that tenant
+is seen, and holds them in memory; a background timer (60s, fixed, no jitter or backoff) refreshes
+every tenant currently cached, so a sealed or unreachable Vault degrades nothing on the request
+path -- it only delays picking up a credential rotation until Vault recovers (§3.1's correction to
+the original design, which specified a per-request Vault read). This is the one deliberate
+divergence from on-prem `messgr-sms-sender`, whose `ProviderConfigCache` does read Vault per
+request (with a last-known-value fallback on failure) -- there, Vault's own request-path presence
+was accepted; here it is not, because tenants bring their own provider accounts and there is no
+single credential to prefetch once at boot.
+
+Provider selection itself is unchanged from on-prem: a synchronous, in-request walk over the
+already-resolved provider list in priority order, retrying the next one immediately on failure
+rather than the dispatcher's windowed circuit-breaker/half-open-probe design for queued traffic
+that can afford to wait.
+
+The audit record (`comms_request`/`comms_event`) is written **best-effort**: `class = "auth"`,
+`payload_ciphertext` always `NULL` (the code is a live credential and must never be retained --
+DESIGN.md §7), `destination_hmac`/`destination_ciphertext` still computed and DEK-encrypted as
+usual. If the write to Postgres fails, the OTP has already been sent (or has already failed) by
+then either way -- the record is appended to a local buffer file instead and a background task
+retries it every 10 seconds until it lands. `quiet_hours` and producer quotas are never evaluated
+on this path -- both are exempt by policy (AGENTS.md hard invariants; DESIGN.md §5, §6).
+
+== The `auth_enabled` kill switch
+
+`tenant.auth_enabled` (control database) is polled every 5 seconds and read fail-**open**: a
+read failure or timeout is treated as enabled, since a control-database outage must never
+silently disable customer login. When the cached value is `false`, the provider is never called
+and a `discarded` `comms_request`/`comms_event` pair is written instead. See "Kill switches" for
+the operator runbook -- engaging/releasing this flag is the same out-of-band, two-person,
+`platform_audit`-recorded process as every other kill switch here, not a mechanical tool.
+
+== One-time setup, per tenant
+
+Two steps, both via `messgr-control` (see "Control-plane CLI"), before the auth service's first
+call:
+
+[source,bash]
+----
+# 1. Register the auth service as a producer and issue it an mTLS client cert
+#    (production: your own CA issues the cert; dev PKI is for local testing only).
+cargo run --bin messgr-control -- producer register \
+    --tenant-slug acme --name auth-service \
+    --cert-subject "CN=auth-service.internal" \
+    --owner-team auth --contact auth-oncall@example.com --actor operator@example.com
+
+# 2. Approve the fixed sentinel template messgr-otp writes onto every row --
+#    it is never rendered or read; comms_request.template_id/template_version
+#    are simply NOT NULL columns this satisfies.
+touch /tmp/empty-body.txt
+cargo run --bin messgr-control -- template approve --tenant-slug acme \
+    --template-id otp --version 1 --channel sms --locale en-US \
+    --body-file /tmp/empty-body.txt --actor operator@example.com
+----
+
+`provider-config set` (see "Provider configuration") must also already point at a working `sms`
+provider for the tenant, with its own credential in Vault -- `messgr-otp` will not pick up a
+provider added after the tenant's first request until the next background refresh (up to 60s
+later).
+
+== Running it
+
+Requires `OTP_TLS_CERT_FILE`, `OTP_TLS_KEY_FILE`, `OTP_TLS_CLIENT_CA_FILE` (mTLS server identity,
+same shape as `messgr-sms-sender`), and `OTP_BASE_URL` (a dev stand-in `Sender` endpoint --
+`provider_config` has no `base_url` column, the same `messgr-dispatcher`/`messgr-sms-sender`
+precedent). `OTP_LISTEN_ADDR` defaults to `0.0.0.0:8446`; `OTP_HEALTH_LISTEN_ADDR` defaults to
+`0.0.0.0:8085` and binds a second, plain (non-TLS) listener serving only `GET /healthz`.
+`OTP_BUFFER_PATH`/`OTP_PENDING_PATH` default to `otp-buffer.jsonl`/`otp-pending.jsonl` in the
+working directory -- point them at a persistent path in production, so a process restart doesn't
+lose whatever hadn't drained yet.
+
+`messgr-otp` is deployable per-region from the start (region is a deployment-time fact -- which
+control database/Vault a given process points at -- not something its own code branches on); a
+single-region deployment is a valid intermediate state.
+
+[source,bash]
+----
+just dev-pki-bootstrap
+just dev-pki-issue-server-cert messgr-otp.internal /tmp/otp-cert
+
+OTP_TLS_CERT_FILE=/tmp/otp-cert/cert.pem \
+OTP_TLS_KEY_FILE=/tmp/otp-cert/key.pem \
+OTP_TLS_CLIENT_CA_FILE=/tmp/otp-cert/ca.pem \
+OTP_BASE_URL=http://localhost:9095 \
+just otp-run
+----
+
+Then, with the auth service's client certificate issued (setup step 1 above):
+
+[source,bash]
+----
+curl -sk --cert /tmp/auth-service-cert/cert.pem --key /tmp/auth-service-cert/key.pem \
+  --cacert /tmp/otp-cert/ca.pem --resolve messgr-otp.internal:8446:127.0.0.1 \
+  -H "Content-Type: application/json" \
+  -d '{"customer_id":"<uuid>","destination":"+15550100","body":"your code is 123456"}' \
+  https://messgr-otp.internal:8446/otp
+----
+
+A successful call returns `201` with `{"comms_request_id": "..."}`. The response status always
+reflects the provider outcome, never the audit write's -- a failed audit write is buffered
+locally instead (see "What it does" above), never turned into an error response.
