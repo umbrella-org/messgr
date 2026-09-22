@@ -454,6 +454,42 @@ no regressions).
 `just build`, `just test`, `just lint` (`cargo fmt --check` + `cargo clippy --all-targets
 --all-features -- -D warnings`), `just docs-check` all clean.
 
+### Scoped re-review — round 3
+
+- Reviewer independence (step 0): **independent** — fresh session (post-`/clear`), no memory of
+  authoring this branch or either prior round's fix; audits run directly, nothing delegated.
+- Scope: round 2's fix diff only (commit `fe6057c`, closing F5), read via `git show fe6057c`,
+  audited as new work per the protocol's re-review rule.
+- Acceptance re-run: `cargo test --test sms_sender` (5/5 pass, including the F5 regression
+  assertion), full `just test` (all suites green, 0 failed, no regressions), `just build` clean,
+  `just lint` clean (`cargo fmt --check` + `cargo clippy --all-targets --all-features -- -D
+  warnings`), `just docs-check` clean. F5 is fixed as claimed — confirmed by reading the diff and
+  `src/sms_sender/pending.rs`/`handler.rs` in full, not just the fix record's prose:
+  `PendingAuditRecord.destination_ciphertext` is now AES-256-GCM ciphertext
+  (`encryption::encrypt`, fresh random nonce per call — `src/encryption.rs` — no nonce-reuse risk
+  from the key being reused across records) under a key HMAC-derived from the tenant pepper, drain
+  decrypts with the same derived key before recomputing the customer-DEK
+  `destination_hmac`/`destination_ciphertext`, and the new regression assertion
+  (`!pending_contents.contains("+15550500")`) is mutation-resistant — it fails if the encryption
+  step is removed. The round-2 fix record's "option (a)" framing matches what shipped.
+- New defect found in the fix itself (F6 below) — the round's own replacement text is the one
+  part of the branch nothing had audited yet, per the protocol's re-review scope.
+
+| F6 | non-blocking | design | fixed inline | `pending::derive_key` (new in round 2's own fix) returned a plain `Vec<u8>` for the AES key that decrypts the pending buffer's customer PII, unlike every other unwrapped key-material value in this codebase, all `Zeroizing<Vec<u8>>`: `Keystore::read_provider_credential`/`unwrap_dek` (`src/keystore.rs`), the tenant pepper itself (`src/tenant_pepper.rs`, `TenantContext::pepper`), `KeyCache`'s cached entries (`src/key_cache.rs`), and `get_or_create_dek`'s result (`src/customer_dek/lifecycle.rs`). The derived key sat in ordinary heap memory in `handler.rs` and `pending.rs`, unwiped on drop — recoverable via a core dump or memory scrape for as long as the process lives, for a key that exists specifically to decrypt customer PII during the exact outage window F5 was filed over. No numbered `DESIGN.md` decision names zeroizing directly (06-pii-retention.md describes it only for the DEK/pepper cache), so this doesn't meet the blocking bar's "contradicts a locked decision" citation requirement — but it's this branch's own code (round 2's own fix authored `derive_key`) and the fix is a pure idiom change, no behaviour change, so it meets the inline-fix bar squarely. | `src/sms_sender/pending.rs::derive_key` (returned `Vec<u8>`, called from `handler.rs::persist_send_outcome` and `pending.rs::drain`); contrast `src/keystore.rs:32,80,143,151,287,306`, `src/tenant_pepper.rs:64`, `src/key_cache.rs:15,40,54`, `src/tenant/registry.rs:53`, `src/customer_dek/lifecycle.rs:63` — every one `Zeroizing<Vec<u8>>`. | Fixed inline: `derive_key` now returns `Zeroizing<Vec<u8>>` (commit `1d442f5`); both call sites already only borrow it (`&key`/`&pending_key`) so no other change was needed. `just build`, `just lint`, `cargo test --test sms_sender` (5/5) re-verified clean after the edit. |
+
+Disposition summary (round 3): 0 blocking. 1 non-blocking: `fixed inline` ×1 (F6).
+
+cost: estimated L, actual L.
+
+### Rework fix record — round 3 (commit 1d442f5)
+
+- **F6** (pending-buffer key not zeroized): `pending::derive_key` now returns
+  `Zeroizing<Vec<u8>>` instead of a bare `Vec<u8>`. Both call sites (`handler::persist_send_outcome`,
+  `pending::drain`) already only ever borrowed the result (`&key`, `&pending_key`) to pass to
+  `encryption::encrypt`/`decrypt`, so no further change was needed. `just build`, `just lint`
+  (`cargo fmt --check` + `cargo clippy --all-targets --all-features -- -D warnings`),
+  `cargo test --test sms_sender` (5/5) all clean.
+
 ## History
 
 - 2026-09-19 — created (TO DO). source: audit: build-order step 17, remaining gap identified when auditing unticketed steps against the board
@@ -465,3 +501,4 @@ no regressions).
 - 2026-09-22 — REWORK → IN REVIEW: findings fixed
 - 2026-09-22 — IN REVIEW → REWORK: 1 blocking finding (round 2): pending-crypto buffer persists plaintext PII to disk (F5)
 - 2026-09-22 — REWORK → IN REVIEW: findings fixed
+- 2026-09-22 — IN REVIEW → DONE: round 3: 0 blocking findings; F6 (non-zeroized pending-buffer key) fixed inline

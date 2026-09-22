@@ -20,11 +20,10 @@ Last updated: 2026-09-22
 
 ## IN REVIEW
 
-### messgr (1/1)
+### messgr (0/1)
 
 | id | title | depends-on |
 |---|---|---|
-| T-052 | OTP fast path: sms-sender bypassing the queue | [] |
 
 ## REWORK
 
@@ -106,6 +105,7 @@ Last updated: 2026-09-22
 | T-047 | Webhook receiver and delivery-receipt ingestion (messgr-webhook) | yes — MERGED: PR #62 (`feat/T-047-webhook-receiver-and-delivery-receipt-ingestion`, `4a363d8`) |
 | T-048 | Query API and UI: AuthProvider, MockProvider, customer/campaign views | yes — MERGED: PR #63 merged to `main` (`adaced5`) |
 | T-049 | Admin panel: quota dashboard, kill-switch console, scheduled queue, producer registry | yes — MERGED: PR #64 merged to `main` (`4de480d`) |
+| T-052 | OTP fast path: sms-sender bypassing the queue | no — publish-gated |
 
 ## DROPPED
 
