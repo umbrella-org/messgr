@@ -192,7 +192,70 @@ after `sms-sender.adoc`. Run `just docs-check`.
 
 ## Review
 
-<!-- empty until IN REVIEW -->
+Reviewer independence (step 0): **independent** — this review ran in a fresh session (no memory
+of authoring the branch); no delegation needed. In-tree stale-branch check (step 0a): the feature
+branch's ticket copy was found stale (`3-in-development` vs. `main`'s `4-in-review`); rebased
+onto `main`, `pickle doctor` then clean.
+
+Implementation audit (step 2): every task and confirmed decision (1–6) verified against the
+actual tree — new `src/bin/otp.rs`/`src/otp/` module (not a `sms_sender` flag, decision 1);
+`identity.rs`/`model.rs`/`buffer.rs`/`pending.rs`/`repo.rs`/`auth_flag.rs` are byte-identical in
+logic to `sms_sender`'s versions, doc comments only reworded (decision 2, diffed by hand);
+`OtpProviderCache` is new code, at-startup-per-tenant + 60s background-timer refresh, never
+`ProviderConfigCache` (decision 3); refresh interval fixed 60s, no jitter/backoff (decision 4);
+`OTP_*` env var names mirror `SMS_SENDER_*` (decision 5); no quiet-hours check added (decision
+6, grepped). `just build`/`just lint`/`just docs-check` clean; `just test` green (`tests/otp.rs`:
+3/3 passed, including the mutation-test assertion that `get_or_fetch`'s second call does not
+re-read Vault). One unrelated failure surfaced (`tests/query_api.rs::producers_usage_and_quota_are_comms_ops_only`,
+a pre-existing minute-boundary-sensitive test from T-048, untouched by this diff) — reran in
+isolation and it passed; recorded below as a noted flake, not this branch's fault.
+
+Quality audit (step 3): mutation-test advisory satisfied (`CountingKeyStore` proves the cache
+call count, not just `is_err()`). Error handling/degradation matches `sms_sender`'s
+write-then-buffer-then-pending-buffer chain throughout.
+
+Consistency/addendum audit (step 4, messgr addendum step 2): no `CREATE TABLE`/migration in this
+diff (reuses `comms_request`/`comms_event` verbatim) — items 2, 5, 6 (NULL semantics, erasure
+statements, new-column readers) don't apply. Item 4 (Vault via `KeyStore`, never an env var) —
+confirmed, `OtpProviderCache` never reads a provider key from the environment. Item 7 (grep
+against hard invariants 1/3) — no `queue`/`outbox`/gate-chain/verification/suppression/consent
+reference anywhere in `src/otp/`. Item 8 (local/CI command parity) — `just lint`/`fmt-check`
+match `ci.yml`'s `clippy`/`fmt-check` jobs verbatim. Port `OTP_LISTEN_ADDR` default `8446` and
+`OTP_HEALTH_LISTEN_ADDR` default `8085` collide with no other binary's default.
+
+Documentation audit (step 4a): `docs/user-manual/otp-api.adoc` added and registered in
+`docs/user-manual.adoc` right after `sms-sender.adoc`; covers env vars, the request/response
+shape, the Vault-caching divergence from on-prem, and the mandated cloud-tenant disclosure
+(weaker than on-prem, network hop, can keep auth on-prem). `just docs-check` clean.
+
+Docs-readability pass (step 4b): conscious skip — no docs-readability reviewer available in this
+session/host.
+
+Governing-document reconciliation (step 7 / addendum step 5): this branch resolved design-doc
+Still Open #12 (per its own Description) but left the doc saying otherwise. Fixed inline, same
+review, on the ticket's own branch (commit `9843746`):
+`development/design/14-decisions-and-open-questions.md` — added decision 33 recording the
+resolution, struck through Still Open #12, and corrected Still Open #9's now-false "`otp-api`
+... is unbuilt" clause. `docs/user-manual/sms-sender.adoc` and `docs/user-manual/kill-switches.adoc`
+both described `otp-api` as unbuilt/not-built-yet; both now cross-reference the shipped
+`messgr-otp`.
+
+Impact sweep (step 8): no ticket in `1-to-do/`/`2-ready/` lists T-056 in `depends-on:`. T-060
+(second region) references it as a soft coupling only (already noted in this ticket's own
+pickup-audit History line) — no action needed here.
+
+| id | severity | class | disposition | description | evidence | suggestion |
+|---|---|---|---|---|---|---|
+| F1 | non-blocking | stale-xref | fixed inline | `14-decisions-and-open-questions.md` Still Open #12 said the cloud-OTP-posture question was still open after this ticket resolved it | `development/design/14-decisions-and-open-questions.md` (pre-fix) | struck through, added decision 33 |
+| F2 | non-blocking | stale-xref | fixed inline | Still Open #9's clause claimed `otp-api` "is unbuilt and out of this ticket's scope" | same file | corrected to record T-056's `messgr-otp` as the second `auth_enabled` reader |
+| F3 | non-blocking | stale-xref | fixed inline | `sms-sender.adoc` described cloud's `otp-api` as unbuilt (Still Open #12) | `docs/user-manual/sms-sender.adoc:13-14` (pre-fix) | now cross-references "messgr-otp" |
+| F4 | non-blocking | stale-xref | fixed inline | `kill-switches.adoc` said `otp-api` "is not built yet" | `docs/user-manual/kill-switches.adoc:94` (pre-fix) | now cross-references "messgr-otp" |
+| F5 | non-blocking | test-gap | noted | `tests/query_api.rs::producers_usage_and_quota_are_comms_ops_only` failed once in the full suite, passed in isolation — a pre-existing minute-boundary-sensitive assertion from T-048, not touched by this branch | full `just test` run vs. isolated `cargo test --test query_api producers_usage_and_quota_are_comms_ops_only` | not this ticket's scope; a later reviewer can promote if it recurs |
+
+Disposition summary: 4 fixed inline (F1–F4, all governing-document/docs staleness this branch
+caused), 1 noted (F5, pre-existing unrelated flake). No blocking findings.
+
+cost: estimated M, actual M
 
 ## History
 
@@ -210,3 +273,4 @@ after `sms-sender.adoc`. Run `just docs-check`.
   a 7th binary once this lands — no action here, noted for T-060's own pickup.
 - 2026-09-22 — READY → IN DEVELOPMENT: picked up
 - 2026-09-22 — IN DEVELOPMENT → IN REVIEW: acceptance green
+- 2026-09-22 — IN REVIEW → DONE: verified: implementation matches plan exactly (decisions 1-6 confirmed, verbatim-reuse claim spot-checked), build/lint/test/docs clean (tests/otp.rs 3/3, mutation-test assertion present); 4 non-blocking findings fixed inline (design-doc + docs-tree staleness this branch caused), 1 noted (pre-existing unrelated test flake); no blocking findings
