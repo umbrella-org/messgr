@@ -169,3 +169,4 @@ yet built (cross-reference the Description). Run `just docs-check`.
   splitting and confirmed scope (design-doc still-open item #13: destroy mode only, defer
   terminate-and-archive until pricing is decided)
 - 2026-09-22 — TO DO → READY: plan complete: destroy_vault/destroy_tenant as the inverse of T-001/T-004's provision path, DROP DATABASE ... WITH (FORCE) on Postgres 18; archive mode confirmed out of scope pending pricing (item #13)
+- 2026-09-22 — READY → IN DEVELOPMENT: picked up; applicability gate passed (1 non-blocking drift: Task 1's stated idempotency precedent doesn't match ensure_transit_mount's actual list-check approach — note-and-close)
