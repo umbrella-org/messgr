@@ -385,6 +385,28 @@ Disposition summary: 2 blocking (F1, F2) — not dispositioned, fixed via rework
 
 cost: estimated L, actual L.
 
+### Scoped re-review — round 2
+
+- Reviewer independence (step 0): **independent** — fresh session (post-`/clear`), no memory of
+  authoring this branch or round 1's fix; audits run directly, nothing delegated.
+- Scope: round 1's fix diff only (commit `9d7510b`, closing F1/F2), read via `git show 9d7510b`,
+  audited as new work per the protocol's re-review rule.
+- Acceptance re-run: `cargo test --test sms_sender` (5/5 pass, including the new
+  `dek_resolution_failure_still_sends_and_buffers_pending`), `just build` clean, `just lint`
+  clean (`cargo fmt --check` + `cargo clippy --all-targets --all-features -- -D warnings`),
+  `just docs-check` clean. F1 and F2 are both fixed as claimed — confirmed by reading the diff,
+  not just the fix record's prose: `handler::send_otp` now calls `provider::send` before any
+  DEK/Vault/Postgres work, and `repo::write_audit_record` binds a freshly-captured `Utc::now()`
+  to `finalized_at` as its own parameter (`$13`), no longer reusing `created_at`'s (`$3`).
+- New defect found in the fix itself (F5 below) — the round's own replacement text is the one
+  part of the branch nothing had audited yet, per the protocol's re-review scope.
+
+| F5 | blocking | correctness | — | The F1 fix's new pending-crypto buffer (`pending.rs`) persists the raw, plaintext customer phone number to local disk, unencrypted, exactly in the failure case it was written to handle (DEK resolution or Vault credential read down). `PendingAuditRecord.destination` is a bare `String`, serialized straight to a JSON line with no encryption step — contrast `AuditRecord`, which only ever holds `destination_hmac`/`destination_ciphertext` (`Vec<u8>`, already DEK-encrypted). This contradicts this ticket's own decision 6 ("destination_hmac/destination_ciphertext are still computed and still DEK-encrypted ... reuses ... exactly as messgr-ingest does") and AGENTS.md hard invariant 7 ("Per-customer DEKs from the first write ... Cannot be retrofitted."). The drain loop re-derives the HMAC/ciphertext and removes the line once it succeeds (10s interval), but for the duration of any Vault/Postgres outage — the scenario this exact code path exists for — customer phone numbers sit in cleartext on disk; a backup or forensic recovery of that file, even taken after the line is later drained (log rotation, snapshot mid-outage, etc.), recovers PII no DEK can shred, since it was never encrypted in the first place. | `src/sms_sender/model.rs` `PendingAuditRecord { ..., destination: String, ... }`; `src/sms_sender/pending.rs::append` (`serde_json::to_string(record)`, no crypto); `src/sms_sender/handler.rs::persist_send_outcome`'s `None` branch (the only caller); `development/design/06-pii-retention.md` §7 (DEK-encryption is the only sanctioned at-rest protection for a destination — contrast `orphan_event`'s explicitly-named, deliberate unencrypted exemption, which this was never made into); no test checks the pending file's contents beyond presence of the id — `dek_resolution_failure_still_sends_and_buffers_pending` never asserts the destination is absent or encrypted. | Do not persist the destination in plaintext. Either (a) encrypt it before buffering with a key that doesn't depend on the thing that just failed (e.g. a tenant-wide static-purpose key, decrypted on drain), or (b) hold the pending record only in an in-process retry queue with its own bounded-loss tradeoff spelled out, never on disk, or (c) if a narrow plaintext-on-disk window is judged an acceptable, deliberate tradeoff, that must be a confirmed decision recorded in this ticket and reconciled into `development/design/06-pii-retention.md` §7 — not a silent side effect of the F1 fix. |
+
+Disposition summary (round 2): 1 blocking (F5) — not dispositioned, sent back for rework.
+
+cost: estimated L, actual L (round 2 rework still pending).
+
 ### Rework fix record — round 1 (commit 9d7510b)
 
 - **F1** (OTP send not resilient to a Vault/Postgres outage): `handler::send_otp` reordered so
@@ -418,3 +440,4 @@ no regressions).
 - 2026-09-21 — IN DEVELOPMENT → IN REVIEW: acceptance green
 - 2026-09-21 — IN REVIEW → REWORK: 2 blocking findings: OTP send not actually resilient to a Vault/Postgres outage (F1); finalized_at bound to created_at (F2)
 - 2026-09-22 — REWORK → IN REVIEW: findings fixed
+- 2026-09-22 — IN REVIEW → REWORK: 1 blocking finding (round 2): pending-crypto buffer persists plaintext PII to disk (F5)
