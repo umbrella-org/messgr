@@ -20,10 +20,11 @@ Last updated: 2026-09-22
 
 ## IN REVIEW
 
-### messgr (0/1)
+### messgr (1/1)
 
 | id | title | depends-on |
 |---|---|---|
+| T-052 | OTP fast path: sms-sender bypassing the queue | [] |
 
 ## REWORK
 
@@ -31,7 +32,6 @@ Last updated: 2026-09-22
 
 | id | title | open findings |
 |---|---|---|
-| T-052 | OTP fast path: sms-sender bypassing the queue | 1 blocking finding (round 2): pending-crypto buffer persists plaintext PII to disk (F5) |
 
 ## READY (impact order, per child)
 

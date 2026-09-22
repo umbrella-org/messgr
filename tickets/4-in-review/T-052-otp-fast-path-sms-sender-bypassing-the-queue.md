@@ -431,6 +431,29 @@ cost: estimated L, actual L (round 2 rework still pending).
 `just build`, `just test`, `just lint`, `just docs-check` all clean (`cargo test` 63+ passing,
 no regressions).
 
+### Rework fix record — round 2 (commit fe6057c)
+
+- **F5** (pending-crypto buffer persisted the destination in plaintext): `PendingAuditRecord`
+  now carries `destination_ciphertext: Vec<u8>` instead of a bare `destination: String`. A new
+  `pending::derive_key` derives a 32-byte key from the tenant's HMAC pepper
+  (`TenantContext::pepper`) via a domain-separated HMAC-SHA256 label — chosen over a fresh Vault
+  secret because the pepper is already resolved and held in process memory for the tenant
+  context's lifetime, so encrypting under it never depends on the Vault/Postgres round trip that
+  is down in exactly the scenario this buffer exists for (option (a) from the finding's
+  suggestion). `handler::persist_send_outcome`'s `None` branch now calls
+  `encryption::encrypt(&key, comms_request_id.as_bytes(), destination.as_bytes())` before
+  buffering; `pending::drain` derives the same key and calls `encryption::decrypt` before
+  computing the customer-DEK `destination_hmac`/`destination_ciphertext` as before. This key
+  only ever protects the transient disk buffer — the durable ledger row is still encrypted under
+  the customer DEK once drain succeeds, so hard invariant 7 (per-customer DEK from first write)
+  is unaffected.
+  `dek_resolution_failure_still_sends_and_buffers_pending` (`tests/sms_sender.rs`) extended with
+  a regression assertion that the raw destination never appears in the pending buffer file's
+  contents.
+
+`just build`, `just test`, `just lint` (`cargo fmt --check` + `cargo clippy --all-targets
+--all-features -- -D warnings`), `just docs-check` all clean.
+
 ## History
 
 - 2026-09-19 — created (TO DO). source: audit: build-order step 17, remaining gap identified when auditing unticketed steps against the board
@@ -441,3 +464,4 @@ no regressions).
 - 2026-09-21 — IN REVIEW → REWORK: 2 blocking findings: OTP send not actually resilient to a Vault/Postgres outage (F1); finalized_at bound to created_at (F2)
 - 2026-09-22 — REWORK → IN REVIEW: findings fixed
 - 2026-09-22 — IN REVIEW → REWORK: 1 blocking finding (round 2): pending-crypto buffer persists plaintext PII to disk (F5)
+- 2026-09-22 — REWORK → IN REVIEW: findings fixed
