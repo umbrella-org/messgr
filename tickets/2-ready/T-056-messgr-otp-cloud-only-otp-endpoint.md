@@ -88,10 +88,12 @@ T-052 (`messgr-sms-sender`) is done and merged (PR #65, `8182cf7`) — `src/sms_
    of a tenant (a lazy fetch, exactly once, not per-request), refreshed only by a background
    timer task per §7.6's DEK-cache discipline. The request handler never calls `KeyStore` itself
    — only reads the cache.
-4. **Background refresh interval:** reuse `AUTH_FLAG_POLL_INTERVAL`'s existing precedent of a
-   short, fixed poll — 60s. No jitter, no backoff (matches `auth_flag`/`kill_switch` cache
-   refresh loops elsewhere in this codebase); if a rotation needs to propagate faster than that
-   in practice, that is a future tuning knob, not something to build speculatively now.
+4. **Background refresh interval: 60s, fixed, no jitter, no backoff** — matching the shape (not
+   the number) of existing refresh loops in this codebase (`AUTH_FLAG_POLL_INTERVAL` = 5s,
+   `KILL_SWITCH_POLL_INTERVAL`/`QUOTA_CONFIG_POLL_INTERVAL` = 30s — none of these is 60s).
+   Credential rotation is less latency-sensitive than an auth-enable kill switch, so a slower
+   poll is fine on its own merits; if a rotation needs to propagate faster than that in practice,
+   that is a future tuning knob, not something to build speculatively now.
 5. **Listen port / env var naming mirrors `SMS_SENDER_*`:** `OTP_LISTEN_ADDR`,
    `OTP_HEALTH_LISTEN_ADDR`, `OTP_TLS_CERT_FILE`, `OTP_TLS_KEY_FILE`, `OTP_TLS_CLIENT_CA_FILE`,
    `OTP_BUFFER_PATH`, `OTP_PENDING_PATH` — same shape as `src/bin/sms_sender.rs`'s env vars, `OTP`
@@ -199,3 +201,10 @@ after `sms-sender.adoc`. Run `just docs-check`.
   splitting and confirmed cloud OTP posture (design-doc still-open item #12: build messgr-otp,
   do not defer it in favour of an on-prem-only recommendation)
 - 2026-09-22 — TO DO → READY: plan complete: new messgr-otp binary/module reusing sms_sender's identity/audit/buffer shape; new at-startup+background-timer provider-credential cache per §3.1 correction (not sms_sender's per-request ProviderConfigCache)
+- 2026-09-22 — plan amended inline: pickup applicability audit found decision 4 cited a false
+  precedent (claimed `AUTH_FLAG_POLL_INTERVAL` = 60s; it is actually 5s, and no existing
+  refresh loop in the codebase uses 60s — `KILL_SWITCH_POLL_INTERVAL`/`QUOTA_CONFIG_POLL_INTERVAL`
+  are 30s). Kept 60s on its own merits (credential rotation is less latency-sensitive than an
+  auth kill switch) and reworded to stop citing it as an existing-code precedent. Audit also
+  flagged, informational only, that T-060's region-wiring plan will need to add `messgr-otp` as
+  a 7th binary once this lands — no action here, noted for T-060's own pickup.
