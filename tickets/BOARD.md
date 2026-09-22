@@ -13,10 +13,11 @@ Last updated: 2026-09-22
 
 ## IN DEVELOPMENT
 
-### messgr (0/1)
+### messgr (1/1)
 
 | id | title | depends-on |
 |---|---|---|
+| T-056 | messgr-otp: cloud-only OTP endpoint | [] |
 
 ## IN REVIEW
 
@@ -38,7 +39,6 @@ Last updated: 2026-09-22
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
-| T-056 | messgr-otp: cloud-only OTP endpoint | critical | medium | M | [] |  |
 | T-059 | Tenant offboarding: terminate-and-destroy mode | critical | medium | M | [] |  |
 | T-057 | Platform console: tenant lifecycle, health, platform_audit | high | medium | L | [] |  |
 | T-058 | Platform kill switches: platform-tier override on tenant kill switches | high | medium | L | [] |  |
