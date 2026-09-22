@@ -31,6 +31,10 @@ path = "src/bin/query_api.rs"
 name = "messgr-sms-sender"
 path = "src/bin/sms_sender.rs"
 
+[[bin]]
+name = "messgr-otp"
+path = "src/bin/otp.rs"
+
 [dependencies]
 tokio = { version = "1", features = ["full"] }
 clap = { version = "4", features = ["derive"] }
