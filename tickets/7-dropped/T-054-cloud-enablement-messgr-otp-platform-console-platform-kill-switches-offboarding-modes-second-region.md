@@ -90,3 +90,4 @@ already done — no additional gating from that side).
 
 - 2026-09-19 — created (TO DO). source: audit: build-order step 19, remaining gap identified when auditing unticketed steps against the board
 - 2026-09-19 — added hard depends-on: [T-052], user-confirmed (messgr-otp reuses T-052's sms-sender pattern, §3.1)
+- 2026-09-22 — TO DO → DROPPED: split at refinement into T-056 (messgr-otp), T-057 (platform console), T-058 (platform kill switches), T-059 (offboarding: terminate-and-destroy), T-060 (second region) — each independently schedulable per rules §3; user confirmed the split
