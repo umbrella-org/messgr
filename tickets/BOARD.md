@@ -38,6 +38,11 @@ Last updated: 2026-09-22
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
+| T-056 | messgr-otp: cloud-only OTP endpoint | critical | medium | M | [] |  |
+| T-059 | Tenant offboarding: terminate-and-destroy mode | critical | medium | M | [] |  |
+| T-057 | Platform console: tenant lifecycle, health, platform_audit | high | medium | L | [] |  |
+| T-058 | Platform kill switches: platform-tier override on tenant kill switches | high | medium | L | [] |  |
+| T-060 | Second region: stand up and prove region-boundary isolation | high | high | XL | [] |  |
 
 ## TO DO (impact order, per child)
 
@@ -45,14 +50,9 @@ Last updated: 2026-09-22
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
-| T-056 | messgr-otp: cloud-only OTP endpoint | critical | medium | M | [] |  |
-| T-059 | Tenant offboarding: terminate-and-destroy mode | critical | medium | M | [] |  |
 | T-051 | SMS provider failover | high | medium | M | [] |  |
-| T-058 | Platform kill switches: platform-tier override on tenant kill switches | high | medium | M | [] |  |
 | T-053 | Bulk campaign path: DEK-unwrap-at-scale and ingest admission rate limiting | high | high | L | [] |  |
-| T-057 | Platform console: tenant lifecycle, health, platform_audit | high | medium | L | [] |  |
 | T-050 | Erasure tooling: crypto-shred and physical-redaction commands, erasure audit log | high | high | XL | [] |  |
-| T-060 | Second region: stand up and prove region-boundary isolation | high | high | XL | [] |  |
 | T-045 | Customer event feed consumer and nightly reconciliation | medium | high | L | [] |  |
 | T-055 | Unify frontend reactivity on Datastar, drop unused htmx | low | low | S | [] |  |
 
