@@ -13,6 +13,7 @@ use std::time::Duration;
 use hmac::{Hmac, KeyInit, Mac};
 use sha2::Sha256;
 use sqlx::PgPool;
+use zeroize::Zeroizing;
 
 use crate::customer_dek::lifecycle::get_or_create_dek;
 use crate::destination_hmac;
@@ -30,12 +31,15 @@ use super::{buffer, repo};
 /// this buffer exists because just failed (F5 rework). Domain-separated
 /// from `destination_hmac::compute`'s own use of the same pepper by the
 /// label below, so the two never produce comparable output from the same
-/// input.
-pub fn derive_key(pepper: &[u8]) -> Vec<u8> {
+/// input. Returned `Zeroizing`, matching every other unwrapped key-material
+/// value in this codebase (`Keystore`'s plaintexts, the pepper itself,
+/// `KeyCache`'s entries, `get_or_create_dek`'s result) -- this key decrypts
+/// customer PII exactly like those do, so it gets the same handling.
+pub fn derive_key(pepper: &[u8]) -> Zeroizing<Vec<u8>> {
     let mut mac = <Hmac<Sha256>>::new_from_slice(pepper)
         .expect("HMAC accepts a key of any length");
     mac.update(b"sms-sender:pending-buffer-destination-key");
-    mac.finalize().into_bytes().to_vec()
+    Zeroizing::new(mac.finalize().into_bytes().to_vec())
 }
 
 /// Serializes one record as a JSON line and appends+flushes synchronously
