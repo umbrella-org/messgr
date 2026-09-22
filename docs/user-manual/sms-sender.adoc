@@ -10,9 +10,8 @@ send still appears in messgr's ledger and UI, same as any other message.
 a library linked into the bank's own auth service. The actual on-prem calling system is a
 third-party product -- nothing can be linked into it -- so this is the HTTP-service branch §3
 already anticipated, not a fallback: a dedicated binary, called over the bank's own internal
-network. Still categorically different from cloud's `otp-api` (`14-decisions-and-open-questions.md`
-Still Open #12, unbuilt): single-tenant, on the bank's own network, no multi-tenant trust
-boundary anywhere in the path.
+network. Still categorically different from cloud's `messgr-otp` (`T-056`, see "messgr-otp"): single-tenant,
+on the bank's own network, no multi-tenant trust boundary anywhere in the path.
 
 == What it does
 
