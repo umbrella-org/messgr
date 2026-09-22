@@ -13,6 +13,7 @@ use vaultrs::api::auth::approle::requests::{
     GenerateNewSecretIDRequest, SetAppRoleRequest,
 };
 use vaultrs::api::sys::responses::MountResponse;
+use vaultrs::api::transit::requests::UpdateKeyConfigurationRequest;
 use vaultrs::auth::approle::role as approle_role;
 use vaultrs::client::VaultClient;
 use vaultrs::error::ClientError;
@@ -97,6 +98,50 @@ fn policy_hcl_for(mount_path: &str, tenant_slug: &str) -> String {
          path \"{mount_path}/decrypt/{KEY_NAME}\" {{\n  capabilities = [\"create\", \"update\"]\n}}\n\
          path \"secret/data/{tenant_slug}/*\" {{\n  capabilities = [\"read\"]\n}}\n"
     )
+}
+
+/// Destroys `tenant_slug`'s Vault Transit key, unmounts its Transit engine,
+/// deletes its ACL policy, and deletes its AppRole — the inverse of
+/// `provision_vault` (T-059, DESIGN.md §7.6). Vault-first: the mount's key is
+/// gone (so the tenant's database becomes permanently unreadable) before
+/// anything else in this call can fail. Idempotent: every step tolerates the
+/// resource already being gone, so a second call against an
+/// already-destroyed tenant is a no-op (T-059 decision 3).
+pub async fn destroy_vault(
+    client: &VaultClient,
+    tenant_slug: &str,
+) -> Result<(), KeyStoreError> {
+    let mount_path = format!("transit/{tenant_slug}");
+    let policy_name = format!("tenant-{tenant_slug}-transit");
+
+    // Transit refuses to delete a key unless `deletion_allowed` is set on it
+    // first — this update call itself must run before the delete below.
+    let mut update_opts = UpdateKeyConfigurationRequest::builder();
+    update_opts.deletion_allowed(true);
+    tolerate_not_found(
+        transit_key::update(client, &mount_path, KEY_NAME, Some(&mut update_opts))
+            .await,
+    )?;
+    tolerate_not_found(transit_key::delete(client, &mount_path, KEY_NAME).await)?;
+    tolerate_not_found(mount::disable(client, &mount_path).await)?;
+    tolerate_not_found(policy::delete(client, &policy_name).await)?;
+    tolerate_not_found(approle_role::delete(client, APPROLE_MOUNT, tenant_slug).await)?;
+
+    Ok(())
+}
+
+/// Treats a 404-shaped `ClientError` as success — the resource this call
+/// tried to delete/disable is already gone, which is what makes
+/// `destroy_vault` safe to call twice. Unlike `provision_vault`'s create/set
+/// calls (idempotent by upsert), Vault's delete/disable endpoints have no
+/// upsert equivalent, so tolerating "not found" here is what does the same
+/// job for them.
+fn tolerate_not_found(result: Result<(), ClientError>) -> Result<(), KeyStoreError> {
+    match result {
+        Ok(()) => Ok(()),
+        Err(ClientError::APIError { code: 404, .. }) => Ok(()),
+        Err(err) => Err(err.into()),
+    }
 }
 
 /// Enables a Transit secrets engine at `mount_path` unless one is already

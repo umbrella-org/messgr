@@ -23,6 +23,5 @@ pub mod status {
     pub const SUSPENDED: &str = "suspended";
     #[allow(dead_code)]
     pub const OFFBOARDING_ARCHIVE: &str = "offboarding_archive";
-    #[allow(dead_code)]
     pub const OFFBOARDING_DESTROY: &str = "offboarding_destroy";
 }
