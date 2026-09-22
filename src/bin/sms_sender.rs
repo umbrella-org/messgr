@@ -22,6 +22,7 @@ use messgr::sms_sender::AppState;
 use messgr::sms_sender::auth_flag::{self, AuthEnabledCache};
 use messgr::sms_sender::buffer::run_drain_loop;
 use messgr::sms_sender::handler::send_otp;
+use messgr::sms_sender::pending::run_drain_loop as run_pending_drain_loop;
 use messgr::sms_sender::provider::ProviderConfigCache;
 use messgr::tenant::registry::TenantRegistry;
 
@@ -30,6 +31,9 @@ use messgr::tenant::registry::TenantRegistry;
 const AUTH_FLAG_POLL_INTERVAL: Duration = Duration::from_secs(5);
 /// Buffer drain cadence (task 6).
 const BUFFER_DRAIN_INTERVAL: Duration = Duration::from_secs(10);
+/// Pending-crypto drain cadence (F1 rework) -- same interval as the
+/// write-retry buffer; no reason for these to differ.
+const PENDING_DRAIN_INTERVAL: Duration = Duration::from_secs(10);
 
 #[derive(Parser)]
 #[command(name = "messgr-sms-sender")]
@@ -77,6 +81,10 @@ async fn main() {
         std::env::var("SMS_SENDER_BUFFER_PATH")
             .unwrap_or_else(|_| "sms-sender-buffer.jsonl".to_string()),
     );
+    let pending_path = PathBuf::from(
+        std::env::var("SMS_SENDER_PENDING_PATH")
+            .unwrap_or_else(|_| "sms-sender-pending.jsonl".to_string()),
+    );
 
     let control_pool = db::connect(
         &config.control_database_url,
@@ -118,6 +126,7 @@ async fn main() {
         provider_config_cache: Arc::new(ProviderConfigCache::new()),
         sms_base_url,
         buffer_path: buffer_path.clone(),
+        pending_path: pending_path.clone(),
     };
 
     let app: Router = Router::new()
@@ -150,13 +159,24 @@ async fn main() {
     )));
 
     handles.push(tokio::spawn(run_drain_loop(
+        buffer_path.clone(),
+        control_pool.clone(),
+        config.control_database_url.clone(),
+        keystore.clone(),
+        registry.clone(),
+        config.database_max_connections,
+        BUFFER_DRAIN_INTERVAL,
+    )));
+
+    handles.push(tokio::spawn(run_pending_drain_loop(
+        pending_path,
         buffer_path,
         control_pool,
         config.control_database_url.clone(),
         keystore,
         registry,
         config.database_max_connections,
-        BUFFER_DRAIN_INTERVAL,
+        PENDING_DRAIN_INTERVAL,
     )));
 
     handles.push(tokio::spawn(async move {

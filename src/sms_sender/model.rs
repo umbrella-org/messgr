@@ -56,6 +56,25 @@ pub struct AuditRecord {
     pub provider_status: Option<String>,
 }
 
+/// A send whose audit-record crypto (DEK resolution, HMAC, encryption)
+/// could not complete -- the OTP itself was still sent (`handler::send_otp`
+/// calls the provider before any of this, F1 rework), so this is buffered
+/// (`pending.rs`) and retried until the crypto step succeeds, at which
+/// point it becomes an ordinary `AuditRecord` and follows the same
+/// write-or-buffer path (`buffer.rs`) as every other send.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PendingAuditRecord {
+    pub tenant_id: Uuid,
+    pub comms_request_id: Uuid,
+    pub created_at: DateTime<Utc>,
+    pub customer_id: Uuid,
+    pub producer_id: Uuid,
+    pub destination: String,
+    pub final_status: String,
+    pub provider_ref: String,
+    pub provider_status: Option<String>,
+}
+
 #[derive(Debug)]
 pub enum SmsSenderError {
     /// See `ingest::model::IngestError::MissingPeerCertificate` -- identical

@@ -3,6 +3,7 @@ pub mod buffer;
 pub mod handler;
 pub mod identity;
 pub mod model;
+pub mod pending;
 pub mod provider;
 pub mod repo;
 
@@ -27,7 +28,9 @@ use self::provider::ProviderConfigCache;
 /// decision 9's "the send still succeeds" for the audit write), the
 /// provider base URL (a dev stand-in -- `provider_config` has no `base_url`
 /// column, matching `messgr-dispatcher`'s own `DISPATCHER_<CHANNEL>_BASE_URL`
-/// precedent), and the local-disk buffer path (decision 9).
+/// precedent), the local-disk buffer path (decision 9), and the
+/// pending-crypto buffer path (`pending.rs`, F1 rework: a send whose DEK/
+/// HMAC/encryption step couldn't complete during a Vault/Postgres outage).
 #[derive(Clone)]
 pub struct AppState {
     pub control_pool: PgPool,
@@ -40,4 +43,5 @@ pub struct AppState {
     pub provider_config_cache: Arc<ProviderConfigCache>,
     pub sms_base_url: String,
     pub buffer_path: PathBuf,
+    pub pending_path: PathBuf,
 }

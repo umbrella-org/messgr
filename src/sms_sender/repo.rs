@@ -5,6 +5,7 @@
 //! never mints new ones), so a retried write of an already-landed record is
 //! a safe no-op rather than a duplicate.
 
+use chrono::Utc;
 use sqlx::PgPool;
 
 use super::model::{AuditRecord, CHANNEL, CLASS, TEMPLATE_ID, TEMPLATE_VERSION};
@@ -15,6 +16,11 @@ pub async fn write_audit_record(
 ) -> Result<(), sqlx::Error> {
     let mut tx = pool.begin().await?;
 
+    // `finalized_at` (F2 rework): the time this write actually lands, not
+    // `created_at` -- a bare reused `$3` previously bound both parameters
+    // to the same value on every row.
+    let finalized_at = Utc::now();
+
     sqlx::query(
         r#"
         INSERT INTO comms_request (
@@ -23,7 +29,7 @@ pub async fn write_audit_record(
             payload_ciphertext, producer_id, scheduled_for, expires_at,
             final_status, finalized_at
         ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, NULL, $9, $10, NULL, $11, NULL, NULL, $12, $3
+            $1, $2, $3, $4, $5, $6, $7, $8, NULL, $9, $10, NULL, $11, NULL, NULL, $12, $13
         )
         ON CONFLICT (created_at, id) DO NOTHING
         "#,
@@ -40,6 +46,7 @@ pub async fn write_audit_record(
     .bind(&record.destination_ciphertext)
     .bind(record.producer_id)
     .bind(&record.final_status)
+    .bind(finalized_at)
     .execute(&mut *tx)
     .await?;
 

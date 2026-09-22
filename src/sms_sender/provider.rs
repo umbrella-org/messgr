@@ -10,7 +10,7 @@ use sqlx::PgPool;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
-use crate::keystore::{KeyStore, KeyStoreError, split_kv_path};
+use crate::keystore::{KeyStore, split_kv_path};
 use crate::provider_config::model::ProviderConfig;
 use crate::provider_config::repo as provider_config_repo;
 use crate::sender::http::HttpSender;
@@ -31,12 +31,20 @@ use super::model::CHANNEL;
 /// multi-tenant process might ever serve.
 pub struct ProviderConfigCache {
     rows: RwLock<HashMap<Uuid, Vec<ProviderConfig>>>,
+    /// Last successfully read value per `credential_path` (F1 rework): a
+    /// Vault outage used to block every send outright, since
+    /// `read_provider_credential` was called fresh on every request with no
+    /// fallback at all -- this gives it the same "serve the last known
+    /// snapshot" degradation `rows` above already gives `provider_config`
+    /// itself.
+    credentials: RwLock<HashMap<String, String>>,
 }
 
 impl ProviderConfigCache {
     pub fn new() -> Self {
         Self {
             rows: RwLock::new(HashMap::new()),
+            credentials: RwLock::new(HashMap::new()),
         }
     }
 
@@ -66,6 +74,50 @@ impl ProviderConfigCache {
                     .get(&tenant_id)
                     .cloned()
                     .unwrap_or_default()
+            }
+        }
+    }
+
+    /// Reads `credential_path` fresh from Vault, caching the value for next
+    /// time. On a Vault failure, falls back to the last successfully read
+    /// value for this exact path -- `None` only when Vault fails *and*
+    /// nothing has ever been cached for it (a cold-start outage, not a
+    /// blip).
+    async fn read_credential(
+        &self,
+        keystore: &dyn KeyStore,
+        credential_path: &str,
+        kv_mount: &str,
+        kv_path: &str,
+        priority: i16,
+    ) -> Option<String> {
+        match keystore.read_provider_credential(kv_mount, kv_path).await {
+            Ok(key) => {
+                self.credentials
+                    .write()
+                    .await
+                    .insert(credential_path.to_string(), key.clone());
+                Some(key)
+            }
+            Err(err) => {
+                let cached =
+                    self.credentials.read().await.get(credential_path).cloned();
+                if cached.is_some() {
+                    tracing::warn!(
+                        %err,
+                        credential_path,
+                        priority,
+                        "sms-sender: reading provider credential failed, using last known value"
+                    );
+                } else {
+                    tracing::error!(
+                        %err,
+                        credential_path,
+                        priority,
+                        "sms-sender: reading provider credential failed and none is cached, skipping"
+                    );
+                }
+                cached
             }
         }
     }
@@ -141,12 +193,17 @@ pub async fn send(
             continue;
         };
 
-        let api_key = match keystore.read_provider_credential(kv_mount, kv_path).await {
-            Ok(key) => key,
-            Err(err) => {
-                log_credential_failure(&err, config.priority);
-                continue;
-            }
+        let Some(api_key) = cache
+            .read_credential(
+                keystore,
+                &config.credential_path,
+                kv_mount,
+                kv_path,
+                config.priority,
+            )
+            .await
+        else {
+            continue;
         };
 
         let sender = HttpSender::new(base_url.to_string(), api_key);
@@ -164,12 +221,4 @@ pub async fn send(
     }
 
     Err(ProviderSendError::Exhausted(last_err))
-}
-
-fn log_credential_failure(err: &KeyStoreError, priority: i16) {
-    tracing::error!(
-        %err,
-        priority,
-        "sms-sender: reading provider credential failed, trying next provider"
-    );
 }

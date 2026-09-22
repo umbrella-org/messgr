@@ -13,6 +13,7 @@ use axum::extract::State;
 use axum::routing::post;
 use axum_server::Handle;
 use axum_server::tls_rustls::{RustlsAcceptor, RustlsConfig};
+use chrono::{DateTime, Utc};
 use reqwest::{Certificate, Identity};
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -35,6 +36,7 @@ use messgr::sms_sender::auth_flag::AuthEnabledCache;
 use messgr::sms_sender::buffer;
 use messgr::sms_sender::handler::send_otp;
 use messgr::sms_sender::identity::ProducerContext;
+use messgr::sms_sender::pending;
 use messgr::sms_sender::provider::ProviderConfigCache;
 use messgr::tenant::pool::connect_tenant_pool;
 use messgr::tenant::provision::provision_tenant;
@@ -110,6 +112,7 @@ async fn teardown(fixture: &Fixture, cert_subject: Option<&str>) {
     }
     let _ = std::fs::remove_dir_all(&fixture.cert_dir);
     let _ = std::fs::remove_file(&fixture.buffer_path);
+    let _ = std::fs::remove_file(&fixture.pending_path);
     drop_test_tenant(
         &fixture.control_pool,
         &fixture.database_name,
@@ -137,6 +140,7 @@ impl TestServer {
         auth_flag: Arc<AuthEnabledCache>,
         sms_base_url: String,
         buffer_path: PathBuf,
+        pending_path: PathBuf,
     ) -> Self {
         let cert_path = cert_dir.join("server-cert.pem");
         let key_path = cert_dir.join("server-key.pem");
@@ -158,6 +162,7 @@ impl TestServer {
             provider_config_cache: Arc::new(ProviderConfigCache::new()),
             sms_base_url,
             buffer_path,
+            pending_path,
         };
         let app: Router = Router::new()
             .route("/otp", post(send_otp))
@@ -226,6 +231,7 @@ struct Fixture {
     server_ca_pem: String,
     cert_dir: std::path::PathBuf,
     buffer_path: PathBuf,
+    pending_path: PathBuf,
 }
 
 /// Provisions a tenant, sets its config, bootstraps dev PKI, mints a server
@@ -279,6 +285,9 @@ async fn setup(locale: &str, sms_base_url: &str) -> Fixture {
     let buffer_path = std::env::temp_dir()
         .join(unique_name("sms-sender-buffer"))
         .with_extension("jsonl");
+    let pending_path = std::env::temp_dir()
+        .join(unique_name("sms-sender-pending"))
+        .with_extension("jsonl");
 
     let auth_flag = Arc::new(AuthEnabledCache::new());
     auth_flag
@@ -296,6 +305,7 @@ async fn setup(locale: &str, sms_base_url: &str) -> Fixture {
         auth_flag,
         sms_base_url.to_string(),
         buffer_path.clone(),
+        pending_path.clone(),
     )
     .await;
 
@@ -310,6 +320,7 @@ async fn setup(locale: &str, sms_base_url: &str) -> Fixture {
         server_ca_pem: server_cert.issuing_ca,
         cert_dir,
         buffer_path,
+        pending_path,
     }
 }
 
@@ -410,6 +421,17 @@ async fn wait_for_comms_request(
     panic!("comms_request row for {comms_request_id} never appeared");
 }
 
+async fn fetch_timestamps(
+    tenant_pool: &PgPool,
+    comms_request_id: Uuid,
+) -> (DateTime<Utc>, DateTime<Utc>) {
+    sqlx::query_as("SELECT created_at, finalized_at FROM comms_request WHERE id = $1")
+        .bind(comms_request_id)
+        .fetch_one(tenant_pool)
+        .await
+        .expect("querying comms_request timestamps failed")
+}
+
 #[tokio::test]
 async fn send_otp_writes_ledger_and_calls_provider_exactly_once() {
     let mock_server = MockServer::start().await;
@@ -485,6 +507,19 @@ async fn send_otp_writes_ledger_and_calls_provider_exactly_once() {
     assert_eq!(
         payload_ciphertext, None,
         "payload_ciphertext must stay NULL for the auth class"
+    );
+
+    // F2 regression: `finalized_at` used to be bound to the same query
+    // parameter as `created_at`, so every row landed with the two equal.
+    let (created_at, finalized_at) =
+        fetch_timestamps(&tenant_pool, comms_request_id).await;
+    assert_ne!(
+        finalized_at, created_at,
+        "finalized_at must be the actual write time, not a copy of created_at (F2)"
+    );
+    assert!(
+        finalized_at >= created_at,
+        "finalized_at must not predate created_at"
     );
 
     tenant_pool.close().await;
@@ -570,6 +605,7 @@ async fn postgres_write_failure_buffers_and_drain_recovers_it() {
         provider_config_cache: Arc::new(ProviderConfigCache::new()),
         sms_base_url: mock_server.uri(),
         buffer_path: fixture.buffer_path.clone(),
+        pending_path: fixture.pending_path.clone(),
     };
     app_state
         .auth_flag
@@ -701,6 +737,7 @@ async fn auth_disabled_tenant_never_calls_provider() {
         provider_config_cache: Arc::new(ProviderConfigCache::new()),
         sms_base_url: mock_server.uri(),
         buffer_path: fixture.buffer_path.clone(),
+        pending_path: fixture.pending_path.clone(),
     };
 
     let customer_id = Uuid::new_v4();
@@ -799,4 +836,171 @@ async fn provider_failover_tries_the_next_priority() {
     assert_eq!(requests.len(), 2, "both providers must have been tried");
 
     teardown(&fixture, Some(&cert_subject)).await;
+}
+
+/// F1 regression: DEK resolution used to run *before* the provider call
+/// with a bare `?`, so a Vault/Postgres outage aborted the whole request --
+/// contradicting decision 9 ("the send still succeeds") and this ticket's
+/// own Outcome. Unlike `postgres_write_failure_buffers_and_drain_recovers_it`
+/// above, the DEK cache here is left cold on purpose: `get_or_create_dek`'s
+/// own Postgres lookup is what fails, proving DEK resolution itself -- not
+/// just the later audit write -- is now best-effort.
+#[tokio::test]
+async fn dek_resolution_failure_still_sends_and_buffers_pending() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(wpath("/messages"))
+        .and(header("Authorization", "Bearer test-key-pending"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "message_id": "msg-pending",
+            "status": "queued",
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let fixture = setup("en-US", &mock_server.uri()).await;
+    let vault = vault_keystore();
+    set_provider(&fixture, &vault, 1, "test-key-pending").await;
+
+    let registry = TenantRegistry::new();
+    let keystore: Arc<dyn KeyStore> = Arc::new(vault_keystore());
+    let tenant = registry
+        .get_or_open(
+            &fixture.control_pool,
+            &fixture.control_url,
+            keystore.as_ref(),
+            fixture.tenant_id,
+            5,
+        )
+        .await
+        .expect("opening tenant context failed");
+
+    let broken_pool = connect_tenant_pool(
+        &fixture.control_pool,
+        &fixture.control_url,
+        fixture.tenant_id,
+        &fixture.database_name,
+        2,
+    )
+    .await
+    .expect("opening the pool to break failed")
+    .pool;
+    broken_pool.close().await;
+
+    let customer_id = Uuid::new_v4();
+    let broken_tenant = Arc::new(TenantContext {
+        tenant: tenant.tenant.clone(),
+        pool: broken_pool,
+        config: tenant.config.clone(),
+        pepper: tenant.pepper.clone(),
+        dek_cache: KeyCache::new(
+            std::num::NonZeroUsize::new(4).unwrap(),
+            std::time::Duration::from_secs(60),
+        ),
+        kill_switches: Arc::new(KillSwitchCache::new()),
+    });
+
+    let app_state = AppState {
+        control_pool: fixture.control_pool.clone(),
+        control_database_url: fixture.control_url.clone(),
+        keystore: keystore.clone(),
+        registry: Arc::new(registry),
+        tenant_pool_max_connections: 5,
+        profile: Profile::Dev,
+        auth_flag: Arc::new(AuthEnabledCache::new()),
+        provider_config_cache: Arc::new(ProviderConfigCache::new()),
+        sms_base_url: mock_server.uri(),
+        buffer_path: fixture.buffer_path.clone(),
+        pending_path: fixture.pending_path.clone(),
+    };
+    app_state
+        .auth_flag
+        .refresh(&fixture.control_pool)
+        .await
+        .expect("auth_enabled refresh failed");
+    // Primed against the still-working pool, before `tenant.pool` is
+    // replaced below -- provider selection and credential reads must
+    // survive the same outage that breaks DEK resolution.
+    app_state
+        .provider_config_cache
+        .load(&tenant.pool, fixture.tenant_id)
+        .await;
+
+    let (status, response) = send_otp(
+        State(app_state.clone()),
+        ProducerContext {
+            producer_id: Uuid::new_v4(),
+            tenant: broken_tenant,
+        },
+        axum::Json(serde_json::from_value(otp_body(customer_id, "+15550500")).unwrap()),
+    )
+    .await
+    .expect(
+        "handler must still return success -- DEK resolution failing must not block the send",
+    );
+
+    assert_eq!(status, axum::http::StatusCode::CREATED);
+    let comms_request_id = response.0.comms_request_id;
+
+    assert_eq!(
+        mock_server.received_requests().await.unwrap().len(),
+        1,
+        "the provider must still receive exactly one call despite the DEK outage"
+    );
+
+    let pending_contents = std::fs::read_to_string(&fixture.pending_path).expect(
+        "the pending-crypto buffer file must exist after a DEK resolution failure",
+    );
+    assert!(
+        pending_contents.contains(&comms_request_id.to_string()),
+        "the pending record must carry this send's comms_request_id"
+    );
+    assert!(
+        std::fs::read_to_string(&fixture.buffer_path)
+            .unwrap_or_default()
+            .trim()
+            .is_empty(),
+        "the write-retry buffer must stay empty -- crypto never completed, so write_audit_record was never attempted"
+    );
+
+    let tenant_pool = connect_tenant_pool(
+        &fixture.control_pool,
+        &fixture.control_url,
+        fixture.tenant_id,
+        &fixture.database_name,
+        5,
+    )
+    .await
+    .expect("connecting to tenant pool failed")
+    .pool;
+    let before: i64 = sqlx::query_scalar("SELECT count(*) FROM comms_request")
+        .fetch_one(&tenant_pool)
+        .await
+        .expect("counting comms_request rows failed");
+    assert_eq!(before, 0, "the row must not exist before draining");
+
+    pending::drain(
+        &fixture.pending_path,
+        &fixture.buffer_path,
+        &fixture.control_pool,
+        &fixture.control_url,
+        keystore.as_ref(),
+        &app_state.registry,
+        5,
+    )
+    .await;
+
+    let (final_status, _, _) =
+        wait_for_comms_request(&tenant_pool, comms_request_id).await;
+    assert_eq!(final_status, "sent", "the drained row must reach sent");
+
+    let remaining_pending =
+        std::fs::read_to_string(&fixture.pending_path).unwrap_or_default();
+    assert!(
+        remaining_pending.trim().is_empty(),
+        "a successfully drained pending record must be removed from the pending-crypto buffer file"
+    );
+
+    tenant_pool.close().await;
+    teardown(&fixture, None).await;
 }
