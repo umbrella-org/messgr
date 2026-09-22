@@ -134,9 +134,12 @@ async fn main() {
     // single-tenant-per-process case `connect_as_tenant`'s own doc comment
     // names, unlike messgr-ingest's shared admin-token connection (T-011
     // decision 5). Kept as the concrete type until after the per-channel
-    // credential resolution below (T-023 decision 5) -- `read_provider_credential`
-    // is an inherent method, not on the `KeyStore` trait `keystore` is
-    // narrowed to once wrapped.
+    // credential resolution below (T-023 decision 5) purely to keep this
+    // dispatcher's one-time startup resolution in one place, ahead of the
+    // `Arc<dyn KeyStore>` wrap every `DispatcherContext` shares --
+    // `read_provider_credential` is on the `KeyStore` trait itself (T-052
+    // decision 7 moved it there for `messgr-sms-sender`'s per-request walk),
+    // so calling it through the trait object after wrapping would work too.
     let vault_keystore = VaultKeyStore::connect_as_tenant(config.profile)
         .await
         .expect(
@@ -179,8 +182,9 @@ async fn main() {
     // Two passes: resolve every channel's credential from Vault via the
     // still-concrete `vault_keystore` first, then wrap it into the shared
     // `Arc<dyn KeyStore>` `DispatcherContext` needs (T-023 decision 5) --
-    // `read_provider_credential` is inherent on `VaultKeyStore`, not on the
-    // `KeyStore` trait, so it must run before the value is moved into `Arc`.
+    // kept in this order for a one-time startup resolution in one place,
+    // not because `read_provider_credential` requires the concrete type
+    // (it's a `KeyStore` trait method as of T-052 decision 7).
     let mut channel_senders = Vec::new();
     for channel in &channels {
         let upper = channel.to_uppercase();

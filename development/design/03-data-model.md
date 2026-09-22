@@ -44,6 +44,8 @@ CREATE INDEX ON comms_request (destination_hmac, created_at DESC);
 
 **Correction: `destination_hmac` had no index, despite §11.2 promising one.** The address-scoped query pattern ("who did we contact on this number") is documented as an index scan on `destination_hmac`, but no such index existed on `comms_request` — only `customer_id`, `final_status`, and `campaign_id` were indexed. Added above as `(destination_hmac, created_at DESC)`, matching the shape of the other lookup indexes on this table.
 
+**Gap, found and resolved during T-052: `template_id`/`template_version` are `NOT NULL` on every row, but OTP never renders a template.** `payload_ciphertext` is NULL for the auth class (§7) and the code itself must never be templated or retained, so `sms-sender` has no template to pin. Resolved with a fixed sentinel row (`template_id = 'otp'`, `version = 1`, empty body, never rendered or read), approved once per tenant via the existing `messgr-control template approve` command (T-010) — an operational setup step, not a runtime code path.
+
 **`final_status` is the one permitted mutation of a ledger row**, and it needs justifying because "append-only" is otherwise the whole point.
 
 The gate chain (§5) produces terminal outcomes — `sent`, `expired`, `cancelled`, `suppressed_consent`, `suppressed_list`, `unverified_address` — and `GET /comms?status=` filters on them. Deriving status from `comms_event` would mean an aggregate over a partitioned 7-year table on every query; storing it nowhere would make the suppression outcomes that the compliance story depends on unqueryable.

@@ -27,6 +27,7 @@ pub mod provider_config;
 pub mod query_api;
 pub mod quiet_hours;
 pub mod sender;
+pub mod sms_sender;
 pub mod stats;
 pub mod suppression;
 pub mod template;

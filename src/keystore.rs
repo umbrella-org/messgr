@@ -78,6 +78,19 @@ pub trait KeyStore: Send + Sync {
         mount: &str,
         wrapped: &str,
     ) -> Result<Zeroizing<Vec<u8>>, KeyStoreError>;
+
+    /// Reads a provider credential from Vault KV v2 at `<mount>/data/<path>`
+    /// (DESIGN.md §13, T-023). On the trait, not just inherent on
+    /// `VaultKeyStore` (T-052 decision 7): `messgr-sms-sender`'s in-request
+    /// provider walk only ever holds `Arc<dyn KeyStore>` (T-011 decision 5's
+    /// shared-admin-token style, unlike `messgr-dispatcher`'s one-time,
+    /// still-concrete-type resolution at startup), so this must be callable
+    /// through the trait object.
+    async fn read_provider_credential(
+        &self,
+        mount: &str,
+        path: &str,
+    ) -> Result<String, KeyStoreError>;
 }
 
 pub struct VaultKeyStore {
@@ -116,24 +129,6 @@ impl VaultKeyStore {
     /// either way — see `connect_client`.
     pub fn client(&self) -> &VaultClient {
         &self.client
-    }
-
-    /// Reads a provider credential from Vault KV v2 at `<mount>/data/<path>`
-    /// (DESIGN.md §13, T-023) — a generic secret read, not one of `KeyStore`'s
-    /// two narrow Transit operations, so this is an inherent method rather
-    /// than a trait one (see `.client()`'s own precedent).
-    pub async fn read_provider_credential(
-        &self,
-        mount: &str,
-        path: &str,
-    ) -> Result<String, KeyStoreError> {
-        #[derive(serde::Deserialize)]
-        struct ProviderCredential {
-            api_key: String,
-        }
-        let secret: ProviderCredential =
-            vaultrs::kv2::read(&self.client, mount, path).await?;
-        Ok(secret.api_key)
     }
 
     /// Reads a tenant's webhook shared secret from Vault KV v2, at
@@ -309,6 +304,20 @@ impl KeyStore for VaultKeyStore {
                 ))
             })?;
         Ok(Zeroizing::new(plaintext))
+    }
+
+    async fn read_provider_credential(
+        &self,
+        mount: &str,
+        path: &str,
+    ) -> Result<String, KeyStoreError> {
+        #[derive(serde::Deserialize)]
+        struct ProviderCredential {
+            api_key: String,
+        }
+        let secret: ProviderCredential =
+            vaultrs::kv2::read(&self.client, mount, path).await?;
+        Ok(secret.api_key)
     }
 }
 

@@ -1,0 +1,114 @@
+= messgr-sms-sender: `POST /otp`
+
+`messgr-sms-sender` (`T-052`) is the on-prem OTP fast path (DESIGN.md §3, AGENTS.md hard
+invariant 1): the bank's own auth service calls it synchronously, over the bank's internal
+network, to send a one-time code. No queue, no gate chain, no dispatcher -- a marketing
+incident, a full outbox, or a dead dispatcher can never stop a customer from logging in. The
+send still appears in messgr's ledger and UI, same as any other message.
+
+**Correction, found during T-052.** `02-otp.md` §3 originally described on-prem `sms-sender` as
+a library linked into the bank's own auth service. The actual on-prem calling system is a
+third-party product -- nothing can be linked into it -- so this is the HTTP-service branch §3
+already anticipated, not a fallback: a dedicated binary, called over the bank's own internal
+network. Still categorically different from cloud's `otp-api` (`14-decisions-and-open-questions.md`
+Still Open #12, unbuilt): single-tenant, on the bank's own network, no multi-tenant trust
+boundary anywhere in the path.
+
+== What it does
+
+`POST /otp` takes `customer_id`, `destination`, and `body` (the OTP code text). Identity is
+resolved from the caller's mTLS client certificate exactly as `messgr-ingest` does (see
+"messgr-ingest"): the auth service is registered as an ordinary producer, no new identity
+mechanism. `customer_id` is used as supplied -- no `customer::resolve` call, no provisional
+customer minting; the auth service already holds messgr's own `customer_id`.
+
+Provider selection walks `provider_config`'s `sms` rows in priority order, synchronously,
+within the request: a live customer is waiting, so a failed provider is retried with the next
+one immediately, rather than the dispatcher's own windowed circuit-breaker/half-open-probe
+design for queued traffic that can afford to wait. See "Provider configuration" (control-plane
+CLI) for how to set that list up -- `messgr-sms-sender` reads the same rows `messgr-dispatcher`
+does, just all of them per send instead of only the top one at startup.
+
+The audit record (`comms_request`/`comms_event`) is written **best-effort**: `class = "auth"`,
+`payload_ciphertext` always `NULL` (the code is a live credential and must never be retained --
+DESIGN.md §7), `destination_hmac`/`destination_ciphertext` still computed and DEK-encrypted as
+usual. If the write to Postgres fails, the OTP has already been sent (or has already failed) by
+then either way -- the record is appended to a local buffer file instead and a background task
+retries it every 10 seconds until it lands. `quiet_hours` and producer quotas are never
+evaluated on this path -- both are exempt by policy (AGENTS.md hard invariants; DESIGN.md §5,
+§6).
+
+== The `auth_enabled` kill switch
+
+`tenant.auth_enabled` (control database) is polled every 5 seconds and read fail-**open**: a
+read failure or timeout is treated as enabled, since a control-database outage must never
+silently disable customer login. When the cached value is `false`, the provider is never
+called and a `discarded` `comms_request`/`comms_event` pair is written instead. See "Kill
+switches" for the operator runbook -- engaging/releasing this flag is the same out-of-band,
+two-person, `platform_audit`-recorded process as every other kill switch here, not a mechanical
+tool.
+
+== One-time setup, per tenant
+
+Two steps, both via `messgr-control` (see "Control-plane CLI"), before the auth service's first
+call:
+
+[source,bash]
+----
+# 1. Register the auth service as a producer and issue it an mTLS client cert
+#    (production: your own CA issues the cert; dev PKI is for local testing only).
+cargo run --bin messgr-control -- producer register \
+    --tenant-slug acme --name auth-service \
+    --cert-subject "CN=auth-service.internal" \
+    --owner-team auth --contact auth-oncall@example.com --actor operator@example.com
+
+# 2. Approve the fixed sentinel template `sms-sender` writes onto every row --
+#    it is never rendered or read; comms_request.template_id/template_version
+#    are simply NOT NULL columns this satisfies (03-data-model.md's own
+#    correction note on this gap).
+touch /tmp/empty-body.txt
+cargo run --bin messgr-control -- template approve --tenant-slug acme \
+    --template-id otp --version 1 --channel sms --locale en-US \
+    --body-file /tmp/empty-body.txt --actor operator@example.com
+----
+
+`provider-config set` (see "Provider configuration") must also already point at a working `sms`
+provider, same as for `messgr-dispatcher`.
+
+== Running it
+
+Requires `SMS_SENDER_TLS_CERT_FILE`, `SMS_SENDER_TLS_KEY_FILE`, `SMS_SENDER_TLS_CLIENT_CA_FILE`
+(mTLS server identity, same shape as `messgr-ingest`), and `SMS_SENDER_BASE_URL` (a dev
+stand-in `Sender` endpoint -- `provider_config` has no `base_url` column, the same
+`messgr-dispatcher` precedent `DISPATCHER_<CHANNEL>_BASE_URL` already sets). `SMS_SENDER_LISTEN_ADDR`
+defaults to `0.0.0.0:8445`; `SMS_SENDER_HEALTH_LISTEN_ADDR` (`T-032`) defaults to `0.0.0.0:8084`
+and binds a second, plain (non-TLS) listener serving only `GET /healthz`. `SMS_SENDER_BUFFER_PATH`
+defaults to `sms-sender-buffer.jsonl` in the working directory -- point it at a persistent path
+in production, so a process restart doesn't lose whatever hadn't drained yet.
+
+[source,bash]
+----
+just dev-pki-bootstrap
+just dev-pki-issue-server-cert messgr-sms-sender.internal /tmp/sms-sender-cert
+
+SMS_SENDER_TLS_CERT_FILE=/tmp/sms-sender-cert/cert.pem \
+SMS_SENDER_TLS_KEY_FILE=/tmp/sms-sender-cert/key.pem \
+SMS_SENDER_TLS_CLIENT_CA_FILE=/tmp/sms-sender-cert/ca.pem \
+SMS_SENDER_BASE_URL=http://localhost:9094 \
+just sms-sender-run
+----
+
+Then, with the auth service's client certificate issued (setup step 1 above):
+
+[source,bash]
+----
+curl -sk --cert /tmp/auth-service-cert/cert.pem --key /tmp/auth-service-cert/key.pem \
+  --cacert /tmp/sms-sender-cert/ca.pem --resolve messgr-sms-sender.internal:8445:127.0.0.1 \
+  -H "Content-Type: application/json" \
+  -d '{"customer_id":"<uuid>","destination":"+15550100","body":"your code is 123456"}' \
+  https://messgr-sms-sender.internal:8445/otp
+----
+
+A successful call returns `201` with `{"comms_request_id": "..."}`. The response status always
+reflects the provider outcome, never the audit write's -- a failed audit write is buffered
+locally instead (see "What it does" above), never turned into an error response.

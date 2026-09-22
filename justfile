@@ -239,6 +239,14 @@ ingest-run:
 dispatcher-run:
     cargo run --bin messgr-dispatcher
 
+# Run messgr-sms-sender (POST /otp, T-052): the on-prem OTP fast path.
+# Requires SMS_SENDER_TLS_CERT_FILE, SMS_SENDER_TLS_KEY_FILE,
+# SMS_SENDER_TLS_CLIENT_CA_FILE, and SMS_SENDER_BASE_URL to be set (see
+# .env.example); SMS_SENDER_LISTEN_ADDR defaults to 0.0.0.0:8445.
+[group('control-plane')]
+sms-sender-run:
+    cargo run --bin messgr-sms-sender
+
 # Run messgr-webhook (POST /webhook/:webhook_token/:provider). Requires
 # WEBHOOK_TLS_CERT_FILE and WEBHOOK_TLS_KEY_FILE to be set (see
 # .env.example); WEBHOOK_LISTEN_ADDR defaults to 0.0.0.0:8543. The

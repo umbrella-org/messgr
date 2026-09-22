@@ -27,6 +27,10 @@ path = "src/bin/webhook.rs"
 name = "messgr-query-api"
 path = "src/bin/query_api.rs"
 
+[[bin]]
+name = "messgr-sms-sender"
+path = "src/bin/sms_sender.rs"
+
 [dependencies]
 tokio = { version = "1", features = ["full"] }
 clap = { version = "4", features = ["derive"] }
