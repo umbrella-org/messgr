@@ -5,7 +5,7 @@
 {% block content %}
 <h1>Platform audit trail</h1>
 
-<div class="panel" data-signals="{tenantId: '{{ filter_tenant_id }}', action: '{{ filter_action }}'}">
+<div class="panel" data-signals="{{ signals }}">
     <form data-on-submit__prevent
           data-on-change__debounce.400ms="@get('/ui/audit?tenant_id='+$tenantId+'&action='+$action)">
         <div class="field">

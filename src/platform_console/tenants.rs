@@ -90,15 +90,34 @@ pub async fn suspend(
         return status.into_response();
     }
 
-    if let Err(err) =
-        tenant_repo::mark_status(&state.control_pool, id, status::SUSPENDED).await
+    let mut tx = match state.control_pool.begin().await {
+        Ok(tx) => tx,
+        Err(err) => {
+            tracing::error!(%err, tenant_id = %id, "platform-console: failed to start suspend transaction");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+
+    let rows_affected = match tenant_repo::mark_status_tx(
+        &mut tx,
+        id,
+        status::SUSPENDED,
+    )
+    .await
     {
-        tracing::error!(%err, tenant_id = %id, "platform-console: failed to suspend tenant");
-        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        Ok(rows) => rows,
+        Err(err) => {
+            tracing::error!(%err, tenant_id = %id, "platform-console: failed to suspend tenant");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+
+    if rows_affected == 0 {
+        return StatusCode::NOT_FOUND.into_response();
     }
 
-    if let Err(err) = crate::platform_audit::record(
-        &state.control_pool,
+    if let Err(err) = crate::platform_audit::record_tx(
+        &mut tx,
         &identity.actor,
         "tenant.suspend",
         Some(id),
@@ -107,6 +126,11 @@ pub async fn suspend(
     .await
     {
         tracing::error!(%err, tenant_id = %id, "platform-console: failed to write platform_audit row for suspend");
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    }
+
+    if let Err(err) = tx.commit().await {
+        tracing::error!(%err, tenant_id = %id, "platform-console: failed to commit suspend transaction");
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
 

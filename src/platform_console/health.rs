@@ -6,6 +6,7 @@ use askama::Template;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
+use tokio::task::JoinSet;
 
 use crate::stats::{self, ChannelStatusCount};
 use crate::tenant::repo as tenant_repo;
@@ -43,28 +44,45 @@ pub async fn ui_health(
         }
     };
 
-    let mut rows = Vec::with_capacity(tenants.len());
-    for tenant in tenants {
-        let result = stats::tenant_message_stats(
-            &state.control_pool,
-            &state.base_db_url,
-            &tenant.slug,
-            None,
-        )
-        .await;
-        rows.push(match result {
+    // Independent per-tenant lookups, each opening its own pool
+    // (`stats::tenant_message_stats` -> `connect_tenant_pool`) -- run them
+    // concurrently instead of serially so page latency is bounded by the
+    // slowest tenant, not their sum.
+    let mut set = JoinSet::new();
+    for (idx, tenant) in tenants.into_iter().enumerate() {
+        let control_pool = state.control_pool.clone();
+        let base_db_url = state.base_db_url.clone();
+        set.spawn(async move {
+            let result = stats::tenant_message_stats(
+                &control_pool,
+                &base_db_url,
+                &tenant.slug,
+                None,
+            )
+            .await;
+            (idx, tenant.slug, result)
+        });
+    }
+
+    let mut rows = Vec::with_capacity(set.len());
+    while let Some(joined) = set.join_next().await {
+        let (idx, slug, result) = joined.expect("tenant health stats task panicked");
+        let health = match result {
             Ok(counts) => TenantHealth {
-                slug: tenant.slug,
+                slug,
                 counts,
                 error: None,
             },
             Err(err) => TenantHealth {
-                slug: tenant.slug,
+                slug,
                 counts: Vec::new(),
                 error: Some(err.to_string()),
             },
-        });
+        };
+        rows.push((idx, health));
     }
+    rows.sort_by_key(|(idx, _)| *idx);
+    let rows = rows.into_iter().map(|(_, health)| health).collect();
 
     render(HealthTemplate {
         actor: identity.actor,

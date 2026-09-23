@@ -9,6 +9,7 @@
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 use sqlx::PgPool;
+use sqlx::postgres::PgTransaction;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, sqlx::FromRow)]
@@ -41,6 +42,34 @@ pub async fn record(
     .bind(detail)
     .bind(Utc::now())
     .execute(pool)
+    .await
+    .map(|_| ())
+}
+
+/// `record`'s transactional form, for callers that must commit this row
+/// atomically with the state change it's auditing (the platform console's
+/// suspend handler) rather than risk a status change with no audit trail if
+/// the second, separate write failed.
+pub async fn record_tx(
+    tx: &mut PgTransaction<'_>,
+    actor: &str,
+    action: &str,
+    tenant_id: Option<Uuid>,
+    detail: Value,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        r#"
+        INSERT INTO platform_audit (id, actor, action, tenant_id, detail, at)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        "#,
+    )
+    .bind(Uuid::new_v4())
+    .bind(actor)
+    .bind(action)
+    .bind(tenant_id)
+    .bind(detail)
+    .bind(Utc::now())
+    .execute(&mut **tx)
     .await
     .map(|_| ())
 }

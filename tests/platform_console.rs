@@ -249,6 +249,85 @@ async fn suspend_writes_exactly_one_platform_audit_row() {
 }
 
 #[tokio::test]
+async fn suspend_on_unknown_tenant_returns_not_found_and_writes_no_audit_row() {
+    let control_url = control_database_url();
+    let control_pool = db::connect(&control_url, 5)
+        .await
+        .expect("failed to connect to control database");
+    let auth: Arc<dyn PlatformAuthProvider> = Arc::new(MockPlatformProvider::new(
+        Profile::Dev,
+        "operator@example.com".to_string(),
+        "operator".to_string(),
+    ));
+    let router = platform_console::router(AppState {
+        control_pool: control_pool.clone(),
+        base_db_url: control_url,
+        auth,
+    });
+
+    let unknown_id = Uuid::new_v4();
+    let response = router
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/tenants/{unknown_id}/suspend"))
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+    let count: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM platform_audit WHERE tenant_id = $1")
+            .bind(unknown_id)
+            .fetch_one(&control_pool)
+            .await
+            .expect("counting platform_audit rows failed");
+    assert_eq!(
+        count, 0,
+        "suspend on an unknown tenant must not write a platform_audit row"
+    );
+}
+
+#[tokio::test]
+async fn audit_view_tolerates_an_empty_tenant_id_filter() {
+    let control_url = control_database_url();
+    let control_pool = db::connect(&control_url, 5)
+        .await
+        .expect("failed to connect to control database");
+    let auth: Arc<dyn PlatformAuthProvider> = Arc::new(MockPlatformProvider::new(
+        Profile::Dev,
+        "operator@example.com".to_string(),
+        "operator".to_string(),
+    ));
+    let router = platform_console::router(AppState {
+        control_pool,
+        base_db_url: control_url,
+        auth,
+    });
+
+    // The audit page's own filter form sends `tenant_id=` (present, empty)
+    // whenever another filter changes and the tenant box is blank.
+    let response = router
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/ui/audit?tenant_id=&action=")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        response.status(),
+        StatusCode::OK,
+        "an empty tenant_id filter must not 400"
+    );
+}
+
+#[tokio::test]
 async fn health_view_matches_stats_and_reflects_a_status_mutation() {
     let vault = vault_keystore();
     let tenant = provision_test_tenant(&vault).await;

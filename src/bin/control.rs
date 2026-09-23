@@ -1782,9 +1782,7 @@ async fn run(
                 std::sync::Arc::new(tls_config),
             );
 
-            let mut handles = Vec::new();
-
-            handles.push(tokio::spawn(async move {
+            let health_handle = tokio::spawn(async move {
                 let listener = tokio::net::TcpListener::bind(health_listen_addr)
                     .await
                     .expect("failed to bind --health-listen-addr");
@@ -1792,18 +1790,29 @@ async fn run(
                 axum::serve(listener, messgr::health::router())
                     .await
                     .expect("health server error");
-            }));
+            });
 
-            handles.push(tokio::spawn(async move {
+            let console_handle = tokio::spawn(async move {
                 tracing::info!(%listen_addr, "messgr-control platform console listening");
                 axum_server::bind_rustls(listen_addr, rustls_config)
                     .serve(app.into_make_service())
                     .await
                     .expect("server error");
-            }));
+            });
 
-            for handle in handles {
-                let _ = handle.await;
+            // Neither task returns under normal operation, so whichever
+            // resolves first has crashed -- awaiting them in sequence would
+            // block on the other one forever and never notice (finding from
+            // PR #68 review). Report it as a `run()` error so the process
+            // exits non-zero and an orchestrator restarts it instead of
+            // limping along with one listener silently dead.
+            tokio::select! {
+                result = health_handle => {
+                    return Err(format!("platform console health listener exited: {result:?}"));
+                }
+                result = console_handle => {
+                    return Err(format!("platform console listener exited: {result:?}"));
+                }
             }
         }
         Command::Version => unreachable!("handled before Config::from_env() above"),
