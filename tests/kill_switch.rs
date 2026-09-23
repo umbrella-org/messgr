@@ -592,7 +592,7 @@ async fn release_immediately_stops_blocking_new_ingest_even_before_drain_finishe
 
 struct TestServer {
     addr: SocketAddr,
-    handle: Handle,
+    handle: Handle<SocketAddr>,
 }
 
 impl TestServer {

@@ -82,7 +82,7 @@ async fn drop_test_tenant(control_pool: &PgPool, database_name: &str, slug: &str
 /// (minus env-var plumbing), on an ephemeral port.
 struct TestServer {
     addr: SocketAddr,
-    handle: Handle,
+    handle: Handle<SocketAddr>,
 }
 
 impl TestServer {
