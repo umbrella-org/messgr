@@ -277,6 +277,26 @@ dispositioned. 1 non-blocking, disposition note-and-close (F3).
 
 cost: estimated L, actual L
 
+### Rework fix record — round 1 (commit 4273d96)
+
+- **F1** — `tenants::suspend` now propagates `platform_audit::record`'s `Result` the same way
+  every other call site does: on error, logs and returns `500` instead of rendering the tenants
+  page, so a suspend can no longer succeed while its mandated audit row silently fails to write.
+  `src/platform_console/tenants.rs`.
+- **F2** — `health_view_matches_stats_and_reflects_a_status_mutation` now registers the producer
+  with a `unique_name`-derived `cert_subject` instead of the hardcoded `"CN=test-producer"`, and
+  `drop_test_tenant` now deletes the tenant's `producer_cert` row(s) before deleting the tenant
+  row, so a second run no longer collides on `producer_cert`'s control-wide `cert_subject`
+  uniqueness constraint. Checked the live control DB for the poisoning row the review found
+  (`cert_subject = 'CN=test-producer'`) — already absent in this environment — then ran
+  `cargo test --test platform_console` twice back-to-back: both runs green
+  (`suspend_writes_exactly_one_platform_audit_row`,
+  `health_view_matches_stats_and_reflects_a_status_mutation`), proving the fixture no longer
+  poisons a second run. `tests/platform_console.rs`.
+
+`cargo build`, `cargo fmt --all -- --check`, `cargo clippy --all-targets --all-features -- -D
+warnings`, `cargo test` (full suite), and `just docs-check` all clean after the fix.
+
 ### Impact sweep (step 8)
 
 `tickets/2-ready/T-058-platform-kill-switches-platform-tier-override-on-tenant-kill-switches.md`
@@ -314,3 +334,4 @@ it** — Task 5 only adds a CLI path.
 - 2026-09-22 — READY → IN DEVELOPMENT: picked up
 - 2026-09-22 — IN DEVELOPMENT → IN REVIEW: acceptance green
 - 2026-09-23 — IN REVIEW → REWORK: review: 2 blocking findings (F1 platform_audit write silently swallowed on suspend, F2 acceptance test not idempotent — hardcoded cert_subject leaves permanent producer_cert pollution); 1 non-blocking (F3, note-and-close)
+- 2026-09-23 — REWORK → IN REVIEW: findings fixed

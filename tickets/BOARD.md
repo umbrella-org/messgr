@@ -20,10 +20,11 @@ Last updated: 2026-09-23
 
 ## IN REVIEW
 
-### messgr (0/1)
+### messgr (1/1)
 
 | id | title | depends-on |
 |---|---|---|
+| T-057 | Platform console: tenant lifecycle, health, platform_audit | [] |
 
 ## REWORK
 
@@ -31,7 +32,6 @@ Last updated: 2026-09-23
 
 | id | title | open findings |
 |---|---|---|
-| T-057 | Platform console: tenant lifecycle, health, platform_audit | review: 2 blocking findings (F1 platform_audit write silently swallowed on suspend, F2 acceptance test not idempotent —… |
 
 ## READY (impact order, per child)
 
