@@ -309,20 +309,95 @@ can then name the real stub location (`src/platform_console/kill_switches.rs`) i
 "T-057's stub", and that **T-058's own task list (1–6) has no task that wires a real view into
 it** — Task 5 only adds a CLI path.
 
-### Checklist
+## Scoped re-review — round 1
+
+### Reviewer independence (step 0)
+
+Independent. This review session has no hand in `feat/T-057-platform-console-tenant-lifecycle-
+health-platform-audit` — first touch on this ticket, including the round-1 fix commit
+(`4273d96`) — so nothing needed delegating.
+
+### In-tree stale-branch check (step 0a)
+
+`pickle doctor` on this branch reported the ticket copy stale (`this branch has it in
+"5-rework" but main has it in "4-in-review"` — main had already picked up the "findings fixed"
+board move). Rebased onto `main` (two commits replayed cleanly); re-ran `pickle doctor` clean
+(only the unrelated `payload_version "0.21.0" differs from binary "0.21.1"` warning remains).
+
+### Scoped re-review scope
+
+Per the rules, this round reads only the two listed findings (F1, F2) plus the diff that closed
+them — the round-1 fix commit `4273d96` (`git show 4273d96 -- src/platform_console/tenants.rs
+tests/platform_console.rs`) — not a re-audit of the whole branch.
+
+- **F1** — `tenants::suspend` (`src/platform_console/tenants.rs:97-109`) now wraps
+  `platform_audit::record`'s call in `if let Err(err) = ... { tracing::error!(...); return
+  StatusCode::INTERNAL_SERVER_ERROR.into_response(); }`, matching every other call site's `?`
+  propagation in effect (log + 500 instead of silently rendering the tenants page). Confirmed
+  the tenant-status write (`mark_status`) still happens first and the audit write second, so the
+  fix targets exactly the finding: an audit-write failure now surfaces instead of vanishing.
+  **Verified fixed.**
+- **F2** — `drop_test_tenant` (`tests/platform_console.rs:39-67`) now deletes the tenant's
+  `producer_cert` row(s) before deleting the `tenant` row itself, in the same position as the
+  other pre-existing per-tenant cleanup deletes (`tenant_schema_version`, `platform_audit`) — FK
+  order is respected. `health_view_matches_stats_and_reflects_a_status_mutation` now registers
+  its producer with `&format!("CN={}", unique_name("test-producer"))` instead of the hardcoded
+  `"CN=test-producer"`. Re-ran `cargo test --test platform_console` twice back-to-back in this
+  session (not just re-reading the round-1 record): both runs green
+  (`suspend_writes_exactly_one_platform_audit_row`,
+  `health_view_matches_stats_and_reflects_a_status_mutation`, ~103s each), confirming the fixture
+  no longer poisons a second run. **Verified fixed.**
+
+No new defect found in the fix diff itself — it is a minimal, targeted change with no
+side effects on the surrounding handler or test.
+
+### Full-suite re-run (steps 2–4a, re-run in full since the fix touched shared test scaffolding)
+
+- `cargo build`: clean.
+- `just lint` (`cargo fmt --all -- --check` + `cargo clippy --all-targets --all-features -- -D
+  warnings`): clean.
+- `just test` (full workspace suite, not just `platform_console`): all suites green, 0 failed.
+- `just docs-check`: clean (exit 0).
+
+### Findings (round 1 re-review)
+
+No new findings. F1 and F2 verified fixed as above; no other rows to add to the findings table.
+
+**Disposition summary:** 0 new findings this round — F1 and F2 (both blocking, round 1) closed
+by the fix commit; nothing carried forward.
+
+cost: estimated L, actual L (unchanged — the rework round was a small, targeted fix, not a
+re-estimate-worthy scope change)
+
+### Impact sweep (step 8, round 1 re-review)
+
+As flagged in the round-1 impact sweep above: this review concludes to `tickets/6-done/`, so
+`T-058`'s "T-057 has not landed" assumption is now false. Patched
+`tickets/2-ready/T-058-platform-kill-switches-platform-tier-override-on-tenant-kill-switches.md`:
+the Prerequisite gate, Task 5, and Finish step 3 now name the real stub
+(`src/platform_console/kill_switches.rs`) instead of "T-057's stub"/"until T-057 lands", and each
+now flags that **neither T-057's own task list nor T-058's wires a real view into that stub** —
+left for whoever refines T-058 further to add as a task, not invented here since it is a scope
+decision on a different ticket, not a stale-reference fix. Recorded as a dated `## History` line
+on T-058 itself.
+
+No other `tickets/2-ready/` or `tickets/1-to-do/` ticket references T-057 in `depends-on:` or
+Description (`grep -rl "T-057" tickets/1-to-do tickets/2-ready`).
+
+### Checklist (round 1 re-review)
 
 - [x] Reviewer independence settled (step 0): independent — this session has no hand in the branch
 - [x] In-tree stale-branch check (step 0a): `pickle doctor` run, stale warning found and resolved by rebase, re-run clean
-- [x] Implementation audit — acceptance test re-run, tasks & criteria verified (steps 1, 2)
-- [x] Quality audit (step 3)
-- [x] Consistency audit (step 4)
-- [x] Documentation audit — coverage, whole-tree sweep, docs build clean (step 4a)
-- [x] Docs-readability pass — conscious skip, no reviewer available in this session (step 4b)
-- [x] Findings recorded with severity, class, disposition; disposition summary + cost line present (step 5)
-- [x] Ticket moved to `tickets/5-rework/`; `## History` appended (step 6)
-- [x] Other references checked — T-058's mentions of T-057 remain accurate while T-057 is not yet done, no patch needed this round (see impact sweep); governing documents reconciled — DESIGN.md §11.4 already matches the shipped console, no correction needed (step 7)
-- [x] Remaining-tickets impact sweep done (step 8)
-- [ ] Summary + commit message & MR attributes for approval — N/A this round, routed to rework instead (step 9)
+- [x] Scoped re-review — round-1 findings (F1, F2) verified against the fix diff (`4273d96`), plus full `just build`/`just test`/`just lint`/`just docs-check` re-run (steps 1, 2)
+- [x] Quality audit — fix diff is minimal and targeted, no new issues (step 3)
+- [x] Consistency audit — fix matches every other `platform_audit::record` call site's error propagation; cleanup delete ordering matches existing precedent (step 4)
+- [x] Documentation audit — no doc changes needed for this fix; `just docs-check` clean (step 4a)
+- [x] Docs-readability pass — n/a, no `.adoc`/`.md` changed this round (step 4b)
+- [x] Findings recorded — none new; disposition summary + cost line present (step 5)
+- [x] Ticket moved to `tickets/6-done/`; `## History` appended (step 6)
+- [x] Other references checked — T-058 patched to reflect T-057 landing, with a flagged missing wiring task; governing documents reconciled — DESIGN.md §11.4 unchanged by this round's fix, still accurate (step 7)
+- [x] Remaining-tickets impact sweep done — T-058 patched, no other ticket references T-057 (step 8)
+- [x] Summary + commit message & MR attributes presented for approval (step 9)
 
 ## History
 
@@ -335,3 +410,4 @@ it** — Task 5 only adds a CLI path.
 - 2026-09-22 — IN DEVELOPMENT → IN REVIEW: acceptance green
 - 2026-09-23 — IN REVIEW → REWORK: review: 2 blocking findings (F1 platform_audit write silently swallowed on suspend, F2 acceptance test not idempotent — hardcoded cert_subject leaves permanent producer_cert pollution); 1 non-blocking (F3, note-and-close)
 - 2026-09-23 — REWORK → IN REVIEW: findings fixed
+- 2026-09-23 — IN REVIEW → DONE: scoped re-review: F1, F2 verified fixed, no new findings

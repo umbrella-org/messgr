@@ -69,8 +69,11 @@ git checkout -b feat/T-058-platform-kill-switches-platform-tier-override-on-tena
 ### Prerequisite gate (hard)
 
 None. T-016 (`src/kill_switch/`, tenant-level kill switches) is done and merged (PR #19,
-`6059a13`) and the `platform_kill_switch` table already exists (T-001). T-057 (console) has not
-landed — this ticket's console pane task is deferred to T-057's stub (Description soft coupling).
+`6059a13`) and the `platform_kill_switch` table already exists (T-001). T-057 (console) is done —
+its stub pane for this ticket is `src/platform_console/kill_switches.rs` ("not yet available").
+**T-057's own task list has no task that wires a real view into that stub** — this ticket's task
+list (below) doesn't add one either; whoever refines this ticket next should add a task filling
+`kill_switches.rs` with the real pane, alongside Task 5's CLI path.
 
 ### Confirmed design decisions (do not deviate without asking)
 
@@ -135,8 +138,10 @@ scope as `"platform"` in the response/log so an operator can tell the two apart.
 #### Task 5 — `messgr-control` CLI: engage/release subcommands
 `Command::EngagePlatformKillSwitch { scope: PlatformScope, tenant_slug: Option<String>, reason:
 String, actor: String }` / `Command::ReleasePlatformKillSwitch { id: Uuid, actor: String }` in
-`src/bin/control.rs`, calling task 1's `configure::engage`/`release`. This is the only way to
-engage a platform switch until T-057's console pane lands (soft coupling).
+`src/bin/control.rs`, calling task 1's `configure::engage`/`release`. This remains the only way to
+engage a platform switch — T-057 has landed but its console pane for this is still the
+`kill_switches.rs` stub (see Prerequisite gate); it stays the only path until a task wiring that
+pane is added.
 
 #### Task 6 — Tenant admin panel: distinct, non-actionable display (`src/query_api/admin.rs`,
 `templates/admin/kill_switches.html`)
@@ -172,8 +177,9 @@ two-tier override rule, the new CLI subcommands, and what the tenant admin panel
 
 1. Acceptance test green; `just build`/`just test`/`just lint`/`just docs-check` clean.
 2. Docs updated and registered.
-3. Write a summary (files touched, decisions made, anything deferred — note T-057's console pane
-   is still a stub until that ticket lands) and hand back for review.
+3. Write a summary (files touched, decisions made, anything deferred — note whether the
+   `kill_switches.rs` pane got wired or is still left as the stub, per the Prerequisite gate)
+   and hand back for review.
 4. Suggested commit message: `feat(kill-switch): platform-tier override on tenant kill switches
    (T-058)`.
 
@@ -187,3 +193,7 @@ two-tier override rule, the new CLI subcommands, and what the tenant admin panel
   independently-schedulable components bundled under build-order step 19; user confirmed
   splitting
 - 2026-09-22 — TO DO → READY: plan complete: platform_kill_switch table already existed unused (T-001); re-graded cost M to L given dispatcher+ingest+CLI+two console-panel wiring points; fan-out reuses the existing per-tenant kill_switch NOTIFY channel rather than adding a second one
+- 2026-09-23 — impact sweep from T-057's re-review: T-057 landed, so "T-057 has not landed" was
+  stale — corrected the Prerequisite gate, Task 5, and Finish step 3 to name the real stub
+  (`src/platform_console/kill_switches.rs`) and flagged that neither T-057's task list nor this
+  one's wires a real view into it; whoever refines this ticket further should add that task

@@ -20,11 +20,10 @@ Last updated: 2026-09-23
 
 ## IN REVIEW
 
-### messgr (1/1)
+### messgr (0/1)
 
 | id | title | depends-on |
 |---|---|---|
-| T-057 | Platform console: tenant lifecycle, health, platform_audit | [] |
 
 ## REWORK
 
@@ -109,6 +108,7 @@ Last updated: 2026-09-23
 | T-049 | Admin panel: quota dashboard, kill-switch console, scheduled queue, producer registry | yes — MERGED: PR #64 merged to `main` (`4de480d`) |
 | T-052 | OTP fast path: sms-sender bypassing the queue | yes — MERGED: PR #65 (`feat/T-052-otp-fast-path-sms-sender-bypassing-the-queue`, `8182cf7`) |
 | T-056 | messgr-otp: cloud-only OTP endpoint | yes — MERGED: PR #66 (`feat/T-056-messgr-otp-cloud-only-otp-endpoint`, `46ebe65`) |
+| T-057 | Platform console: tenant lifecycle, health, platform_audit | no — publish-gated |
 | T-059 | Tenant offboarding: terminate-and-destroy mode | yes — MERGED: PR #67 (`feat/T-059-tenant-offboarding-terminate-and-destroy-mode`, `f22d718`) |
 
 ## DROPPED
