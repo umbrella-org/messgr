@@ -121,7 +121,7 @@ async fn teardown(fixture: &Fixture, cert_subject: Option<&str>) {
 /// repo.
 struct TestServer {
     addr: SocketAddr,
-    handle: Handle,
+    handle: Handle<SocketAddr>,
 }
 
 impl TestServer {

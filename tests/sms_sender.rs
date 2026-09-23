@@ -125,7 +125,7 @@ async fn teardown(fixture: &Fixture, cert_subject: Option<&str>) {
 /// on an ephemeral port.
 struct TestServer {
     addr: SocketAddr,
-    handle: Handle,
+    handle: Handle<SocketAddr>,
 }
 
 impl TestServer {
