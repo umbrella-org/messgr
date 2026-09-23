@@ -9,7 +9,7 @@ hand — edit the tickets. Hand-written planning notes live in [`NOTES.md`](NOTE
 **WIP limits (per child-project):**
 - `messgr`: `3-in-development/` ≤ 1 · `4-in-review/` ≤ 1
 
-Last updated: 2026-09-22
+Last updated: 2026-09-23
 
 ## IN DEVELOPMENT
 
@@ -20,11 +20,10 @@ Last updated: 2026-09-22
 
 ## IN REVIEW
 
-### messgr (1/1)
+### messgr (0/1)
 
 | id | title | depends-on |
 |---|---|---|
-| T-057 | Platform console: tenant lifecycle, health, platform_audit | [] |
 
 ## REWORK
 
@@ -32,6 +31,7 @@ Last updated: 2026-09-22
 
 | id | title | open findings |
 |---|---|---|
+| T-057 | Platform console: tenant lifecycle, health, platform_audit | review: 2 blocking findings (F1 platform_audit write silently swallowed on suspend, F2 acceptance test not idempotent —… |
 
 ## READY (impact order, per child)
 

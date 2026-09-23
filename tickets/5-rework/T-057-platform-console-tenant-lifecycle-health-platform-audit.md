@@ -186,7 +186,123 @@ disclosure). Run `just docs-check`.
 
 ## Review
 
-<!-- empty until IN REVIEW -->
+### Reviewer independence (step 0)
+
+Independent. This review session has no prior involvement with
+`feat/T-057-platform-console-tenant-lifecycle-health-platform-audit` — first touch on this
+ticket in a fresh session — so nothing needed delegating.
+
+### In-tree stale-branch check (step 0a)
+
+`pickle doctor` on first checkout of the feature branch reported the ticket copy stale (`this
+branch has it in "3-in-development" but main has it in "4-in-review"`). Rebased onto `main`
+(one commit replayed cleanly); re-ran `pickle doctor` clean (only the unrelated
+`payload_version "0.21.0" differs from binary "0.21.1"` warning remains).
+
+### Implementation audit (step 2)
+
+- Tasks 1–4: all present as specified — `src/platform_auth/{mod,provider,mock,role}.rs`,
+  `src/platform_console/{mod,tenants,health,audit,kill_switches}.rs`, the four templates,
+  `Command::Serve` in `src/bin/control.rs`. **Met.**
+- `just build`, `just lint` (`cargo fmt --all -- --check` + `cargo clippy --all-targets
+  --all-features -- -D warnings`): clean. **Met.**
+- `just docs-check`: clean. **Met.**
+- `cargo test --test platform_console`: `suspend_writes_exactly_one_platform_audit_row` passed;
+  `health_view_matches_stats_and_reflects_a_status_mutation` **failed** on this re-run (F2
+  below) — it evidently passed once, since the implementer's own successful run is what left
+  the fixture poisoned for this one. **Not met as re-run.**
+- Manual acceptance step 3: `cargo run --bin messgr-control -- serve` with a throwaway
+  self-signed cert; `/ui/tenants`, `/ui/health`, `/ui/audit`, `/ui/kill-switches` all returned
+  200 with the expected rendered content; the health listener's `/healthz` returned 200;
+  `grep -rn "KeyStore\|connect_tenant_pool" src/platform_console/ src/platform_auth/` printed
+  nothing. **Met.**
+- Confirmed design decisions 1–4, 4a: honoured — plain TLS, the new `platform_auth` realm with
+  no `tenant_id`, `control_pool`-only app state, offboard-trigger a permanent disabled stub
+  never wired to `destroy_tenant`/`VaultClient`.
+- Confirmed design decision 5 ("`platform_audit` gets a row for every console action that
+  changes state"): **not honoured** under a DB write failure (F1 below).
+
+### Quality audit (step 3)
+
+- Idiomatic, matches `query_api`/`admin`'s existing conventions throughout (state extraction,
+  `require_role`, template rendering).
+- Askama's default HTML auto-escaping is in effect on every template; no `|safe` filter used
+  anywhere in `templates/platform_console/`.
+- `tenant_repo::mark_status` (pre-existing, shared with T-059) doesn't check `rows_affected`, so
+  `suspend` against a nonexistent tenant id returns 200 rather than 404 — inherited behaviour,
+  not introduced by this ticket (F3, non-blocking).
+- Test coverage matches the two acceptance-test assertions plus `mock.rs`'s two
+  `MockPlatformProvider` unit tests; no coverage of `require_role`'s reject path, acceptable
+  given the closed one-role vocabulary this slice ships (decision 3).
+
+### Consistency audit (step 4)
+
+- `platform_console`'s `require_role`/`PlatformAuthedUser` pattern is structurally identical to
+  `query_api::auth_mw`'s, as its own comments claim.
+- `tenants::suspend`'s `.ok()` on `platform_audit::record`'s `Result` is inconsistent with every
+  other call site in the codebase (`src/tenant/provision.rs:100,169`,
+  `src/tenant/offboard.rs:52`), which all propagate the error with `?` (F1).
+- `tenant_repo::list`'s full-row `SELECT` (including `vault_role_id`/`vault_pepper_wrapped`/
+  `webhook_token`) matches the existing `find_by_slug`/`find_by_webhook_token` precedent in the
+  same file; none of those columns reach a template. No new exposure.
+- `stats::tenant_message_stats`'s `base_db_url` argument is fed `config.control_database_url`,
+  the same value every existing `messgr-control` subcommand already passes it. Consistent.
+
+### Documentation audit (step 4a)
+
+- `docs/user-manual/control-plane-cli.adoc` gained a "Platform console" section covering the
+  `serve` subcommand, its flags, its env vars, and the metadata-not-content disclosure.
+  Coverage present.
+- `just docs-check` clean.
+- Whole-tree sweep: `grep -rln "platform console\|platform_console" docs/` returns only the file
+  this ticket edited — no stale references elsewhere still describing the console as unbuilt.
+- The doc's "every state-changing action... writes a `platform_audit` row" claim is only true on
+  the happy path today (F1); it needs no separate doc fix, since fixing F1 makes it true again.
+
+### Docs-readability pass (step 4b)
+
+Conscious skip — no `docs_readability` tool or `docs-readability` subagent available in this
+session.
+
+### Findings
+
+| id | severity | class | disposition | description | evidence | suggestion |
+|---|---|---|---|---|---|---|
+| F1 | blocking | correctness | — | `tenants::suspend` discards the `Result` of `platform_audit::record` with `.ok()`, so a tenant can be suspended while its mandated `platform_audit` row silently fails to write on a DB error — violates T-057 decision 5 | `src/platform_console/tenants.rs:100-109`; contrast every other caller of `platform_audit::record`, which propagates with `?` (`src/tenant/provision.rs:100,169`, `src/tenant/offboard.rs:52`) | Propagate the error like every other call site (return 500, don't render the tenants page) instead of `.ok()` |
+| F2 | blocking | test-gap | — | `health_view_matches_stats_and_reflects_a_status_mutation` hardcodes `cert_subject = "CN=test-producer"` (unlike the slug/db name in the same test, which use `unique_name`) against a control-wide uniqueness constraint on `producer_cert.cert_subject`, and `drop_test_tenant` never deletes that row — so the mandated acceptance test cannot be re-run in a persistent environment once it has passed once | `tests/platform_console.rs:258`; reproduced live: `cargo test --test platform_console` failed with `cert_subject "CN=test-producer" is already registered to a different tenant`; the poisoning `producer_cert` row (`tenant_id ce0a4f0b…`) was confirmed present in the control DB, left by the implementer's own prior successful run | Uniquify the cert_subject (`unique_name`-style) and have `drop_test_tenant` (or a new helper) delete the matching `producer_cert` row on cleanup |
+| F3 | non-blocking | design | note-and-close | `tenant_repo::mark_status` (pre-existing, shared with T-059) doesn't check `rows_affected`, so `suspend` against a nonexistent tenant id returns 200 and writes an audit row rather than 404 | `src/tenant/repo.rs:132-138`; `src/platform_console/tenants.rs` `suspend` handler | Not reachable via the shipped UI today; worth a `rows_affected() == 0 -> 404` guard if a second caller ever makes the id externally addressable |
+
+**Disposition summary:** 2 blocking (F1, F2) — routed to a scoped rework pass, not
+dispositioned. 1 non-blocking, disposition note-and-close (F3).
+
+cost: estimated L, actual L
+
+### Impact sweep (step 8)
+
+`tickets/2-ready/T-058-platform-kill-switches-platform-tier-override-on-tenant-kill-switches.md`
+references T-057 in three places, all keyed to "T-057 has not landed" (prerequisite gate) /
+"until T-057... lands" (Task 5, Finish). This review routes T-057 to `5-rework/` rather than
+`6-done/`, so that assumption is **still true** — T-057 has not landed — and no patch is needed
+this round. Worth flagging for whoever runs T-057's scoped re-review after the fix pass: once
+that re-review concludes to `6-done/`, its own step 8 should catch that T-058's prerequisite gate
+can then name the real stub location (`src/platform_console/kill_switches.rs`) instead of just
+"T-057's stub", and that **T-058's own task list (1–6) has no task that wires a real view into
+it** — Task 5 only adds a CLI path.
+
+### Checklist
+
+- [x] Reviewer independence settled (step 0): independent — this session has no hand in the branch
+- [x] In-tree stale-branch check (step 0a): `pickle doctor` run, stale warning found and resolved by rebase, re-run clean
+- [x] Implementation audit — acceptance test re-run, tasks & criteria verified (steps 1, 2)
+- [x] Quality audit (step 3)
+- [x] Consistency audit (step 4)
+- [x] Documentation audit — coverage, whole-tree sweep, docs build clean (step 4a)
+- [x] Docs-readability pass — conscious skip, no reviewer available in this session (step 4b)
+- [x] Findings recorded with severity, class, disposition; disposition summary + cost line present (step 5)
+- [x] Ticket moved to `tickets/5-rework/`; `## History` appended (step 6)
+- [x] Other references checked — T-058's mentions of T-057 remain accurate while T-057 is not yet done, no patch needed this round (see impact sweep); governing documents reconciled — DESIGN.md §11.4 already matches the shipped console, no correction needed (step 7)
+- [x] Remaining-tickets impact sweep done (step 8)
+- [ ] Summary + commit message & MR attributes for approval — N/A this round, routed to rework instead (step 9)
 
 ## History
 
@@ -197,3 +313,4 @@ disclosure). Run `just docs-check`.
 - 2026-09-22 — plan amended inline: applicability gate (fresh sub-agent audit) on pickup found T-059's `destroy_tenant` (merged since this ticket went READY) requires a `VaultClient`, conflicting with decision 4's "never a KeyStore" invariant and §11.4 — offboard-trigger changed from "stub until T-059 lands" to a permanent stub (decision 4a added), never wired to `destroy_tenant`; Task 3's template precedent corrected from htmx to Datastar to match what T-049 actually shipped; Description's "never opens a tenant pool" claim softened to "never holds a KeyStore" since the reused T-028 health query does open a short-lived tenant-DB connection for metadata (non-blocking finding, disposition: fixed inline). User approved both routing decisions (offboard-trigger stays a stub; Task 3 follows Datastar).
 - 2026-09-22 — READY → IN DEVELOPMENT: picked up
 - 2026-09-22 — IN DEVELOPMENT → IN REVIEW: acceptance green
+- 2026-09-23 — IN REVIEW → REWORK: review: 2 blocking findings (F1 platform_audit write silently swallowed on suspend, F2 acceptance test not idempotent — hardcoded cert_subject leaves permanent producer_cert pollution); 1 non-blocking (F3, note-and-close)
