@@ -59,6 +59,12 @@ async fn drop_test_tenant(control_pool: &PgPool, database_name: &str, slug: &str
     .bind(slug)
     .execute(control_pool)
     .await;
+    let _ = sqlx::query(
+        "DELETE FROM producer_cert WHERE tenant_id = (SELECT id FROM tenant WHERE slug = $1)",
+    )
+    .bind(slug)
+    .execute(control_pool)
+    .await;
     let _ = sqlx::query("DELETE FROM tenant WHERE slug = $1")
         .bind(slug)
         .execute(control_pool)
@@ -255,7 +261,7 @@ async fn health_view_matches_stats_and_reflects_a_status_mutation() {
         &tenant.control_url,
         &tenant.slug,
         &unique_name("producer"),
-        "CN=test-producer",
+        &format!("CN={}", unique_name("test-producer")),
         "test-team",
         "oncall@example.com",
         "test-actor",

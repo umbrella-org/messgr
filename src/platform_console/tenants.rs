@@ -97,7 +97,7 @@ pub async fn suspend(
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
 
-    crate::platform_audit::record(
+    if let Err(err) = crate::platform_audit::record(
         &state.control_pool,
         &identity.actor,
         "tenant.suspend",
@@ -105,7 +105,10 @@ pub async fn suspend(
         serde_json::json!({}),
     )
     .await
-    .ok();
+    {
+        tracing::error!(%err, tenant_id = %id, "platform-console: failed to write platform_audit row for suspend");
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    }
 
     tenants_page(&state.control_pool, identity.actor, identity.role).await
 }
