@@ -411,3 +411,11 @@ Description (`grep -rl "T-057" tickets/1-to-do tickets/2-ready`).
 - 2026-09-23 — IN REVIEW → REWORK: review: 2 blocking findings (F1 platform_audit write silently swallowed on suspend, F2 acceptance test not idempotent — hardcoded cert_subject leaves permanent producer_cert pollution); 1 non-blocking (F3, note-and-close)
 - 2026-09-23 — REWORK → IN REVIEW: findings fixed
 - 2026-09-23 — IN REVIEW → DONE: scoped re-review: F1, F2 verified fixed, no new findings
+- 2026-09-23 — post-done, pre-merge: `/code-review high` on PR #68 found 7 additional findings
+  (empty `tenant_id` filter 400ing, `suspend` writing a `platform_audit` row on a nonexistent
+  tenant with a non-transactional status/audit write pair, the platform-console serve command
+  masking a crashed listener, serial per-tenant health queries, reflected JS injection via
+  `data-signals`, and `base.html` duplicating `admin/base.html`); fixed 6 inline (commit
+  `b456514`) with 2 new regression tests, left the `base.html` duplication as a non-blocking
+  cleanup — disposition: note-and-close
+- 2026-09-23 — merged to main (PR #68, `14b2271`)
