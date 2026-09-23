@@ -1,5 +1,6 @@
 use chrono::Utc;
 use sqlx::PgPool;
+use sqlx::postgres::PgTransaction;
 use uuid::Uuid;
 
 use super::model::{Tenant, status};
@@ -125,23 +126,69 @@ pub async fn insert_provisioning(
 }
 
 pub async fn mark_active(pool: &PgPool, tenant_id: Uuid) -> Result<(), sqlx::Error> {
-    mark_status(pool, tenant_id, status::ACTIVE).await
+    mark_status(pool, tenant_id, status::ACTIVE)
+        .await
+        .map(|_| ())
 }
 
 /// Sets `tenant.status` to an arbitrary legal value — `mark_active`'s general
 /// form, for callers (T-059's `destroy_tenant`) that need a status other
-/// than `active`.
+/// than `active`. Returns rows affected so a caller working from an
+/// unvalidated id (the platform console's suspend handler) can tell a no-op
+/// update on a nonexistent tenant from a real one, instead of writing a
+/// `platform_audit` row for a suspension that never happened.
 pub async fn mark_status(
     pool: &PgPool,
     tenant_id: Uuid,
     status: &str,
-) -> Result<(), sqlx::Error> {
+) -> Result<u64, sqlx::Error> {
     sqlx::query("UPDATE tenant SET status = $1 WHERE id = $2")
         .bind(status)
         .bind(tenant_id)
         .execute(pool)
         .await
-        .map(|_| ())
+        .map(|r| r.rows_affected())
+}
+
+/// `mark_status`'s transactional form, for callers that must commit the
+/// status change and a `platform_audit` row atomically (the platform
+/// console's suspend handler).
+pub async fn mark_status_tx(
+    tx: &mut PgTransaction<'_>,
+    tenant_id: Uuid,
+    status: &str,
+) -> Result<u64, sqlx::Error> {
+    sqlx::query("UPDATE tenant SET status = $1 WHERE id = $2")
+        .bind(status)
+        .bind(tenant_id)
+        .execute(&mut **tx)
+        .await
+        .map(|r| r.rows_affected())
+}
+
+/// Every registered tenant, newest first — the platform console's tenant
+/// list (T-057); no caller before this ticket needed a bare list-all.
+pub async fn list(pool: &PgPool) -> Result<Vec<Tenant>, sqlx::Error> {
+    sqlx::query_as::<_, Tenant>(
+        r#"
+        SELECT id, slug, region, database_name, vault_mount, vault_role_id, vault_pepper_wrapped, webhook_token, status, created_at
+        FROM tenant
+        ORDER BY created_at DESC
+        "#,
+    )
+    .fetch_all(pool)
+    .await
+}
+
+/// `tenant_id` -> applied `tenant_schema_version.version`, for the platform
+/// console's drift column (T-057) — a tenant with no row yet (never
+/// migrated) is simply absent from the map, not an error.
+pub async fn schema_versions(pool: &PgPool) -> Result<Vec<(Uuid, i32)>, sqlx::Error> {
+    sqlx::query_as::<_, (Uuid, i32)>(
+        "SELECT tenant_id, version FROM tenant_schema_version",
+    )
+    .fetch_all(pool)
+    .await
 }
 
 pub async fn record_schema_version(

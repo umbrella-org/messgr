@@ -453,3 +453,45 @@ gone.
 period, with producers/UI disabled and dispatchers stopped, converting to destroy after an
 explicit end date -- is not built. §7.7 leaves it pending a pricing decision (design-doc still-open
 item #13); `offboard-destroy` only ever destroys.
+
+== Platform console
+
+[source,bash]
+----
+export PLATFORM_MOCK_AUTH_ACTOR=operator@example.com
+export PLATFORM_MOCK_AUTH_ROLE=operator
+cargo run --bin messgr-control -- serve \
+    --cert-file /path/to/cert.pem --key-file /path/to/key.pem
+----
+
+`serve` (T-057, DESIGN.md §11.4) starts a long-lived HTTP server for provider staff: tenant
+lifecycle (list, drift, suspend), per-tenant health/volume, the `platform_audit` trail, and a
+platform kill-switches pane. It is **not** the tenant admin panel with extra permissions -- a
+different binary (`messgr-control`, not `messgr-query-api`) and a different authentication realm
+(`PlatformAuthProvider`/`PlatformIdentity`, which carry no `tenant_id` -- an operator identity
+spans every tenant by design, unlike a query-api request).
+
+Flags: `--listen-addr` (default `0.0.0.0:8545`), `--health-listen-addr` (default
+`0.0.0.0:8084`, plain HTTP liveness only), `--cert-file`/`--key-file` (required, plain TLS --
+this is a human-facing console, not a service-to-service mTLS call). Env vars:
+`PLATFORM_MOCK_AUTH_ACTOR`/`PLATFORM_MOCK_AUTH_ROLE` configure the only auth provider built so
+far -- a dev-only mock, refused outside `MESSGR_PROFILE=dev` the same way `AUTH_PROVIDER=mock`
+is refused for `messgr-query-api` (§11.1). A single `operator` role covers every provider-staff
+user for now; role differentiation is not built.
+
+**Metadata only, never content, by construction.** This server holds a `control_pool`
+connection and never holds Vault Transit credentials, so there is no code path by which it could
+reach a tenant's Transit mount or decrypt a payload. It can see metadata -- tenant lifecycle
+state, `tenant_schema_version` drift, per-tenant health/volume counts (the same
+`comms_request.final_status` counts the `stats` subcommand above reports) -- and every
+state-changing action (suspend, and once T-058 lands, kill-switch engage/release) writes a
+`platform_audit` row. This visibility is disclosed to tenants as such (§11.4): operators see
+metadata, and every access is audited.
+
+The tenant list's offboard action is a visible, disabled "coming soon" control, not wired to
+`offboard-destroy`'s underlying `destroy_tenant` function -- that function needs a live Vault
+client, which would break this server's "never holds Transit credentials" invariant. Destroying
+a tenant still goes through the `offboard-destroy` subcommand above, run by a human out-of-band.
+
+Kill switches are a stub pane ("not yet available") until T-058 ships platform-tier kill
+switches; every other pane is usable today.

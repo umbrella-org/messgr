@@ -1,0 +1,36 @@
+{% extends "platform_console/base.html" %}
+
+{% block title %}Tenants{% endblock %}
+
+{% block content %}
+<h1>Tenants</h1>
+
+<div class="panel">
+    {% if rows.is_empty() %}
+    <p class="note">No tenants registered.</p>
+    {% else %}
+    <table>
+        <thead>
+            <tr><th>Slug</th><th>Region</th><th>Status</th><th>Schema version</th><th>Created</th><th></th></tr>
+        </thead>
+        <tbody>
+            {% for row in rows %}
+            <tr>
+                <td>{{ row.slug }}</td>
+                <td>{{ row.region }}</td>
+                <td><span class="pill">{{ row.status }}</span></td>
+                <td>{{ row.schema_version }}</td>
+                <td>{{ row.created_at }}</td>
+                <td>
+                    <form class="inline" data-on-submit__prevent="@post('/tenants/{{ row.id }}/suspend', {contentType: 'form'})">
+                        <button type="submit" class="danger">Suspend</button>
+                    </form>
+                    <button type="button" disabled title="offboard-trigger is not wired to destroy_tenant from this console (T-057 decision 4a) -- run messgr-control offboard-destroy">Offboard&hellip;</button>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+</div>
+{% endblock %}

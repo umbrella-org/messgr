@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}messgr platform console{% endblock %}</title>
+    <script src="/assets/datastar.js" type="module"></script>
+    <style>
+        :root {
+            --bg: #f4f5f7;
+            --panel: #ffffff;
+            --text: #1a1d23;
+            --muted: #5b6470;
+            --border: #dfe3e8;
+            --accent: #2f6fed;
+            --danger: #c4361f;
+            --pill-bg: #eef1f5;
+        }
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg: #14161a;
+                --panel: #1c1f24;
+                --text: #e7e9ec;
+                --muted: #9aa2ad;
+                --border: #2c3038;
+                --accent: #6ea3ff;
+                --danger: #ff6b52;
+                --pill-bg: #262a31;
+            }
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            background: var(--bg);
+            color: var(--text);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        }
+        header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0.75rem 1.5rem;
+            background: var(--panel);
+            border-bottom: 1px solid var(--border);
+        }
+        header nav a {
+            margin-right: 1rem;
+            color: var(--text);
+            text-decoration: none;
+        }
+        header nav a.disabled {
+            color: var(--muted);
+            pointer-events: none;
+        }
+        main { padding: 1.5rem; max-width: 72rem; margin: 0 auto; }
+        .panel {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1rem 1.25rem;
+            margin-bottom: 1.25rem;
+        }
+        .pill {
+            display: inline-block;
+            background: var(--pill-bg);
+            color: var(--muted);
+            border-radius: 999px;
+            padding: 0.1rem 0.6rem;
+            font-size: 0.8rem;
+        }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { text-align: left; padding: 0.4rem 0.5rem; border-bottom: 1px solid var(--border); }
+        th { color: var(--muted); font-weight: 500; font-size: 0.85rem; }
+        form.inline { display: inline; }
+        input, select, button {
+            font: inherit;
+            padding: 0.35rem 0.5rem;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            background: var(--panel);
+            color: var(--text);
+        }
+        button { cursor: pointer; }
+        button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+        button.danger { background: var(--danger); color: #fff; border-color: var(--danger); }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+        .note { color: var(--muted); font-size: 0.85rem; }
+        .field { margin-bottom: 0.6rem; }
+        .field label { display: block; font-size: 0.85rem; color: var(--muted); margin-bottom: 0.2rem; }
+    </style>
+</head>
+<body>
+    <header>
+        <strong>messgr platform console</strong>
+        <nav>
+            <a href="/ui/tenants">Tenants</a>
+            <a href="/ui/health">Health</a>
+            <a href="/ui/audit">Audit</a>
+            <a href="/ui/kill-switches">Kill switches</a>
+        </nav>
+        <span class="note">signed in as <code>{{ actor }}</code> (<code>{{ role }}</code>) &mdash; metadata only, never content</span>
+    </header>
+    <main>
+        {% block content %}{% endblock %}
+    </main>
+</body>
+</html>

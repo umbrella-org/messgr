@@ -21,6 +21,8 @@ pub mod otp;
 pub mod outbox_query;
 pub mod partition_lifecycle;
 pub mod platform_audit;
+pub mod platform_auth;
+pub mod platform_console;
 pub mod producer;
 pub mod producer_quota;
 pub mod profile;

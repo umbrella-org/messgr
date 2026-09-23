@@ -1,0 +1,36 @@
+{% extends "platform_console/base.html" %}
+
+{% block title %}Health{% endblock %}
+
+{% block content %}
+<h1>Per-tenant health / volume</h1>
+
+{% for tenant in tenants %}
+<div class="panel">
+    <h2>{{ tenant.slug }}</h2>
+    {% match tenant.error %}
+    {% when Some with (err) %}
+    <p class="note">failed to load: {{ err }}</p>
+    {% when None %}
+    {% if tenant.counts.is_empty() %}
+    <p class="note">No messages yet.</p>
+    {% else %}
+    <table>
+        <thead>
+            <tr><th>Channel</th><th>Status</th><th>Count</th></tr>
+        </thead>
+        <tbody>
+            {% for row in tenant.counts %}
+            <tr>
+                <td>{{ row.channel }}</td>
+                <td>{{ row.status }}</td>
+                <td>{{ row.count }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+    {% endmatch %}
+</div>
+{% endfor %}
+{% endblock %}
