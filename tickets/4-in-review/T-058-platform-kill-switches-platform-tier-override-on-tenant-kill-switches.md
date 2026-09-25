@@ -95,8 +95,9 @@ and merged; the `platform_kill_switch` table exists (T-001).
    database; no second `PgListener` on `control_pool`.
 3. **The platform re-read lives inside `KillSwitchCache`'s refresh**, which gains an optional
    `(control_pool, tenant_id)` source; `run_refresh_loop` passes it through. A failed control read
-   fails the whole refresh (the previous snapshot is kept — never "platform switch vanished
-   because the control DB blipped").
+   carries the previous platform entries over unchanged while the tenant's own rows still
+   refresh — never "platform switch vanished because the control DB blipped", and never "a
+   control-DB outage stopped the tenant's own switches taking effect".
 4. **A tenant cannot release a platform switch** — the tenant admin panel never offers the
    action; engage/release is exposed only in the platform console (operator realm) and the
    `messgr-control` CLI.
@@ -228,3 +229,5 @@ step 19". Run `just docs-check`.
   one's wires a real view into it; whoever refines this ticket further should add that task
 - 2026-09-25 — plan amended inline (applicability gate, still READY): blocking A1 — release must ramp, so platform switches are merged into KillSwitchCache as synthetic global/hold rows reusing the drain machinery; blocking A2 — user decided T-057 suspend also engages a tenant-scope switch; user decided generic tenant-facing label and folding the T-016 drain-ignores-engaged-switches bug (A15) into this ticket; inline fixes A3–A14 (ingest polls not LISTENs, constraints migration, fan-out targets/after-commit/best-effort, audit, console pane task, admin-panel read site, grouped CLI, isolated tests, OTP-untouched note, stale doc xrefs)
 - 2026-09-25 — READY → IN DEVELOPMENT: picked up
+- 2026-09-25 — plan amended inline: decision 3 — a failed control-database read no longer fails the whole refresh (that coupled the tenant's own kill switches to control-DB availability, a regression found in self-review); the last-known platform rows are kept and the tenant rows still refresh, covered by a new test
+- 2026-09-25 — IN DEVELOPMENT → IN REVIEW: acceptance green — `feat/T-058-…` commit 01b093f; build/lint clean; full `cargo test` green on local Postgres 16 + dev Vault (the four mTLS-server suites needed NO_PROXY for this sandbox's HTTPS proxy); `just docs-check` not run (snowball unavailable here); console pane wired (no longer a stub)
