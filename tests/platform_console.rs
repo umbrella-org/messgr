@@ -20,6 +20,7 @@ use messgr::keystore::VaultKeyStore;
 use messgr::platform_auth::mock::MockPlatformProvider;
 use messgr::platform_auth::provider::PlatformAuthProvider;
 use messgr::platform_console::{self, AppState};
+use messgr::platform_kill_switch;
 use messgr::producer::register::register_producer;
 use messgr::profile::Profile;
 use messgr::tenant::pool::connect_tenant_pool;
@@ -55,6 +56,14 @@ async fn drop_test_tenant(control_pool: &PgPool, database_name: &str, slug: &str
     .await;
     let _ = sqlx::query(
         "DELETE FROM platform_audit WHERE tenant_id = (SELECT id FROM tenant WHERE slug = $1)",
+    )
+    .bind(slug)
+    .execute(control_pool)
+    .await;
+    // T-058: suspend engages a platform_kill_switch row, which references
+    // tenant -- it must go before the tenant row does.
+    let _ = sqlx::query(
+        "DELETE FROM platform_kill_switch WHERE tenant_id = (SELECT id FROM tenant WHERE slug = $1)",
     )
     .bind(slug)
     .execute(control_pool)
@@ -244,6 +253,167 @@ async fn suspend_writes_exactly_one_platform_audit_row() {
         .await
         .expect("reading tenant status failed");
     assert_eq!(status, "suspended");
+
+    // T-058: suspend also holds the queued backlog via a tenant-scope
+    // platform switch, engaged in the same transaction.
+    let live_switches: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM platform_kill_switch \
+         WHERE scope = 'tenant' AND tenant_id = $1 AND released_at IS NULL",
+    )
+    .bind(tenant.tenant_id)
+    .fetch_one(&tenant.control_pool)
+    .await
+    .expect("counting platform_kill_switch rows failed");
+    assert_eq!(
+        live_switches, 1,
+        "suspend must engage a tenant-scope platform switch"
+    );
+
+    tenant.cleanup().await;
+}
+
+#[tokio::test]
+async fn suspending_an_already_switched_tenant_still_succeeds() {
+    let vault = vault_keystore();
+    let tenant = provision_test_tenant(&vault).await;
+    platform_kill_switch::configure::engage(
+        &tenant.control_pool,
+        &tenant.control_url,
+        platform_kill_switch::model::scope::TENANT,
+        Some(tenant.tenant_id),
+        "abuse investigation",
+        "operator@example.com",
+    )
+    .await
+    .expect("engaging platform switch failed");
+
+    let response = build_router(&tenant, "operator@example.com", "operator")
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/tenants/{}/suspend", tenant.tenant_id))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let status: String = sqlx::query_scalar("SELECT status FROM tenant WHERE id = $1")
+        .bind(tenant.tenant_id)
+        .fetch_one(&tenant.control_pool)
+        .await
+        .expect("reading tenant status failed");
+    assert_eq!(
+        status, "suspended",
+        "an existing switch must not roll the suspend back"
+    );
+
+    tenant.cleanup().await;
+}
+
+#[tokio::test]
+async fn kill_switch_pane_engages_lists_and_releases_a_tenant_switch() {
+    let vault = vault_keystore();
+    let tenant = provision_test_tenant(&vault).await;
+
+    let response = build_router(&tenant, "operator@example.com", "operator")
+        .oneshot(
+            Request::post("/platform-kill-switches")
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(format!(
+                    "scope=tenant&tenant_id={}&reason=non-payment",
+                    tenant.tenant_id
+                )))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_text(response).await;
+    assert!(
+        body.contains(&tenant.slug),
+        "the new switch must be listed by tenant slug"
+    );
+    assert!(
+        body.contains("non-payment"),
+        "the console shows the operator's reason"
+    );
+
+    let switch_id: Uuid = sqlx::query_scalar(
+        "SELECT id FROM platform_kill_switch WHERE tenant_id = $1 AND released_at IS NULL",
+    )
+    .bind(tenant.tenant_id)
+    .fetch_one(&tenant.control_pool)
+    .await
+    .expect("the engaged switch must exist");
+    let engaged_by: String =
+        sqlx::query_scalar("SELECT engaged_by FROM platform_kill_switch WHERE id = $1")
+            .bind(switch_id)
+            .fetch_one(&tenant.control_pool)
+            .await
+            .expect("reading engaged_by failed");
+    assert_eq!(engaged_by, "operator@example.com");
+
+    let response = build_router(&tenant, "operator@example.com", "operator")
+        .oneshot(
+            Request::post(format!("/platform-kill-switches/{switch_id}/release"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let released: bool = sqlx::query_scalar(
+        "SELECT released_at IS NOT NULL FROM platform_kill_switch WHERE id = $1",
+    )
+    .bind(switch_id)
+    .fetch_one(&tenant.control_pool)
+    .await
+    .expect("reading the switch failed");
+    assert!(released);
+
+    let audited: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM platform_audit WHERE tenant_id = $1 \
+         AND action IN ('platform_kill_switch.engage', 'platform_kill_switch.release')",
+    )
+    .bind(tenant.tenant_id)
+    .fetch_one(&tenant.control_pool)
+    .await
+    .expect("counting platform_audit rows failed");
+    assert_eq!(audited, 2, "engage and release must each be audited");
+
+    tenant.cleanup().await;
+}
+
+#[tokio::test]
+async fn kill_switch_pane_is_operator_only() {
+    let vault = vault_keystore();
+    let tenant = provision_test_tenant(&vault).await;
+
+    let response = build_router(&tenant, "viewer@example.com", "viewer")
+        .oneshot(
+            Request::post("/platform-kill-switches")
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(format!(
+                    "scope=tenant&tenant_id={}&reason=nope",
+                    tenant.tenant_id
+                )))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+    let engaged: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM platform_kill_switch WHERE tenant_id = $1",
+    )
+    .bind(tenant.tenant_id)
+    .fetch_one(&tenant.control_pool)
+    .await
+    .expect("counting switches failed");
+    assert_eq!(engaged, 0);
 
     tenant.cleanup().await;
 }

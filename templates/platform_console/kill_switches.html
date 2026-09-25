@@ -1,0 +1,69 @@
+{% extends "platform_console/base.html" %}
+
+{% block title %}Platform kill switches{% endblock %}
+
+{% block content %}
+<h1>Platform kill switches</h1>
+<p class="note">A platform switch overrides every tenant's own kill switches and cannot be released by the
+tenant. Queued messages are held, never discarded, and ramp back in at each tenant's release rate when
+the switch is released. Auth/OTP traffic is not affected &mdash; suspend the tenant to stop that too.</p>
+
+{% if let Some(message) = message %}
+<div class="panel"><p>{{ message }}</p></div>
+{% endif %}
+
+<div class="panel" data-signals="{scope: 'tenant'}">
+    <h2>Engage</h2>
+    <form data-on-submit__prevent="@post('/platform-kill-switches', {contentType: 'form'})">
+        <div class="field">
+            <label for="scope">Scope</label>
+            <select id="scope" name="scope" data-bind="scope">
+                <option value="tenant">tenant &mdash; one tenant</option>
+                <option value="platform">platform &mdash; every tenant in this region</option>
+            </select>
+        </div>
+        <div class="field" data-show="$scope == 'tenant'">
+            <label for="tenant_id">Tenant</label>
+            <select id="tenant_id" name="tenant_id">
+                {% for tenant in tenants %}
+                <option value="{{ tenant.id }}">{{ tenant.slug }} ({{ tenant.status }})</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="field">
+            <label for="reason">Reason (mandatory; operator-facing only &mdash; the tenant sees a generic label)</label>
+            <input id="reason" type="text" name="reason" required>
+        </div>
+        <button type="submit" class="danger">Engage</button>
+    </form>
+</div>
+
+<div class="panel">
+    <h2>Active switches</h2>
+    {% if rows.is_empty() %}
+    <p class="note">No platform switches currently engaged.</p>
+    {% else %}
+    <table>
+        <thead>
+            <tr><th>Scope</th><th>Target</th><th>Engaged by</th><th>Engaged at</th><th>Reason</th><th></th></tr>
+        </thead>
+        <tbody>
+            {% for row in rows %}
+            <tr>
+                <td><span class="pill">{{ row.scope }}</span></td>
+                <td>{{ row.target }}</td>
+                <td>{{ row.engaged_by }}</td>
+                <td>{{ row.engaged_at }}</td>
+                <td>{{ row.reason }}</td>
+                <td>
+                    <form class="inline" data-on-submit__prevent="@post('/platform-kill-switches/{{ row.id }}/release', {contentType: 'form'})">
+                        <button type="submit" class="primary">Release</button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+</div>
+{% endblock %}

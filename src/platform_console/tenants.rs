@@ -10,11 +10,17 @@ use axum::response::{IntoResponse, Response};
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
+use crate::platform_kill_switch;
+use crate::platform_kill_switch::configure::ConfigureError;
 use crate::tenant::model::status;
 use crate::tenant::repo as tenant_repo;
 
 use super::{AppState, PlatformAuthedUser, render, require_role};
 use crate::platform_auth::role;
+
+/// The `platform_kill_switch.reason` suspend records (T-058) -- operator-
+/// facing only; the tenant's admin panel shows a generic label instead.
+const SUSPEND_REASON: &str = "tenant suspended";
 
 #[derive(Template)]
 #[template(path = "platform_console/tenants.html")]
@@ -129,10 +135,40 @@ pub async fn suspend(
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
 
+    // T-058: `status = 'suspended'` stops ingest and the OTP paths (via
+    // `resolve_producer`) but not the dispatcher, which never re-reads
+    // tenant status -- so suspend also engages a tenant-scope platform
+    // switch, in this same transaction, to hold the queued backlog too. A
+    // switch already engaged for this tenant is fine: the tenant is held
+    // either way.
+    let notify_targets = match platform_kill_switch::configure::engage_tx(
+        &mut tx,
+        platform_kill_switch::model::scope::TENANT,
+        Some(id),
+        SUSPEND_REASON,
+        &identity.actor,
+    )
+    .await
+    {
+        Ok(outcome) => outcome.notify_targets,
+        Err(ConfigureError::AlreadyEngaged) => Vec::new(),
+        Err(err) => {
+            tracing::error!(%err, tenant_id = %id, "platform-console: failed to engage the suspend platform switch");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+
     if let Err(err) = tx.commit().await {
         tracing::error!(%err, tenant_id = %id, "platform-console: failed to commit suspend transaction");
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
+
+    platform_kill_switch::configure::notify_tenants(
+        &state.control_pool,
+        &state.base_db_url,
+        &notify_targets,
+    )
+    .await;
 
     tenants_page(&state.control_pool, identity.actor, identity.role).await
 }

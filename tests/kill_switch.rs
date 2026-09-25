@@ -437,6 +437,7 @@ async fn release_ramp_admits_at_most_release_rate_rows_per_batch() {
         &switch,
         2,
         Utc::now() + chrono::Duration::minutes(2),
+        &ChannelExclusion::default(),
     )
     .await
     .expect("claim_for_scope failed");

@@ -58,6 +58,13 @@ async fn drop_test_tenant(control_pool: &PgPool, database_name: &str, slug: &str
     .bind(slug)
     .execute(control_pool)
     .await;
+    // T-058: platform_kill_switch references tenant -- delete it first.
+    let _ = sqlx::query(
+        "DELETE FROM platform_kill_switch WHERE tenant_id = (SELECT id FROM tenant WHERE slug = $1)",
+    )
+    .bind(slug)
+    .execute(control_pool)
+    .await;
     let _ = sqlx::query(
         "DELETE FROM platform_audit WHERE tenant_id = (SELECT id FROM tenant WHERE slug = $1)",
     )
@@ -626,6 +633,69 @@ async fn scheduled_queue_filters_by_producer_and_cancel_removes_row() {
         "cancelled row must drop out of the listing"
     );
     assert!(body.contains(&second.to_string()));
+
+    tenant.cleanup().await;
+}
+
+/// T-058: a platform switch shows on the tenant's own kill-switch page as a
+/// distinct, non-actionable suspension -- a generic label, never the
+/// operator's reason, and no release control -- on the plain view and on
+/// the page re-rendered after the tenant engages its own switch.
+#[tokio::test]
+async fn platform_suspension_is_shown_as_a_non_actionable_generic_block() {
+    let vault = vault_keystore();
+    let tenant = provision_test_tenant(&vault).await;
+
+    let (outcome, _) = messgr::platform_kill_switch::configure::engage(
+        &tenant.control_pool,
+        &tenant.control_url,
+        messgr::platform_kill_switch::model::scope::TENANT,
+        Some(tenant.tenant_id),
+        "non-payment since march",
+        "operator@example.com",
+    )
+    .await
+    .expect("engaging platform switch failed");
+
+    let vault = Arc::new(vault);
+    let router = build_router(&tenant, vault.clone(), "ops-agent", "comms_ops");
+    let response = router
+        .oneshot(
+            Request::get(format!("/t/{}/ui/admin/kill-switches", tenant.slug))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_text(response).await;
+    assert!(body.contains("Suspended by the platform operator"));
+    assert!(
+        !body.contains("non-payment since march"),
+        "the operator's reason is provider-internal and must not reach the tenant"
+    );
+    assert!(
+        !body.contains(&outcome.id.to_string()),
+        "the platform switch must offer no release control (its id never appears)"
+    );
+
+    let router = build_router(&tenant, vault.clone(), "ops-agent", "comms_ops");
+    let response = router
+        .oneshot(
+            Request::post(format!("/t/{}/admin/kill-switches", tenant.slug))
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from("scope=global&on_queued=hold&reason=own-drill"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(
+        body_text(response)
+            .await
+            .contains("Suspended by the platform operator"),
+        "the block must survive the re-render after a tenant engage"
+    );
 
     tenant.cleanup().await;
 }

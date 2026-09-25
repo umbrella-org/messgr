@@ -515,7 +515,7 @@ CREATE TABLE tenant_schema_version (             -- migrations run N times; drif
 );
 
 CREATE TABLE platform_kill_switch (              -- operator-level; overrides tenant switches (§5.2)
-                                                  -- cloud-only; unread until cloud enablement (step 19)
+                                                  -- cloud-only; read by dispatcher + ingest (T-058)
     id          uuid PRIMARY KEY,
     scope       text NOT NULL,                   -- platform | tenant
     tenant_id   uuid,
@@ -525,6 +525,8 @@ CREATE TABLE platform_kill_switch (              -- operator-level; overrides te
     released_by text,
     released_at timestamptz
 );
+-- T-058 constraints: scope IN (platform, tenant); tenant_id NULL iff scope = platform;
+-- tenant_id REFERENCES tenant(id); at most one live row per (scope, tenant_id).
 
 CREATE TABLE platform_audit (                    -- provisioning, suspension, break-glass
     id         uuid PRIMARY KEY,
