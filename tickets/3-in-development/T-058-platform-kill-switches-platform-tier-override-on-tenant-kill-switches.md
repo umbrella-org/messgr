@@ -227,3 +227,4 @@ step 19". Run `just docs-check`.
   (`src/platform_console/kill_switches.rs`) and flagged that neither T-057's task list nor this
   one's wires a real view into it; whoever refines this ticket further should add that task
 - 2026-09-25 — plan amended inline (applicability gate, still READY): blocking A1 — release must ramp, so platform switches are merged into KillSwitchCache as synthetic global/hold rows reusing the drain machinery; blocking A2 — user decided T-057 suspend also engages a tenant-scope switch; user decided generic tenant-facing label and folding the T-016 drain-ignores-engaged-switches bug (A15) into this ticket; inline fixes A3–A14 (ingest polls not LISTENs, constraints migration, fan-out targets/after-commit/best-effort, audit, console pane task, admin-panel read site, grouped CLI, isolated tests, OTP-untouched note, stale doc xrefs)
+- 2026-09-25 — READY → IN DEVELOPMENT: picked up
