@@ -10,6 +10,7 @@ use chrono::Utc;
 use sqlx::PgPool;
 use uuid::Uuid;
 
+use crate::kill_switch::cache::{ChannelExclusion, exclusion_for_channel};
 use crate::kill_switch::model::KillSwitch;
 
 use super::model::ClaimedOutbox;
@@ -105,12 +106,19 @@ pub async fn drain_released_scope(
 ) {
     loop {
         let leased_until = Utc::now() + LEASE_DURATION;
+        // Rebuilt every batch from the *engaged* set only (T-058 decision
+        // 5): a switch engaged mid-drain stops this drain touching its rows
+        // at once, and other draining scopes are deliberately not included
+        // -- two overlapping drains must not starve each other.
+        let engaged = ctx.kill_switches.active_snapshot().await;
+        let exclusion = exclusion_for_channel(engaged.iter(), &channel);
         let batch = match repo::claim_for_scope(
             &ctx.pool,
             Some(&channel),
             &kill_switch,
             release_rate,
             leased_until,
+            &exclusion,
         )
         .await
         {
@@ -247,6 +255,7 @@ pub async fn discard_engaged_scope(
             &kill_switch,
             batch_size,
             leased_until,
+            &ChannelExclusion::default(),
         )
         .await
         {

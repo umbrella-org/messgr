@@ -454,6 +454,34 @@ period, with producers/UI disabled and dispatchers stopped, converting to destro
 explicit end date -- is not built. §7.7 leaves it pending a pricing decision (design-doc still-open
 item #13); `offboard-destroy` only ever destroys.
 
+== Platform kill switches
+
+[source,bash]
+----
+cargo run --bin messgr-control -- platform-kill-switch engage \
+    --scope tenant --tenant-slug acme --reason "non-payment" --actor operator@example.com
+cargo run --bin messgr-control -- platform-kill-switch engage \
+    --scope platform --reason "provider incident" --actor operator@example.com
+cargo run --bin messgr-control -- platform-kill-switch list
+cargo run --bin messgr-control -- platform-kill-switch release \
+    --id <id from list> --actor operator@example.com
+----
+
+`platform-kill-switch` (DESIGN.md §5.2 "Two tiers in cloud", T-058) engages and releases the
+provider's own kill switches, stored in the control database's `platform_kill_switch` table:
+`--scope tenant` holds one tenant's sending, `--scope platform` holds every tenant in the region.
+A platform switch overrides the tenant's own kill switches and the tenant cannot release it; see
+`kill-switches.adoc`'s "Platform-tier switches" section for exactly what it does and does not
+stop. The platform console's kill-switches pane (below) is the same operation behind a UI.
+
+`engage` prints the new switch's `id` and how many tenant databases were sent the fast-path
+`NOTIFY kill_switch` (`notified=`/`notify_failed=`). A notification failure never fails the
+engage -- the switch is already committed, and each tenant's dispatcher picks it up on its next
+30-second poll regardless. Only one switch can be live per exact scope (one region-wide, one per
+tenant); engaging a second is rejected. `release` is idempotent. Every engage, release, and
+rejected engage writes a `platform_audit` row (`platform_kill_switch.engage` /
+`platform_kill_switch.release`).
+
 == Platform console
 
 [source,bash]
@@ -484,8 +512,7 @@ connection and never holds Vault Transit credentials, so there is no code path b
 reach a tenant's Transit mount or decrypt a payload. It can see metadata -- tenant lifecycle
 state, `tenant_schema_version` drift, per-tenant health/volume counts (the same
 `comms_request.final_status` counts the `stats` subcommand above reports) -- and every
-state-changing action (suspend, and once T-058 lands, kill-switch engage/release) writes a
-`platform_audit` row. This visibility is disclosed to tenants as such (§11.4): operators see
+state-changing action (suspend, kill-switch engage/release) writes a `platform_audit` row. This visibility is disclosed to tenants as such (§11.4): operators see
 metadata, and every access is audited.
 
 The tenant list's offboard action is a visible, disabled "coming soon" control, not wired to
@@ -493,5 +520,12 @@ The tenant list's offboard action is a visible, disabled "coming soon" control, 
 client, which would break this server's "never holds Transit credentials" invariant. Destroying
 a tenant still goes through the `offboard-destroy` subcommand above, run by a human out-of-band.
 
-Kill switches are a stub pane ("not yet available") until T-058 ships platform-tier kill
-switches; every other pane is usable today.
+**Suspend holds the queue too.** Suspending a tenant sets its status to `suspended`, which
+stops ingest and the OTP paths, *and* (T-058) engages a tenant-scope platform kill switch in the
+same transaction, which stops `messgr-dispatcher` sending the tenant's already-queued backlog. The
+switch is not released automatically; release it from the kill-switches pane or with
+`platform-kill-switch release` when the tenant is reinstated.
+
+The kill-switches pane (T-058) lists every live platform switch with its tenant, engage time and
+the operator's reason, offers an engage form (scope, tenant, mandatory reason) and a release
+button per switch -- the same operations as the `platform-kill-switch` subcommands above.

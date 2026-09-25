@@ -5,6 +5,8 @@
 //! `LISTEN kill_switch` connection with a 30-second poll fallback.
 //! `messgr-ingest` connects through PgBouncer transaction mode, where
 //! `LISTEN` never fires (§2.3), so it refreshes on a plain poll only.
+//! Both also merge in the control database's `platform_kill_switch` rows
+//! for their tenant (T-058), so the platform tier rides the same cache.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -16,6 +18,7 @@ use uuid::Uuid;
 
 use super::model::{KillSwitch, scope};
 use super::repo;
+use crate::platform_kill_switch::repo as platform_repo;
 
 /// What `KillSwitchCache::refresh` observed changed since its previous
 /// snapshot. `newly_engaged` drives the discard-at-engage action;
@@ -29,37 +32,117 @@ pub struct RefreshDelta {
 }
 
 pub struct KillSwitchCache {
-    active: RwLock<HashMap<Uuid, KillSwitch>>,
+    active: RwLock<ActiveSet>,
 }
+
+/// Engaged switches keyed by id — the tenant's own `kill_switch` rows plus,
+/// when a refresh was given a platform source, each applicable
+/// `platform_kill_switch` row as its synthetic `global`/`hold` form (T-058
+/// decision 1). `platform_ids` remembers which entries are platform-tier,
+/// so `blocking_scope` can report them as such instead of as `global`.
+#[derive(Default)]
+struct ActiveSet {
+    switches: HashMap<Uuid, KillSwitch>,
+    platform_ids: HashSet<Uuid>,
+}
+
+/// `blocking_scope`'s answer for a platform-tier switch (T-058) — distinct
+/// from every tenant scope, so `messgr-ingest`'s `503` tells a producer
+/// team the provider suspended the tenant, not that its own ops team
+/// engaged a `global` switch.
+pub const PLATFORM_SCOPE: &str = "platform";
 
 impl KillSwitchCache {
     pub fn new() -> Self {
         Self {
-            active: RwLock::new(HashMap::new()),
+            active: RwLock::new(ActiveSet::default()),
         }
+    }
+
+    /// Re-reads the tenant's own active set and swaps it in, returning what
+    /// changed — `refresh_with_platform` without a platform source, for
+    /// callers with no control-database access.
+    pub async fn refresh(&self, pool: &PgPool) -> Result<RefreshDelta, sqlx::Error> {
+        self.refresh_with_platform(pool, None).await
     }
 
     /// Re-reads the active set and swaps it in, returning what changed.
     /// Rows are never deleted (DESIGN.md §5.2 — engage/release only ever
     /// update `released_at`), so an id present before and absent now was
     /// released, never dropped for any other reason.
-    pub async fn refresh(&self, pool: &PgPool) -> Result<RefreshDelta, sqlx::Error> {
-        let fresh = repo::list_active(pool).await?;
-        let fresh_ids: HashSet<Uuid> = fresh.iter().map(|s| s.id).collect();
+    ///
+    /// `platform`, when given, is `(control_pool, tenant_id)`: the
+    /// `platform_kill_switch` rows blocking this tenant are read in the same
+    /// refresh and merged in (T-058 decision 3), so the fan-out `NOTIFY`
+    /// that wakes the dispatcher's loop wakes it into a read that actually
+    /// sees them. If that control-database read fails, the previous
+    /// platform entries are carried over unchanged while the tenant's own
+    /// rows still refresh: a control-database blip must never look like a
+    /// platform switch releasing, and must never stop the tenant's own
+    /// switches taking effect either. A tenant-database read failure fails
+    /// the whole refresh, as before T-058.
+    pub async fn refresh_with_platform(
+        &self,
+        pool: &PgPool,
+        platform: Option<(&PgPool, Uuid)>,
+    ) -> Result<RefreshDelta, sqlx::Error> {
+        let mut fresh = repo::list_active(pool).await?;
+        let platform_rows = match platform {
+            None => Some(Vec::new()),
+            Some((control_pool, tenant_id)) => {
+                match platform_repo::list_active_for_tenant(control_pool, tenant_id)
+                    .await
+                {
+                    Ok(rows) => Some(rows),
+                    Err(err) => {
+                        tracing::error!(
+                            %err,
+                            %tenant_id,
+                            "platform_kill_switch read failed; keeping the last-known platform switches"
+                        );
+                        None
+                    }
+                }
+            }
+        };
 
         let mut guard = self.active.write().await;
+        let platform_ids: HashSet<Uuid> = match platform_rows {
+            Some(rows) => rows
+                .into_iter()
+                .map(|row| {
+                    fresh.push(row.as_kill_switch());
+                    row.id
+                })
+                .collect(),
+            None => {
+                fresh.extend(
+                    guard
+                        .platform_ids
+                        .iter()
+                        .filter_map(|id| guard.switches.get(id).cloned()),
+                );
+                guard.platform_ids.clone()
+            }
+        };
+        let fresh_ids: HashSet<Uuid> = fresh.iter().map(|s| s.id).collect();
+
         let released: Vec<KillSwitch> = guard
+            .switches
             .values()
             .filter(|s| !fresh_ids.contains(&s.id))
             .cloned()
             .collect();
         let newly_engaged: Vec<KillSwitch> = fresh
             .iter()
-            .filter(|s| !guard.contains_key(&s.id))
+            .filter(|s| !guard.switches.contains_key(&s.id))
             .cloned()
             .collect();
 
-        *guard = fresh.into_iter().map(|s| (s.id, s)).collect();
+        *guard = ActiveSet {
+            switches: fresh.into_iter().map(|s| (s.id, s)).collect(),
+            platform_ids,
+        };
 
         Ok(RefreshDelta {
             newly_engaged,
@@ -69,7 +152,8 @@ impl KillSwitchCache {
 
     /// The scope of whichever currently-active switch blocks this
     /// `(channel, producer_id, campaign_id)` tuple, if any —
-    /// `messgr-ingest`'s per-request check.
+    /// `messgr-ingest`'s per-request check. A platform-tier switch blocks
+    /// everything and is checked first, reported as `PLATFORM_SCOPE`.
     pub async fn blocking_scope(
         &self,
         channel: &str,
@@ -77,7 +161,11 @@ impl KillSwitchCache {
         campaign_id: Option<&str>,
     ) -> Option<String> {
         let guard = self.active.read().await;
+        if !guard.platform_ids.is_empty() {
+            return Some(PLATFORM_SCOPE.to_string());
+        }
         guard
+            .switches
             .values()
             .find(|s| s.matches(channel, producer_id, campaign_id))
             .map(|s| s.scope.clone())
@@ -88,7 +176,13 @@ impl KillSwitchCache {
     /// switches whose backlog hasn't finished ramping yet) to build one
     /// claim-exclusion set; see `exclusion_for_channel`.
     pub async fn active_snapshot(&self) -> Vec<KillSwitch> {
-        self.active.read().await.values().cloned().collect()
+        self.active
+            .read()
+            .await
+            .switches
+            .values()
+            .cloned()
+            .collect()
     }
 }
 
@@ -155,6 +249,10 @@ pub fn exclusion_for_channel<'a>(
 /// per this module's own doc comment). `on_delta` receives every refresh's
 /// `RefreshDelta`, including empty ones, so the dispatcher's caller can
 /// react to engages/releases; `messgr-ingest` passes a no-op closure.
+/// `platform`, if given, is `(control_pool, tenant_id)` and is passed to
+/// every `refresh_with_platform` (T-058): both `messgr-dispatcher` and
+/// `messgr-ingest` pass it, so a platform switch reaches them on the same
+/// tick as a tenant switch.
 /// `cancel`, if given, stops the loop as soon as it's notified — this is
 /// what lets `TenantRegistry` (T-031) actually tear down a per-tenant poll
 /// task on eviction rather than merely dropping its handle; `messgr-dispatcher`
@@ -167,9 +265,11 @@ pub async fn run_refresh_loop(
     poll_interval: Duration,
     mut on_delta: impl FnMut(RefreshDelta),
     cancel: Option<Arc<Notify>>,
+    platform: Option<(PgPool, Uuid)>,
 ) {
     loop {
-        match cache.refresh(&pool).await {
+        let platform_source = platform.as_ref().map(|(p, id)| (p, *id));
+        match cache.refresh_with_platform(&pool, platform_source).await {
             Ok(delta) => on_delta(delta),
             Err(err) => tracing::error!(%err, "kill_switch cache refresh failed"),
         }

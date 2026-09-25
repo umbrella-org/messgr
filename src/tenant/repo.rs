@@ -24,8 +24,8 @@ pub async fn find_by_slug(
 /// Looks up a tenant by its control-database id, the shape `resolve_producer`
 /// (T-006) hands back — `find_by_slug`'s counterpart for callers that only
 /// have `tenant_id` (T-011's tenant registry).
-pub async fn find_by_id(
-    pool: &PgPool,
+pub async fn find_by_id<'e>(
+    pool: impl sqlx::PgExecutor<'e>,
     tenant_id: Uuid,
 ) -> Result<Option<Tenant>, sqlx::Error> {
     sqlx::query_as::<_, Tenant>(
@@ -168,7 +168,9 @@ pub async fn mark_status_tx(
 
 /// Every registered tenant, newest first — the platform console's tenant
 /// list (T-057); no caller before this ticket needed a bare list-all.
-pub async fn list(pool: &PgPool) -> Result<Vec<Tenant>, sqlx::Error> {
+pub async fn list<'e>(
+    pool: impl sqlx::PgExecutor<'e>,
+) -> Result<Vec<Tenant>, sqlx::Error> {
     sqlx::query_as::<_, Tenant>(
         r#"
         SELECT id, slug, region, database_name, vault_mount, vault_role_id, vault_pepper_wrapped, webhook_token, status, created_at

@@ -97,6 +97,11 @@ pub fn router(state: AppState) -> Router {
         .route("/ui/health", get(health::ui_health))
         .route("/ui/audit", get(audit::ui_audit))
         .route("/ui/kill-switches", get(kill_switches::ui_kill_switches))
+        .route("/platform-kill-switches", post(kill_switches::engage))
+        .route(
+            "/platform-kill-switches/{id}/release",
+            post(kill_switches::release),
+        )
         .route("/assets/datastar.js", get(datastar_asset))
         .with_state(state)
 }
