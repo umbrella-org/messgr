@@ -65,13 +65,28 @@ pub async fn claim(
 /// since it must hand each row to that channel's own `Sender`); `None`
 /// (the discard-at-engage task, which never sends) matches every channel a
 /// channel-agnostic scope (`global`/`producer`/`campaign`) covers.
+///
+/// `exclusion` is every *other* still-engaged switch's exclusion, applied
+/// exactly as `claim` applies it (T-058 decision 5): a released scope's
+/// drain must never claim a row some other switch still holds — a tenant
+/// `campaign` switch still engaged when a `global` one releases, or a
+/// platform suspension still engaged when a tenant switch releases (a
+/// platform switch overrides a tenant's, never the reverse, §5.2). Rows it
+/// skips are ramped in later by that other switch's own release drain. The
+/// discard-at-engage task passes `ChannelExclusion::default()`: discarding
+/// sends nothing, so no other switch has anything to protect from it.
 pub async fn claim_for_scope(
     pool: &PgPool,
     channel: Option<&str>,
     kill_switch: &KillSwitch,
     limit: i64,
     leased_until: DateTime<Utc>,
+    exclusion: &ChannelExclusion,
 ) -> Result<Vec<ClaimedOutbox>, sqlx::Error> {
+    if exclusion.blocked_entirely {
+        return Ok(Vec::new());
+    }
+
     let mut qb = sqlx::QueryBuilder::new("UPDATE outbox SET leased_until = ");
     qb.push_bind(leased_until);
     qb.push(
@@ -133,6 +148,12 @@ pub async fn claim_for_scope(
         }
         _ => return Ok(Vec::new()),
     }
+
+    qb.push(" AND producer_id <> ALL(");
+    qb.push_bind(exclusion.blocked_producer_ids.clone());
+    qb.push(") AND (campaign_id IS NULL OR campaign_id <> ALL(");
+    qb.push_bind(exclusion.blocked_campaign_ids.clone());
+    qb.push("))");
 
     qb.push(" ORDER BY priority, next_attempt_at LIMIT ");
     qb.push_bind(limit);

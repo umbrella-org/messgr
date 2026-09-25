@@ -115,6 +115,48 @@ Re-enabling is the same shape, with `auth_enabled = true` and `action = 'auth_en
 these against the *control* database (`CONTROL_DATABASE_URL`), not the tenant database
 `kill_switch` lives in.
 
+== Platform-tier switches
+
+In the cloud deployment, the provider has its own tier of kill switches (DESIGN.md §5.2 "Two
+tiers in cloud", T-058), kept in the *control* database's `platform_kill_switch` table rather
+than the tenant's `kill_switch` table. They are engaged and released only by provider staff --
+with `messgr-control platform-kill-switch` or the platform console's kill-switches pane (see
+`control-plane-cli.adoc`) -- never from the tenant's admin panel. There are two scopes:
+`tenant` (one tenant, for abuse or non-payment) and `platform` (every tenant in the region, for a
+platform-wide incident).
+
+**A platform switch overrides the tenant's switches, never the reverse.** While one is engaged,
+the tenant is treated exactly as if it had a `global` switch of its own with `on_queued = hold`:
+`messgr-ingest` rejects every new request with `503` and scope `platform` (so a producer team can
+tell the provider suspended the tenant, not their own ops team), and `messgr-dispatcher` claims
+nothing for the tenant on any channel. Queued messages are always *held*, never discarded -- a
+suspension does not touch the tenant's data. Nothing the tenant does with its own switches can
+release it.
+
+**Release ramps.** Releasing a platform switch drains the held backlog at the tenant's
+`kill_switch_release_rate`, exactly like releasing a tenant switch; rows whose `expires_at` has
+passed are written `expired`, not sent late. The ramp still honours every switch the *tenant*
+has engaged: a campaign the tenant is holding stays held after the platform switch releases (and,
+likewise, releasing a tenant switch never drains anything past a platform switch that is still
+engaged). Every release drain -- tenant or platform -- skips rows another still-engaged switch
+covers; those rows ramp in when that switch releases.
+
+**Propagation.** Engaging or releasing sends `NOTIFY kill_switch` into each affected tenant's
+own database (the channel `messgr-dispatcher` already listens on), so a dispatcher usually reacts
+within seconds; its 30-second poll re-reads the control database regardless, so a missed or
+failed notification delays a switch by at most one poll, never loses it. `messgr-ingest` does
+not listen (PgBouncer, §2.3) and picks the switch up on its 5-second poll.
+
+**Auth/OTP is not affected**, the same as for every other switch on this page. To stop a
+tenant's OTP traffic as well, suspend the tenant from the platform console: suspension blocks
+ingest and OTP by tenant status *and* engages a `tenant`-scope platform switch to hold the queued
+backlog.
+
+**What the tenant sees.** The tenant's admin panel shows an engaged platform switch as a
+separate, clearly marked "Suspended by the platform operator -- contact support" block with the
+time it took effect, above the tenant's own switches. It has no release control, and it never
+shows the operator's reason, which stays provider-internal.
+
 == What "held" means
 
 A row under an active switch is left exactly as it was queued: not leased, not retried, not

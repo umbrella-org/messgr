@@ -14,6 +14,9 @@ use messgr::mtls;
 use messgr::orphan_reconcile::reconcile::run_for_tenant as run_orphan_reconcile;
 use messgr::partition_lifecycle::lifecycle::run_for_tenant as run_partition_lifecycle;
 use messgr::platform_auth::mock::MockPlatformProvider;
+use messgr::platform_kill_switch::configure as platform_kill_switch_configure;
+use messgr::platform_kill_switch::model::scope as platform_kill_switch_scope;
+use messgr::platform_kill_switch::repo as platform_kill_switch_repo;
 use messgr::producer::dev_pki;
 use messgr::producer::register::{disable_producer, list_producers, register_producer};
 use messgr::producer_quota::configure::{
@@ -209,6 +212,15 @@ enum Command {
         #[arg(long)]
         since: Option<chrono::NaiveDate>,
     },
+    /// Engage, release, or list platform-tier kill switches (DESIGN.md §5.2
+    /// "Two tiers in cloud", T-058): provider-operated switches that
+    /// suspend one tenant's sending or the whole region's, overriding every
+    /// tenant's own kill switches. Auth/OTP is never affected. The platform
+    /// console's kill-switch pane is the same operation behind a UI.
+    PlatformKillSwitch {
+        #[command(subcommand)]
+        command: PlatformKillSwitchCommand,
+    },
     /// Start the platform console (T-057, DESIGN.md §11.4): a long-lived
     /// HTTP server for provider staff, in a separate auth realm from the
     /// tenant admin panel. Connects a `control_pool` only -- this binary
@@ -225,6 +237,41 @@ enum Command {
     },
     /// Print the binary name and version, then exit.
     Version,
+}
+
+#[derive(Subcommand)]
+enum PlatformKillSwitchCommand {
+    /// Engage a switch. `--scope tenant` needs `--tenant-slug`;
+    /// `--scope platform` (every tenant in this region) must not have one.
+    /// Held messages are never discarded.
+    Engage {
+        #[arg(
+            long,
+            value_parser = clap::builder::PossibleValuesParser::new([
+                platform_kill_switch_scope::PLATFORM,
+                platform_kill_switch_scope::TENANT,
+            ])
+        )]
+        scope: String,
+        #[arg(long = "tenant-slug")]
+        tenant_slug: Option<String>,
+        /// Operator-facing only -- the tenant's admin panel shows a generic
+        /// "suspended by the platform operator" label instead.
+        #[arg(long)]
+        reason: String,
+        #[arg(long)]
+        actor: String,
+    },
+    /// Release a switch by id (see `list`). The held backlog ramps back in
+    /// at each tenant's `kill_switch_release_rate`, not all at once.
+    Release {
+        #[arg(long)]
+        id: uuid::Uuid,
+        #[arg(long)]
+        actor: String,
+    },
+    /// List every currently-engaged platform switch.
+    List,
 }
 
 #[derive(Subcommand)]
@@ -1746,6 +1793,79 @@ async fn run(
                 }
             }
         }
+        Command::PlatformKillSwitch { command } => match command {
+            PlatformKillSwitchCommand::Engage {
+                scope,
+                tenant_slug,
+                reason,
+                actor,
+            } => {
+                let tenant_id = match tenant_slug {
+                    Some(slug) => Some(
+                        find_by_slug(&control_pool, &slug)
+                            .await
+                            .map_err(|err| format!("tenant lookup failed: {err}"))?
+                            .ok_or_else(|| {
+                                format!("no tenant registered with slug {slug:?}")
+                            })?
+                            .id,
+                    ),
+                    None => None,
+                };
+                let (outcome, report) = platform_kill_switch_configure::engage(
+                    &control_pool,
+                    &config.control_database_url,
+                    &scope,
+                    tenant_id,
+                    &reason,
+                    &actor,
+                )
+                .await
+                .map_err(|err| {
+                    format!("failed to engage platform kill switch: {err}")
+                })?;
+                println!(
+                    "outcome=engaged id={} notified={} notify_failed={}",
+                    outcome.id, report.notified, report.failed
+                );
+            }
+            PlatformKillSwitchCommand::Release { id, actor } => {
+                let (outcome, report) = platform_kill_switch_configure::release(
+                    &control_pool,
+                    &config.control_database_url,
+                    id,
+                    &actor,
+                )
+                .await
+                .map_err(|err| {
+                    format!("failed to release platform kill switch {id}: {err}")
+                })?;
+                println!(
+                    "outcome={} notified={} notify_failed={}",
+                    outcome.outcome, report.notified, report.failed
+                );
+            }
+            PlatformKillSwitchCommand::List => {
+                let rows = platform_kill_switch_repo::list_active(&control_pool)
+                    .await
+                    .map_err(|err| {
+                        format!("failed to list platform kill switches: {err}")
+                    })?;
+                if rows.is_empty() {
+                    println!("no platform kill switches engaged");
+                }
+                for row in rows {
+                    let tenant = row
+                        .tenant_id
+                        .map(|id| id.to_string())
+                        .unwrap_or_else(|| "-".to_string());
+                    println!(
+                        "id={} scope={} tenant_id={tenant} engaged_by={} engaged_at={} reason={:?}",
+                        row.id, row.scope, row.engaged_by, row.engaged_at, row.reason,
+                    );
+                }
+            }
+        },
         Command::Serve {
             listen_addr,
             health_listen_addr,

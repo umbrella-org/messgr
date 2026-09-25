@@ -29,6 +29,7 @@ use crate::kill_switch::repo as kill_switch_repo;
 use crate::outbox_query::filter::OutboxQueueFilter;
 use crate::outbox_query::model::OutboxQueueRow;
 use crate::outbox_query::repo as outbox_query_repo;
+use crate::platform_kill_switch::repo as platform_kill_switch_repo;
 use crate::producer::model::Producer;
 use crate::producer::register as producer_register;
 use crate::producer::repo as producer_repo;
@@ -242,6 +243,12 @@ struct KillSwitchesTemplate {
     role: String,
     tenant_slug: String,
     active: Vec<KillSwitch>,
+    /// Active platform-tier switches blocking this tenant (T-058) -- shown
+    /// as a distinct, non-actionable suspension block, never as rows with a
+    /// release button. Only the engage time is carried to the template: the
+    /// operator's reason is provider-internal (T-058's generic-label
+    /// decision).
+    platform_suspended_since: Vec<DateTime<Utc>>,
 }
 
 #[derive(Template)]
@@ -250,14 +257,27 @@ struct BlastRadiusTemplate {
     rows: Vec<(String, i64)>,
 }
 
+/// Shared by the view and by the engage/release handlers, so the platform
+/// suspension block (T-058) is present on every render of this page, not
+/// only on a fresh load.
 async fn kill_switches_page(
     pool: &PgPool,
+    control_pool: &PgPool,
+    tenant_id: Uuid,
     actor: String,
     role: String,
     tenant_slug: String,
 ) -> Response {
+    let platform_suspended_since =
+        match platform_kill_switch_repo::list_active_for_tenant(control_pool, tenant_id)
+            .await
+        {
+            Ok(rows) => rows.into_iter().map(|row| row.engaged_at).collect(),
+            Err(err) => return database_error(err),
+        };
     match kill_switch_repo::list_active(pool).await {
         Ok(active) => render(KillSwitchesTemplate {
+            platform_suspended_since,
             actor,
             role,
             tenant_slug,
@@ -271,11 +291,20 @@ pub async fn ui_kill_switches(
     AuthedUser(identity): AuthedUser,
     tenant: TenantContext,
     Path(TenantSlugPath { tenant_slug }): Path<TenantSlugPath>,
+    State(state): State<AppState>,
 ) -> Response {
     if let Err(status) = require_role(&identity, &[role::COMMS_OPS]) {
         return status.into_response();
     }
-    kill_switches_page(&tenant.pool, identity.actor, identity.role, tenant_slug).await
+    kill_switches_page(
+        &tenant.pool,
+        &state.control_pool,
+        tenant.tenant_id,
+        identity.actor,
+        identity.role,
+        tenant_slug,
+    )
+    .await
 }
 
 #[derive(Debug, Deserialize)]
@@ -341,8 +370,15 @@ pub async fn engage_kill_switch(
 
     match result {
         Ok(_) => {
-            kill_switches_page(&tenant.pool, identity.actor, identity.role, tenant_slug)
-                .await
+            kill_switches_page(
+                &tenant.pool,
+                &state.control_pool,
+                tenant.tenant_id,
+                identity.actor,
+                identity.role,
+                tenant_slug,
+            )
+            .await
         }
         Err(kill_switch_configure::ConfigureError::AlreadyEngaged) => {
             StatusCode::CONFLICT.into_response()
@@ -374,8 +410,15 @@ pub async fn release_kill_switch(
     .await
     {
         Ok(_) => {
-            kill_switches_page(&tenant.pool, identity.actor, identity.role, tenant_slug)
-                .await
+            kill_switches_page(
+                &tenant.pool,
+                &state.control_pool,
+                tenant.tenant_id,
+                identity.actor,
+                identity.role,
+                tenant_slug,
+            )
+            .await
         }
         Err(kill_switch_configure::ConfigureError::Database(err)) => {
             database_or_rejected(err)
