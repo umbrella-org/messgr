@@ -215,7 +215,162 @@ step 19". Run `just docs-check`.
 
 ## Review
 
-<!-- empty until IN REVIEW -->
+### Reviewer independence (step 0)
+
+Independent. This review session had no hand in
+`feat/T-058-platform-kill-switches-platform-tier-override-on-tenant-kill-switches` (commit
+`01b093f`); the branch was first seen here after it landed on the remote, so nothing needed
+delegating.
+
+### In-tree stale-branch check (step 0a)
+
+`pickle` is not installed in this review's environment, so `pickle doctor` could not run —
+recorded as a skip, not a pass. Checked by hand instead: the branch's merge-base is `652b3fc`
+(the pickup commit on `main`), and `git diff --name-only origin/main...HEAD` lists no `tickets/`
+path, so the worktree carried no stale ticket copy; the ticket was read from `origin/main` at
+`aa6a81a`.
+
+### Implementation audit (step 2)
+
+- Tasks 1–9: all present in the files the plan names — `migrations/control/0006_…sql`,
+  `src/platform_kill_switch/{mod,model,repo,configure}.rs`, `src/kill_switch/cache.rs`
+  (`refresh_with_platform`, `PLATFORM_SCOPE`, `run_refresh_loop`'s `platform` arg),
+  `src/bin/dispatcher.rs`, `src/dispatcher/{repo,drain}.rs`, `src/tenant/registry.rs`,
+  `src/platform_console/{tenants,kill_switches,mod}.rs`, `src/bin/control.rs`,
+  `src/query_api/admin.rs`, both templates. The console pane T-057 left as a stub (and flagged
+  as unwired) is now a real view. **Met.**
+- `just build` (`cargo build --all-targets`): clean. `just lint` (`cargo fmt --all -- --check`
+  + `cargo clippy --all-targets --all-features -- -D warnings`): clean. **Met.**
+- `just test`, re-run on local Postgres 16 + dev-mode Vault 1.20.4 with `cargo test
+  --no-fail-fast`: every suite green, including `tests/platform_kill_switch.rs` 10/10,
+  `tests/platform_console.rs` 7/7, `tests/admin_panel.rs` 4/4, `tests/kill_switch.rs` 6/6,
+  `tests/ingest.rs` 22/22. Two environment notes, neither about this branch: (a) the four mTLS
+  suites (`ingest`, `kill_switch`, `sms_sender`, `webhook`) need this sandbox's HTTPS proxy
+  bypassed (`NO_PROXY='*'` for the local-only test process), exactly as the implementer
+  recorded — without it all 22 `ingest` tests fail with a proxy connection reset; (b)
+  `tests/dispatcher.rs::inserting_an_outbox_row_notifies_the_channels_listener`, untouched by
+  this branch, hung once for more than 10 minutes in its setup (an idle `LISTEN "outbox_sms"`,
+  no insert yet issued, so before its own 5 s timeout); the binary was killed and
+  `tests/dispatcher.rs` then passed 30/30 on each of three isolated re-runs. **Met.**
+- Acceptance-test bullets 2a–2g each map to a test in `tests/platform_kill_switch.rs`,
+  `tests/platform_console.rs` or `tests/admin_panel.rs`. **Met.**
+- Manual acceptance step 3 (compose stack, CLI engage, dispatcher stops within one 30 s tick):
+  **not run** — no compose stack here, and the implementer did not run it either. The automated
+  fan-out and cache tests cover the same path short of a live dispatcher process.
+- Confirmed decisions 1–8: honoured. Decision 1 — `PlatformKillSwitch::as_kill_switch` is a
+  `global`/`hold` row with the platform id; `blocking_scope` checks `platform_ids` first.
+  Decision 2 — `NOTIFY kill_switch` into each tenant database, no control-DB listener. Decision
+  3 — a failed control read carries the previous platform entries over while tenant rows still
+  refresh (`a_failed_platform_read_keeps_…`). Decision 4 — no release path in the admin panel.
+  Decision 5 — `claim_for_scope` takes `exclusion`, `drain_released_scope` rebuilds it from
+  `active_snapshot()` each batch, discard passes the default. Decision 6 — partial unique index
+  plus `ON CONFLICT … DO NOTHING`. Decision 7 — every engage/release/rejection audited via
+  `record_tx` in the write's own transaction. Decision 8 — fan-out after commit, best-effort,
+  status-filtered for region-wide switches.
+
+**Addendum step 2.** (1) Not transcribed: the migration's own claims were checked
+independently — a probe in a rolled-back transaction showed a second live `scope='platform'`
+row (NULL `tenant_id`) deduped by `ON CONFLICT` (0 rows returned, 1 live row), and both CHECKs
+firing (`platform_kill_switch_scope_tenant_check` on `('tenant', NULL)`,
+`platform_kill_switch_scope_check` on `'region'`); the FK's premise holds — nothing in `src/` or
+`migrations/` deletes a `tenant` row. (2) NULL semantics: handled by the `COALESCE` expression,
+verified as above. (3) Leases: `claim_for_scope`'s new early return on `blocked_entirely`
+leases nothing (`release_drain_sends_nothing_…` asserts `leased_until IS NULL`); the new "live
+switch" state has a release path in the CLI and the console. (4) No secrets. (5) No
+customer-data table; `erasure_coverage` green. (6) No new columns. (7) Invariant 1: only
+`src/ingest/handler.rs:68` calls `blocking_scope`; `src/otp/` and `src/sms_sender/` never read
+`kill_switches`, and the check is not in `resolve_producer`. Invariant 3: unchanged — a kill
+switch rejection at ingest is the pre-existing T-016 pattern, not a gate. (8) `justfile` and
+`.github/workflows/` untouched.
+
+### Quality audit (step 3)
+
+- Idiomatic and consistent with `kill_switch::configure`'s shape; `ConfigureError` leaves the
+  caller's transaction committable on every domain outcome, which is what lets T-057's suspend
+  treat `AlreadyEngaged` as success.
+- Askama auto-escaping applies to the operator's free-text reason in the console; the admin
+  panel never receives it (`platform_suspended_since` carries only timestamps).
+- **Mutation checks (addendum step 3).** Dropping the platform merge in
+  `refresh_with_platform` (rows read but never pushed into the active set) turned 3 tests red;
+  removing `claim_for_scope`'s exclusion turned both release-drain tests red. Tree restored
+  after each. The assertions can fail.
+- Test isolation: the region-wide tests are serialized in-file and release their own switches
+  on panic via `isolated`; cross-binary interference is ruled out by `cargo test` running
+  binaries sequentially. See F1 for the one case not covered.
+
+### Consistency audit (step 4)
+
+- The `refresh`/`refresh_with_platform` split keeps every pre-T-058 caller's contract; the two
+  production callers both pass a platform source.
+- `claim_for_scope`'s exclusion SQL is the same `<> ALL` shape `claim` uses.
+- The console's engage/release handlers follow `tenants::suspend`'s shape (role check, service
+  call, re-render).
+- Found: F2 (suspend engages a switch that has no automatic release counterpart), F3 (switch
+  lifecycle vs. offboarding), F4 (registry poll in OTP processes).
+
+### Documentation audit (step 4a)
+
+- Coverage: `platform-kill-switch {engage,release,list}` documented in
+  `control-plane-cli.adoc`; the platform tier (two-tier rule, release ramp, propagation,
+  OTP unaffected, suspend relationship, what the tenant sees) in `kill-switches.adoc`; the
+  console pane described alongside the other panes. The manual documents the console by pane,
+  not by HTTP route (the T-057 suspend route is not listed either), so the two new `POST`
+  routes follow the established convention. **Met.**
+- Whole-tree sweep: no remaining "stub", "until T-058" or "unread until step 19" claims under
+  `docs/`, `development/`, `src/` or `migrations/`.
+- Build: `snowball` is not installed here (nor was it for the implementer). Approximated with
+  `asciidoctor 2.0.26 --failure-level WARN docs/user-manual.adoc` on the branch and on
+  `origin/main`: both exit 0 with no warnings. The PDF/EPUB renders were not built.
+
+### Docs-readability pass (step 4b)
+
+Conscious skip: no docs-readability reviewer is configured in this session.
+
+### Findings (step 5)
+
+| id | severity | class | disposition | description | evidence | suggestion |
+|---|---|---|---|---|---|---|
+| F1 | non-blocking | test-gap | noted | No test engages a second live region-wide switch (`scope='platform'`, `tenant_id` NULL), which is the NULL case addendum step 2.2 exists for; only the tenant-scope duplicate is covered. The behaviour is correct. | Hand probe above: second `INSERT … ON CONFLICT` returned 0 rows, 1 live row. `tests/platform_kill_switch.rs:279` covers `scope::TENANT` only. | Add a region-wide duplicate-engage assertion the next time this suite is touched. |
+| F2 | non-blocking | design | noted | Suspend engages a tenant-scope switch, but there is no reinstate path to release it, and releasing the switch on its own resumes dispatch for a tenant still `suspended` (ingest and OTP stay blocked). As designed (applicability-gate decision A2) and documented, but the two halves of "suspend" can now drift apart. | `src/platform_console/mod.rs:95-104`: `/tenants/{id}/suspend` has no counterpart. `control-plane-cli.adoc`'s "Suspend holds the queue too" tells the operator to release "when the tenant is reinstated". No ticket owns reinstatement. | Whoever builds reinstatement should release the suspend switch in the same transaction. |
+| F3 | non-blocking | design | noted | A tenant-scope switch outlives its tenant's `offboard-destroy`: it stays live and listed indefinitely, and releasing it fans out to a dropped database (counted as `notify_failed`). The console's tenant picker also offers `provisioning` and `offboarding_destroy` tenants. Cosmetic: release still works. | `src/platform_kill_switch/configure.rs` `fan_out_targets`: the `scope::TENANT` arm does not filter by status. `templates/platform_console/kill_switches.html`: the tenant `<option>` loop is unfiltered. | None needed unless the console list gets noisy. |
+| F4 | non-blocking | design | noted | `messgr-otp` and `messgr-sms-sender` open tenants through `TenantRegistry`, whose 5 s poll now also reads `platform_kill_switch` from the control database. Neither process ever reads the result. Invariant 1 is intact, and the tenant `kill_switch` read was already unused there before T-058. | `src/tenant/registry.rs:208-218`. `grep -rn kill_switch src/otp src/sms_sender` returns only doc comments. | Act only if control-DB load from OTP replicas shows up. |
+
+Disposition summary: 4 noted (F1–F4); 0 fixed inline, 0 folded, 0 new tickets.
+cost: estimated L, actual L
+
+### Governing documents (step 7)
+
+The branch reconciled `development/design/03-data-model.md` (drops "unread until step 19",
+records the 0006 constraints) and `04-gate-chain.md` (new "How the two tiers meet" paragraph,
+including the on-the-record correction that the T-016 drain ignored still-engaged switches).
+Decision 12 ("Release is drain-rate limited") is still accurate as written, and no Still-open
+item concerns platform switches. The branch did not bump `DESIGN.md`'s version stamp (still
+Version 11), which matches T-056's precedent. This review changes nothing in `DESIGN.md`, so the
+addendum's step 5 bump rule does not apply. `tickets/BOARD.md` was **not regenerated**: `pickle`
+is unavailable here, and `main`'s board was already stale before this review (it still lists
+T-058 under READY), so `pickle board sync` must be run where `pickle` is installed.
+
+### Impact sweep (step 8)
+
+No open ticket lists T-058 in `depends-on:` or names it. T-060 (READY) relies on "per-region
+kill switch … independence". T-058 scopes a region-wide switch to every tenant in *one* control
+database, and T-060 gives each region its own, so the assumption holds and is now a concrete,
+testable property. Flagged in T-060's History for its implementer; its plan is unchanged.
+
+### Checklist
+
+- [x] Reviewer independence settled (step 0): independent — no hand in the branch
+- [x] In-tree stale-branch check (step 0a): `pickle doctor` unavailable (skip recorded); checked by hand — branch diff carries no `tickets/` path
+- [x] Implementation audit — acceptance test re-run, tasks & criteria verified (steps 1, 2); manual compose step not run
+- [x] Quality audit (step 3), including two mutation checks
+- [x] Consistency audit (step 4)
+- [x] Documentation audit — coverage met, whole-tree sweep clean, docs build approximated with asciidoctor at WARN (snowball unavailable) (step 4a)
+- [x] Docs-readability pass — conscious skip: no reviewer configured (step 4b)
+- [x] Findings recorded with severity, class and disposition; disposition summary and cost line present (step 5)
+- [x] Ticket moved to `tickets/6-done/`; `## History` appended (step 6) — board regeneration pending `pickle board sync`
+- [x] Governing documents reconciled by the branch; no review edits needed (step 7)
+- [x] Remaining-tickets impact sweep done — T-060 flagged (step 8)
+- [x] Summary + commit message & MR attributes presented for approval (step 9) — publish pending user approval
 
 ## History
 
@@ -231,3 +386,4 @@ step 19". Run `just docs-check`.
 - 2026-09-25 — READY → IN DEVELOPMENT: picked up
 - 2026-09-25 — plan amended inline: decision 3 — a failed control-database read no longer fails the whole refresh (that coupled the tenant's own kill switches to control-DB availability, a regression found in self-review); the last-known platform rows are kept and the tenant rows still refresh, covered by a new test
 - 2026-09-25 — IN DEVELOPMENT → IN REVIEW: acceptance green — `feat/T-058-…` commit 01b093f; build/lint clean; full `cargo test` green on local Postgres 16 + dev Vault (the four mTLS-server suites needed NO_PROXY for this sandbox's HTTPS proxy); `just docs-check` not run (snowball unavailable here); console pane wired (no longer a stub)
+- 2026-09-25 — IN REVIEW → DONE: validated, no blocking findings; 4 noted (F1–F4), 0 fixed inline, 0 folded, 0 new tickets; acceptance re-run green (mTLS suites need the sandbox proxy bypassed); board not regenerated here (pickle unavailable) — run `pickle board sync`

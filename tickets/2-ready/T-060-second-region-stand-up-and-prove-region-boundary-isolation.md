@@ -157,3 +157,4 @@ the local second-region proof stack. Run `just docs-check`.
   splitting and confirmed scope (design-doc still-open item #10: use a placeholder second region
   to prove isolation mechanics rather than holding this ticket for launch-jurisdiction input)
 - 2026-09-22 — TO DO → READY: plan complete: found the region-boundary assertion the schema comment promises was never implemented; adds it (Config.region + connect_tenant_pool's expected_region) scoped to the six service binaries only, plus a second Compose stack as the isolation proof
+- 2026-09-25 — impact sweep from T-058's review: T-058 landed platform kill switches, whose region-wide scope reaches every tenant in *one* control database — so this ticket's "per-region kill switch … independence" now has a concrete mechanism to prove (a `scope='platform'` switch engaged in region A's control DB must neither block nor `NOTIFY` a region-B tenant). Assumption still holds; plan unchanged — flagged for the implementer
