@@ -9,7 +9,7 @@ hand — edit the tickets. Hand-written planning notes live in [`NOTES.md`](NOTE
 **WIP limits (per child-project):**
 - `messgr`: `3-in-development/` ≤ 1 · `4-in-review/` ≤ 1
 
-Last updated: 2026-09-23
+Last updated: 2026-09-27
 
 ## IN DEVELOPMENT
 
@@ -38,7 +38,6 @@ Last updated: 2026-09-23
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
-| T-058 | Platform kill switches: platform-tier override on tenant kill switches | high | medium | L | [] |  |
 | T-060 | Second region: stand up and prove region-boundary isolation | high | high | XL | [] |  |
 
 ## TO DO (impact order, per child)
@@ -109,6 +108,7 @@ Last updated: 2026-09-23
 | T-052 | OTP fast path: sms-sender bypassing the queue | yes — MERGED: PR #65 (`feat/T-052-otp-fast-path-sms-sender-bypassing-the-queue`, `8182cf7`) |
 | T-056 | messgr-otp: cloud-only OTP endpoint | yes — MERGED: PR #66 (`feat/T-056-messgr-otp-cloud-only-otp-endpoint`, `46ebe65`) |
 | T-057 | Platform console: tenant lifecycle, health, platform_audit | yes — merged to main (PR #68, `14b2271`) |
+| T-058 | Platform kill switches: platform-tier override on tenant kill switches | no — publish-gated |
 | T-059 | Tenant offboarding: terminate-and-destroy mode | yes — MERGED: PR #67 (`feat/T-059-tenant-offboarding-terminate-and-destroy-mode`, `f22d718`) |
 
 ## DROPPED
