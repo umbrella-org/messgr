@@ -54,7 +54,8 @@ pub struct TenantContext {
     pub dek_cache: KeyCache,
     /// Refreshed by a background poll spawned the first time this tenant's
     /// context is opened (T-016 decision 6) — never from the dispatcher's
-    /// `LISTEN`, which this process cannot use (§2.3).
+    /// `LISTEN`, which this process cannot use (§2.3). Includes this
+    /// tenant's platform-tier switches (T-058).
     pub kill_switches: Arc<KillSwitchCache>,
 }
 
@@ -202,6 +203,7 @@ impl TenantRegistry {
         let poll_pool = tenant_pool.pool.clone();
         let poll_cache = kill_switches.clone();
         let poll_cancel = cancel.clone();
+        let poll_control_pool = control_pool.clone();
         let poll_task = tokio::spawn(async move {
             run_refresh_loop(
                 poll_cache,
@@ -210,6 +212,9 @@ impl TenantRegistry {
                 KILL_SWITCH_POLL_INTERVAL,
                 |_| {},
                 Some(poll_cancel),
+                // T-058: this poll is ingest's only path for platform
+                // switches too -- it never sees the fan-out `NOTIFY`.
+                Some((poll_control_pool, tenant_id)),
             )
             .await;
         });

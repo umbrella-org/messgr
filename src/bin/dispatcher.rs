@@ -13,7 +13,10 @@
 //! T-016 adds kill-switch enforcement: a shared `KillSwitchCache`, refreshed
 //! by a dedicated `LISTEN kill_switch` connection with a 30-second poll
 //! fallback (DESIGN.md §5.2), feeds every channel's claim-exclusion check
-//! and drives the release-drain / engage-discard one-shot tasks.
+//! and drives the release-drain / engage-discard one-shot tasks. T-058
+//! merges this tenant's platform-tier switches (control database) into the
+//! same cache, so a platform suspension excludes and later ramps exactly
+//! like a tenant `global` switch.
 
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
@@ -262,6 +265,8 @@ async fn main() {
         .expect("messgr-dispatcher: failed to LISTEN on kill_switch");
 
     let refresh_pool = tenant_pool.clone();
+    let refresh_control_pool = control_pool.clone();
+    let refresh_tenant_id = tenant.id;
     let refresh_cache = kill_switches.clone();
     let refresh_contexts = contexts.clone();
     let refresh_draining = draining.clone();
@@ -314,6 +319,10 @@ async fn main() {
                 }
             },
             None,
+            // T-058: platform switches for this tenant ride the same tick
+            // and the same `LISTEN` wakeup -- the control plane fans its
+            // `NOTIFY kill_switch` out into this tenant's database.
+            Some((refresh_control_pool, refresh_tenant_id)),
         )
         .await;
     }));
