@@ -21,11 +21,13 @@ pub async fn find_by_slug(
     .await
 }
 
-/// Panics if any tenant in this control database belongs to a region other
+/// Errors if any tenant in this control database belongs to a region other
 /// than `region` — the boot-time half of decision 15's "tenants pinned to one
 /// region" (T-060). Catches a binary wired to another region's control
 /// database, which would otherwise serve that region's tenants silently.
-/// Same "panic loudly at connect time" shape as `db::assert_current_database`.
+/// The service binaries `.expect()` it at boot, so a mismatch still stops the
+/// process before it serves; `messgr-control` reports it as an error instead
+/// (T-025 decision 2).
 pub async fn assert_region(pool: &PgPool, region: &str) -> Result<(), sqlx::Error> {
     let mismatch: Option<(String, String)> =
         sqlx::query_as("SELECT slug, region FROM tenant WHERE region <> $1 LIMIT 1")
@@ -34,11 +36,14 @@ pub async fn assert_region(pool: &PgPool, region: &str) -> Result<(), sqlx::Erro
             .await?;
 
     if let Some((slug, actual)) = mismatch {
-        panic!(
-            "region mismatch: this process is configured for region {region:?} \
-             (MESSGR_REGION), but its control database holds tenant {slug:?} in \
-             region {actual:?}"
-        );
+        return Err(sqlx::Error::Configuration(
+            format!(
+                "region mismatch: this process is configured for region {region:?} \
+                 (MESSGR_REGION), but its control database holds tenant {slug:?} in \
+                 region {actual:?}"
+            )
+            .into(),
+        ));
     }
 
     Ok(())

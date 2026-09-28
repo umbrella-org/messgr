@@ -1,8 +1,9 @@
 //! Region-boundary isolation (decision 15, T-060): two independent control
 //! databases standing in for two regions. Proves the boot-time region
 //! assertion catches a process wired to the wrong region's control database,
-//! and that a platform kill switch engaged in one region cannot reach a
-//! tenant of the other.
+//! that `provision` refuses (and audits) another region's `--region`, and
+//! that a platform kill switch engaged in one region cannot reach a tenant of
+//! the other.
 //!
 //! Both control databases live on the one local/CI Postgres cluster — what
 //! makes them separate regions is that nothing in either references the
@@ -16,6 +17,7 @@ use messgr::db;
 use messgr::platform_kill_switch::configure::engage_tx;
 use messgr::platform_kill_switch::model::scope;
 use messgr::platform_kill_switch::repo::list_active_for_tenant;
+use messgr::tenant::provision::refuse_foreign_region;
 use messgr::tenant::repo::{assert_region, insert_provisioning, mark_active};
 
 fn control_database_url() -> String {
@@ -26,6 +28,7 @@ fn control_database_url() -> String {
 
 /// A throwaway, fully migrated control database holding one active tenant
 /// in `region`.
+#[derive(Clone)]
 struct Region {
     pool: PgPool,
     database_name: String,
@@ -96,6 +99,17 @@ async fn region_boundary_holds_between_two_control_databases() {
     let a = Region::create(&admin, "eu").await;
     let b = Region::create(&admin, "region-b").await;
 
+    // Run the assertions in their own task so both throwaway databases are
+    // dropped even when one fails, then re-raise the failure.
+    let outcome = tokio::spawn(assertions(a.clone(), b.clone())).await;
+    a.drop(&admin).await;
+    b.drop(&admin).await;
+    if let Err(err) = outcome {
+        std::panic::resume_unwind(err.into_panic());
+    }
+}
+
+async fn assertions(a: Region, b: Region) {
     // Each region's processes boot cleanly against their own control DB.
     assert_region(&a.pool, "eu")
         .await
@@ -105,20 +119,30 @@ async fn region_boundary_holds_between_two_control_databases() {
         .expect("region B check failed");
 
     // A region-A process wired to region B's control DB must refuse to boot.
-    let wrong = b.pool.clone();
-    let join_error = tokio::spawn(async move { assert_region(&wrong, "eu").await })
+    let message = assert_region(&b.pool, "eu")
         .await
-        .expect_err("assert_region must panic on another region's tenant");
-    let payload = join_error.into_panic();
-    let message = payload
-        .downcast_ref::<String>()
-        .cloned()
-        .or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string()))
-        .expect("panic payload was not a string message");
+        .expect_err("assert_region must reject another region's tenant")
+        .to_string();
     assert!(
         message.contains("region mismatch") && message.contains("\"region-b\""),
-        "panicked, but not with the region-mismatch message: {message:?}"
+        "rejected, but not with the region-mismatch message: {message:?}"
     );
+
+    // `provision --region region-b` under MESSGR_REGION=eu is refused and
+    // leaves exactly one audit row; a matching region passes untouched.
+    refuse_foreign_region(&a.pool, "test", "acme", "eu", "eu")
+        .await
+        .expect("a matching region must be allowed");
+    refuse_foreign_region(&a.pool, "test", "acme", "region-b", "eu")
+        .await
+        .expect_err("a foreign region must be refused");
+    let audited: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM platform_audit WHERE action = 'tenant.provision_rejected'",
+    )
+    .fetch_one(&a.pool)
+    .await
+    .unwrap();
+    assert_eq!(audited, 1, "the refusal must be audited exactly once");
 
     // T-058: a region-wide platform switch engaged in A neither blocks nor
     // NOTIFYs B's tenant.
@@ -148,7 +172,4 @@ async fn region_boundary_holds_between_two_control_databases() {
             .is_empty(),
         "a platform switch in region A must not block region B's tenant"
     );
-
-    a.drop(&admin).await;
-    b.drop(&admin).await;
 }

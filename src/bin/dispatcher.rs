@@ -119,7 +119,7 @@ async fn main() {
     // Decision 15 (T-060): refuse to serve another region's tenants.
     messgr::tenant::repo::assert_region(&control_pool, &config.region)
         .await
-        .expect("failed to check tenant regions in the control database");
+        .expect("region check against the control database failed");
 
     let tenant = tenant_repo::find_by_slug(&control_pool, &tenant_slug)
         .await
