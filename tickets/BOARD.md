@@ -13,18 +13,18 @@ Last updated: 2026-09-28
 
 ## IN DEVELOPMENT
 
+### messgr (0/1)
+
+| id | title | depends-on |
+|---|---|---|
+
+## IN REVIEW
+
 ### messgr (1/1)
 
 | id | title | depends-on |
 |---|---|---|
 | T-060 | Second region: stand up and prove region-boundary isolation | [] |
-
-## IN REVIEW
-
-### messgr (0/1)
-
-| id | title | depends-on |
-|---|---|---|
 
 ## REWORK
 
