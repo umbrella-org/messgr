@@ -153,7 +153,29 @@ The test drops both databases afterwards.
 
 ## Review
 
-<!-- empty until IN REVIEW -->
+### Round 1 — 2026-09-28 (branch `feat/T-060-…` at `d39f1ad` after rebase onto `main`)
+
+- [x] Reviewer independence settled (step 0): **independent** — a fresh session with no memory of writing the branch
+- [x] In-tree stale-branch check (step 0a): `pickle doctor` warned the branch had T-060 in `3-in-development`; the branch was rebased onto `main` (local-only, no upstream), re-run clean apart from the unrelated payload-version warning
+- [x] Implementation audit (steps 1, 2): all five tasks present in the files named. `just build`, `just lint` clean; `just test` green (every test binary `0 failed`, `region_isolation` 1 passed). Mutation check: forcing `assert_region`'s mismatch branch off turns `region_isolation` red at `tests/region_isolation.rs:111`. Manual acceptance step 3: the provision guard refuses `--region region-b` under `MESSGR_REGION=eu`, and `messgr-ingest`/`messgr-control` panic with the region-mismatch message against region B's control DB. **But `provision` against the region-B stack fails as written (F1)** and only passed after AppRole was enabled on `:8201` by hand
+- [x] Quality audit (step 3)
+- [x] Consistency audit (step 4): addendum items 1–8 checked. No new table or column, `tenant.region` is `NOT NULL` (no NULL hole in `region <> $1`), no secrets from env, and the `ci.yml`/`justfile` edits are env and new recipes only (no command-parity drift). `Version` in `messgr-control` returns before `Config::from_env`, so decision 1's "skips `version`" holds. The only `tenant` insert path is `provision_tenant`, called only from `control.rs`, which is behind the guard
+- [x] Documentation audit (step 4a): `just docs-check` clean; the "Regions" subsection and the `otp-api.adoc` wording are present. The Regions instruction for running region B is incomplete (part of F1)
+- [x] Docs-readability pass (step 4b): skipped. No reviewer configured (`opencode` not installed), 0 suggestions discarded
+- [x] Findings recorded (step 5)
+- [x] Ticket moved to `tickets/5-rework/` (step 6a)
+- [x] Governing documents (step 7): `03-data-model.md`'s "asserted on boot" is now true, and decision 15's row still holds. `12-deployment.md`'s "Six binaries" was already stale before this branch (F2). No DESIGN.md amendment made in this review
+- [x] Impact sweep (step 8): no ticket in `1-to-do/` or `2-ready/` references T-060
+- [x] Summary presented; no publish while in rework (step 9)
+
+| id | severity | class | disposition | description | evidence | suggestion |
+|---|---|---|---|---|---|---|
+| F1 | blocking | correctness | — | The region-B stack cannot provision a tenant. Its dev Vault never gets AppRole auth enabled, because `vault-dev-init` hardcodes `http://localhost:8200` and nothing targets `:8201`. Acceptance step 3 and `introduction.adoc`'s "Point `CONTROL_DATABASE_URL`, `VAULT_ADDR` and `MESSGR_REGION` at it" both fail at `provision`. The only way the step could have passed is with region A's Vault, which is exactly the cross-region dependency decision 15 rules out | `MESSGR_REGION=region-b messgr-control provision … ` with `VAULT_ADDR=http://localhost:8201` → `provisioning failed (vault): … status code 404`. It succeeds after `POST :8201/v1/sys/auth/approle` | Let `vault-dev-init` take the Vault address (default `http://localhost:8200`) and add a region-B call, either in `db-up-region-b` or as its own recipe. Say so in the Regions subsection, then re-run acceptance step 3 against `:8201` only |
+| F2 | non-blocking | other | noted | `development/design/12-deployment.md:7` says "Six binaries" and the table leaves out `messgr-sms-sender`, while `Cargo.toml` declares seven `[[bin]]`s. The plan's docs step asked for this check, but the line has been stale since T-052 (`39271f4`), not made false by this branch | `grep -c '^\[\[bin\]\]' Cargo.toml` → 7 | Fix it on the next DESIGN.md pass (version bump) |
+| F3 | non-blocking | test-gap | noted | The provision guard (decision 2) has no automated test, only manual acceptance step 3. The project has no binary-level test harness, and the guard is a single `!=` | `src/bin/control.rs:851`; no test references `does not match this deployment's MESSGR_REGION` | None now. Worth covering if `run()` is ever extracted into something testable |
+
+Dispositions: 1 blocking (F1 → rework); 2 noted (F2, F3); 0 fixed inline, 0 folded, 0 new tickets.
+cost: estimated M, actual M
 
 ## History
 
@@ -166,3 +188,4 @@ The test drops both databases afterwards.
 - 2026-09-28 — plan amended inline: applicability gate found the six service binaries mostly open tenant pools lazily per request (TenantRegistry/TenantPoolCache), so a per-pool `expected_region` check could not fire at boot; replaced with a boot-time `assert_region` over the control DB in all seven mains, a `provision --region` guard, region A = `eu`, a standalone second Compose file, a single-cluster two-control-DB test with T-058 cross-region assertions; `connect_tenant_pool` signature unchanged; cost XL → M (user approved routing)
 - 2026-09-28 — READY → IN DEVELOPMENT: picked up
 - 2026-09-28 — IN DEVELOPMENT → IN REVIEW: acceptance green
+- 2026-09-28 — IN REVIEW → REWORK: review round 1: 1 blocking (F1 region-B Vault never gets AppRole, provision fails), 2 noted (F2, F3)
