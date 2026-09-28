@@ -9,7 +9,7 @@ hand — edit the tickets. Hand-written planning notes live in [`NOTES.md`](NOTE
 **WIP limits (per child-project):**
 - `messgr`: `3-in-development/` ≤ 1 · `4-in-review/` ≤ 1
 
-Last updated: 2026-09-27
+Last updated: 2026-09-28
 
 ## IN DEVELOPMENT
 
@@ -38,7 +38,7 @@ Last updated: 2026-09-27
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
-| T-060 | Second region: stand up and prove region-boundary isolation | high | high | XL | [] |  |
+| T-060 | Second region: stand up and prove region-boundary isolation | high | high | M | [] |  |
 
 ## TO DO (impact order, per child)
 
