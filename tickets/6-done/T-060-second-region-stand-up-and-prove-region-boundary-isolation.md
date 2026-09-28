@@ -198,6 +198,24 @@ warning; the pre-fix tip is `c1ce8e6`, so the re-review diff is `git diff c1ce8e
   `acme-b*` row. `just build`, `just lint` and `just docs-check` are clean, and `just test` is
   green: 0 test binaries report a failure, and `region_isolation` passes 1 of 1.
 
+### Round 2 — 2026-09-28, scoped re-review (branch rebased onto `main`: `17ee666`, fix `c354913`)
+
+- [x] Reviewer independence settled (step 0): **independent** — a fresh session with no memory of writing the branch or the fix
+- [x] In-tree stale-branch check (step 0a): `pickle doctor` warned the branch had T-060 in `5-rework`; rebased onto `main` (local-only, no upstream), which rewrote the round-1 fix record's `c1ce8e6`/`4cb235c` to `17ee666`/`c354913` with the same diff. Re-run clean apart from the unrelated payload-version warning
+- [x] Implementation audit (steps 1, 2): scope is F1 plus the diff `c1ce8e6..4cb235c` (`justfile`, `introduction.adoc`). `just build`, `just lint`, `just docs-check` clean; `just test` green (45 test binaries, 0 failed; `region_isolation` 1 passed). Acceptance step 3 re-run from `docker compose -f compose.region-b.yml down -v` using only `:5433` and `:8201`: `just db-up-region-b` waits for both health checks, then `:8201/v1/sys/auth` lists `approle/`; `migrate` and `provision --slug review-b --region region-b` succeed against region B's Vault; `messgr-ingest` with `MESSGR_REGION=eu` against region B's control DB panics with `region mismatch: … tenant "review-b" in region "region-b"`, and with `MESSGR_REGION=region-b` passes the assertion (fails later only on the dummy TLS paths). `provision --region region-b` under `MESSGR_REGION=eu` against region A is refused; region A's control DB holds no `review-*` or non-`eu` row and no `review_guard` database exists. **F1 closed**
+- [x] Quality audit (step 3): the fix diff introduces no new defect. `vault-dev-init`'s `addr` defaults to `:8200`, so every existing caller (`ci.yml:75`, `scripts/e2e.sh:178`, README) is unchanged
+- [x] Consistency audit (step 4): `ingest.adoc:118`, `tests/keystore.rs:2`, `src/tenant/vault.rs:5` and README still describe `vault-dev-init` correctly; no `ci.yml` command changed (addendum item 8)
+- [x] Documentation audit (step 4a): the Regions subsection now matches what `db-up-region-b` does; `just docs-check` clean
+- [x] Docs-readability pass (step 4b): skipped. No reviewer configured, 0 suggestions discarded
+- [x] Findings recorded (step 5): no new findings; F2, F3 stand as noted in round 1
+- [x] Ticket moved to `tickets/6-done/` (step 6b)
+- [x] Governing documents (step 7): unchanged from round 1 — `03-data-model.md`'s "asserted on boot" is now true; F2 (`12-deployment.md` "Six binaries") predates this branch and stays noted. No DESIGN.md amendment
+- [x] Impact sweep (step 8): no ticket in `1-to-do/` or `2-ready/` references T-060
+- [x] Summary + commit messages and MR attributes presented for approval (step 9)
+
+Dispositions (round 2): F1 closed; 0 new findings; F2, F3 remain noted. 0 fixed inline, 0 folded, 0 new tickets.
+cost: estimated M, actual M
+
 ## History
 
 - 2026-09-22 — created (TO DO). source: review: split out of T-054 at refinement — one of five
@@ -211,3 +229,4 @@ warning; the pre-fix tip is `c1ce8e6`, so the re-review diff is `git diff c1ce8e
 - 2026-09-28 — IN DEVELOPMENT → IN REVIEW: acceptance green
 - 2026-09-28 — IN REVIEW → REWORK: review round 1: 1 blocking (F1 region-B Vault never gets AppRole, provision fails), 2 noted (F2, F3)
 - 2026-09-28 — REWORK → IN REVIEW: findings fixed
+- 2026-09-28 — IN REVIEW → DONE: review round 2: F1 closed, 0 new findings; F2, F3 noted
