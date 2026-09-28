@@ -177,6 +177,27 @@ The test drops both databases afterwards.
 Dispositions: 1 blocking (F1 → rework); 2 noted (F2, F3); 0 fixed inline, 0 folded, 0 new tickets.
 cost: estimated M, actual M
 
+### Rework fix record — round 1 (commit 4cb235c)
+
+Branch rebased onto `main` first (local-only, no upstream) to clear `pickle doctor`'s stale-ticket
+warning; the pre-fix tip is `c1ce8e6`, so the re-review diff is `git diff c1ce8e6..4cb235c`.
+
+- **F1 — fixed.** `vault-dev-init` now takes `addr` (default `http://localhost:8200`, so CI,
+  `scripts/e2e.sh` and the README call are unchanged) and uses it for every call. `db-up-region-b`
+  runs `docker compose … up -d --wait`, so both health checks pass before it continues, and then
+  `just vault-dev-init http://localhost:8201`. That enables AppRole on region B's own Vault and
+  never touches region A's. The Regions subsection of `introduction.adoc` now says the recipe
+  does this. Re-ran acceptance step 3 with only `:5433` and `:8201`, starting from
+  `docker compose -f compose.region-b.yml down -v`: `migrate` and
+  `provision --slug acme-b --region region-b` both succeed, returning a role id and wrapped
+  secret id from `:8201`. `messgr-ingest` with `MESSGR_REGION=eu` against region B's control DB
+  panics with `region mismatch: … tenant "acme-b" in region "region-b"`. Against region B, `provision --region region-b` under `MESSGR_REGION=eu` now trips the boot
+  assertion before the guard runs, so the guard was checked against region A's control DB, whose
+  `eu` tenants pass the boot check: the provision is refused with `does not match this
+  deployment's MESSGR_REGION`, and nothing is written. Region A's control DB holds no
+  `acme-b*` row. `just build`, `just lint` and `just docs-check` are clean, and `just test` is
+  green: 0 test binaries report a failure, and `region_isolation` passes 1 of 1.
+
 ## History
 
 - 2026-09-22 — created (TO DO). source: review: split out of T-054 at refinement — one of five
@@ -189,3 +210,4 @@ cost: estimated M, actual M
 - 2026-09-28 — READY → IN DEVELOPMENT: picked up
 - 2026-09-28 — IN DEVELOPMENT → IN REVIEW: acceptance green
 - 2026-09-28 — IN REVIEW → REWORK: review round 1: 1 blocking (F1 region-B Vault never gets AppRole, provision fails), 2 noted (F2, F3)
+- 2026-09-28 — REWORK → IN REVIEW: findings fixed

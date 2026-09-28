@@ -20,10 +20,11 @@ Last updated: 2026-09-28
 
 ## IN REVIEW
 
-### messgr (0/1)
+### messgr (1/1)
 
 | id | title | depends-on |
 |---|---|---|
+| T-060 | Second region: stand up and prove region-boundary isolation | [] |
 
 ## REWORK
 
@@ -31,7 +32,6 @@ Last updated: 2026-09-28
 
 | id | title | open findings |
 |---|---|---|
-| T-060 | Second region: stand up and prove region-boundary isolation | review round 1: 1 blocking (F1 region-B Vault never gets AppRole, provision fails), 2 noted (F2, F3) |
 
 ## READY (impact order, per child)
 
