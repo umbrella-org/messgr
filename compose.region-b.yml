@@ -1,0 +1,43 @@
+# A second, independent region's control DB + Vault (decision 15, T-060) --
+# a placeholder region for proving isolation locally, not a launch
+# jurisdiction (design-doc still-open item #10). Standalone, not an override:
+# its own project name keeps `just db-down` and `just db-down-region-b` from
+# touching each other's containers.
+name: messgr-region-b
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    container_name: messgr-postgres-b
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: messgr
+      POSTGRES_PASSWORD: messgr
+      POSTGRES_DB: control
+    ports:
+      - "5433:5432"
+    volumes:
+      - messgr-region-b-pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U messgr -d control"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  vault:
+    image: hashicorp/vault:latest
+    container_name: messgr-vault-b
+    restart: unless-stopped
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: messgr-dev-root-token
+      VAULT_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
+    ports:
+      - "8201:8200"
+    healthcheck:
+      test: ["CMD-SHELL", "VAULT_ADDR=http://127.0.0.1:8200 vault status"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  messgr-region-b-pgdata:

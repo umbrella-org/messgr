@@ -804,6 +804,14 @@ async fn main() -> std::process::ExitCode {
     .await
     .expect("failed to connect to control database");
 
+    // Decision 15 (T-060): refuse to operate on another region's tenants.
+    // `migrate` runs before the `tenant` table exists, so it is exempt.
+    if !matches!(cli.command, Command::Migrate) {
+        messgr::tenant::repo::assert_region(&control_pool, &config.region)
+            .await
+            .expect("failed to check tenant regions in the control database");
+    }
+
     match run(cli, config, control_pool).await {
         Ok(()) => std::process::ExitCode::SUCCESS,
         Err(err) => {
@@ -838,6 +846,15 @@ async fn run(
             database_name,
             actor,
         } => {
+            // Write-time half of the boot assertion (T-060): a row
+            // mislabelled for another region never enters this control DB.
+            if region != config.region {
+                return Err(format!(
+                    "--region {region:?} does not match this deployment's MESSGR_REGION \
+                     {:?}; refusing to provision tenant {slug:?}",
+                    config.region
+                ));
+            }
             // Connected only here, not unconditionally in `main` — `Migrate`
             // has no Vault dependency and must not gain one (§13: never
             // couple a subcommand to a service it doesn't use). Connecting

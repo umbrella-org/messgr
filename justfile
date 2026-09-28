@@ -76,6 +76,18 @@ db-reset:
     docker compose down -v
     docker compose up -d
 
+# Start a second, independent region's Postgres (5433) and Vault (8201) (T-060),
+# then bootstrap that Vault -- never region A's (decision 15)
+[group('db')]
+db-up-region-b:
+    docker compose -f compose.region-b.yml up -d --wait
+    just vault-dev-init http://localhost:8201
+
+# Stop the second region's stack
+[group('db')]
+db-down-region-b:
+    docker compose -f compose.region-b.yml down
+
 # Open a psql shell on the control database
 [group('db')]
 db-shell:
@@ -90,19 +102,20 @@ db-shell:
 # original "transit"/"transit-other" (T-003) after that exact collision was
 # caught live during T-004's implementation.
 #
-# Provision Vault Transit fixtures used by tests/keystore.rs
+# Provision Vault Transit fixtures used by tests/keystore.rs, and enable AppRole
+# auth, on the Vault at `addr`
 [group('db')]
-vault-dev-init:
+vault-dev-init addr="http://localhost:8200":
     curl -sf --header "X-Vault-Token: messgr-dev-root-token" --request POST \
-        --data '{"type":"transit"}' http://localhost:8200/v1/sys/mounts/transit-fixture || true
+        --data '{"type":"transit"}' {{addr}}/v1/sys/mounts/transit-fixture || true
     curl -sf --header "X-Vault-Token: messgr-dev-root-token" --request POST \
-        http://localhost:8200/v1/transit-fixture/keys/messgr-dek || true
+        {{addr}}/v1/transit-fixture/keys/messgr-dek || true
     curl -sf --header "X-Vault-Token: messgr-dev-root-token" --request POST \
-        --data '{"type":"transit"}' http://localhost:8200/v1/sys/mounts/transit-fixture-other || true
+        --data '{"type":"transit"}' {{addr}}/v1/sys/mounts/transit-fixture-other || true
     curl -sf --header "X-Vault-Token: messgr-dev-root-token" --request POST \
-        http://localhost:8200/v1/transit-fixture-other/keys/messgr-dek || true
+        {{addr}}/v1/transit-fixture-other/keys/messgr-dek || true
     curl -sf --header "X-Vault-Token: messgr-dev-root-token" --request POST \
-        --data '{"type":"approle"}' http://localhost:8200/v1/sys/auth/approle || true
+        --data '{"type":"approle"}' {{addr}}/v1/sys/auth/approle || true
 
 # Create the messgr_cold tablespace used by partition-lifecycle moves
 # (T-014). Tablespaces are cluster-level, not per-tenant -- run this once

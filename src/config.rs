@@ -7,6 +7,10 @@ pub struct Config {
     pub control_database_url: String,
     pub database_max_connections: u32,
     pub profile: Profile,
+    /// This deployment's region (`MESSGR_REGION`, decision 15). Every
+    /// `tenant.region` in the control database must match it — asserted on
+    /// boot by `tenant::repo::assert_region` (T-060).
+    pub region: String,
 }
 
 impl Config {
@@ -26,11 +30,13 @@ impl Config {
             Err(_) => 20,
         };
         let profile = Profile::from_env();
+        let region = env::var("MESSGR_REGION").expect("MESSGR_REGION must be set");
 
         Self {
             control_database_url,
             database_max_connections,
             profile,
+            region,
         }
     }
 }

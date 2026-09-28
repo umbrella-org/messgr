@@ -92,9 +92,11 @@ precedent). `OTP_LISTEN_ADDR` defaults to `0.0.0.0:8446`; `OTP_HEALTH_LISTEN_ADD
 working directory -- point them at a persistent path in production, so a process restart doesn't
 lose whatever hadn't drained yet.
 
-`messgr-otp` is deployable per-region from the start (region is a deployment-time fact -- which
-control database/Vault a given process points at -- not something its own code branches on); a
-single-region deployment is a valid intermediate state.
+`messgr-otp` is deployable per-region from the start. The region is a deployment-time fact:
+which control database and Vault a given process points at. Its code does not branch on the
+region. Like every binary, it refuses to boot if its control database holds a tenant outside
+its `MESSGR_REGION` (see "Regions" in the introduction). A single-region deployment is a valid
+intermediate state.
 
 [source,bash]
 ----
