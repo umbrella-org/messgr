@@ -216,6 +216,34 @@ warning; the pre-fix tip is `c1ce8e6`, so the re-review diff is `git diff c1ce8e
 Dispositions (round 2): F1 closed; 0 new findings; F2, F3 remain noted. 0 fixed inline, 0 folded, 0 new tickets.
 cost: estimated M, actual M
 
+### Round 3 — 2026-09-28, post-done `/code-review high` of PR 73 (fix `e4c25a7`)
+
+After round 2, the user ran `/code-review high` on PR 73 (squashed feat `190baad`). It returned 10
+findings, and each one was re-checked by hand against the code. None is blocking under this
+ticket's confirmed decisions. With the user's approval, F4–F7 were fixed on the PR branch before
+merge, and F8–F9 were filed as T-061.
+
+**Plan amended by the fix (decision 1):** `messgr-control` no longer panics at boot on a region
+mismatch. It runs `assert_region` inside `run()` and reports a mismatch as an error (T-025
+decision 2). It also exempts `dev-pki` and `offboard-destroy` alongside `migrate`. `serve` stays
+covered, and the six service binaries still stop at boot.
+
+| id | severity | class | disposition | description | evidence | suggestion |
+|---|---|---|---|---|---|---|
+| F4 | non-blocking | design | fixed | The region check before every non-`migrate` `messgr-control` subcommand also blocked `offboard-destroy`, the tool that removes a wrong-region row, so recovery needed hand-written SQL with no audit row | `control.rs:809` at `190baad` | Fixed in `e4c25a7`: `offboard-destroy` and `dev-pki` are exempt |
+| F5 | non-blocking | correctness | fixed | The `provision --region` refusal ran before `provision_tenant` and wrote no `platform_audit` row, breaking T-001/F6's "every outcome is audited" | `control.rs:851` vs `provision.rs:73-76` | Fixed in `e4c25a7`: `tenant::provision::refuse_foreign_region` records `tenant.provision_rejected`; covered in `region_isolation.rs`, which goes red when the audit write is removed |
+| F6 | non-blocking | correctness | fixed | Every `messgr-control` subcommand except `migrate` panicked with `relation "tenant" does not exist` on an unmigrated control DB instead of returning a reported error (T-025) | `control.rs:807` at `190baad` | Fixed in `e4c25a7`: the check `?`-propagates, with a hint to run `migrate` on DB errors only |
+| F7 | non-blocking | test-gap | fixed | `region_isolation.rs` dropped its throwaway control DBs only when every assertion passed; two had already leaked on the dev cluster | two `test_region_ctl_*` databases left from an earlier failed run | Fixed in `e4c25a7`: the assertions run in a spawned task, both DBs are dropped, then the failure is re-raised (a forced failure leaks none). The two leaked DBs were dropped |
+| F8 | non-blocking | design | new ticket | A control DB with no tenants passes `assert_region` for any region, so a wrong `CONTROL_DATABASE_URL` can land a tenant in another region's empty control DB | `repo.rs:29`: the check only reads tenant rows | T-061 |
+| F9 | non-blocking | design | new ticket | Vault is never region-checked. Region B's control DB plus region A's `VAULT_ADDR` provisions region-B keys in region A's Vault | nothing compares `VAULT_ADDR` to a region | T-061 |
+| F10 | non-blocking | design | noted | `assert_region` returned `Result` but panicked on a mismatch | decision 1 | Resolved by F4–F6's fix: it now returns the error |
+| F11 | non-blocking | design | noted | `provision --region` must equal `MESSGR_REGION`, so typing it is redundant | decision 2 | Keep: an explicit operator statement that is cross-checked |
+| F12 | non-blocking | test-gap | noted | The kill-switch half of `region_isolation.rs` passes by construction and cannot fail | decision 6 asked for it | Delete if it ever costs anything |
+| F13 | non-blocking | design | noted | `db-up-region-b` also creates the `tests/keystore.rs` fixture Transit mounts on region B's Vault | `justfile:84` | Harmless dev noise; `--wait` covers the silent-failure concern |
+
+Dispositions (round 3): 4 fixed (F4, F5, F6, F7); 2 new ticket, batched as one (F8, F9 → T-061); 4 noted (F10, F11, F12, F13). Verified: `just build`, `just lint`, `just docs-check` clean; `just test` green; `messgr-control` smoke-tested against region B for the mismatch, unmigrated-DB and foreign-`--region` paths (all reported errors with exit code 1, with the refusal audited).
+cost: estimated M, actual M
+
 ## History
 
 - 2026-09-22 — created (TO DO). source: review: split out of T-054 at refinement — one of five
@@ -230,3 +258,4 @@ cost: estimated M, actual M
 - 2026-09-28 — IN REVIEW → REWORK: review round 1: 1 blocking (F1 region-B Vault never gets AppRole, provision fails), 2 noted (F2, F3)
 - 2026-09-28 — REWORK → IN REVIEW: findings fixed
 - 2026-09-28 — IN REVIEW → DONE: review round 2: F1 closed, 0 new findings; F2, F3 noted
+- 2026-09-28 — post-done /code-review of PR 73: F4–F7 fixed on the PR branch (e4c25a7) before merge; F8, F9 filed as T-061; F10–F13 noted

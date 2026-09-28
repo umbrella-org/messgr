@@ -48,6 +48,7 @@ Last updated: 2026-09-28
 | T-051 | SMS provider failover | high | medium | M | [] |  |
 | T-053 | Bulk campaign path: DEK-unwrap-at-scale and ingest admission rate limiting | high | high | L | [] |  |
 | T-050 | Erasure tooling: crypto-shred and physical-redaction commands, erasure audit log | high | high | XL | [] |  |
+| T-061 | Region boundary hardening: control-DB and Vault region identity | medium | medium | M | [] |  |
 | T-045 | Customer event feed consumer and nightly reconciliation | medium | high | L | [] |  |
 | T-055 | Unify frontend reactivity on Datastar, drop unused htmx | low | low | S | [] |  |
 
