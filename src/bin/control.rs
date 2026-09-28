@@ -38,7 +38,7 @@ use messgr::template::approve::{
 };
 use messgr::template::model::channel;
 use messgr::tenant::offboard::destroy_tenant;
-use messgr::tenant::provision::provision_tenant;
+use messgr::tenant::provision::{provision_tenant, refuse_foreign_region};
 use messgr::tenant::repo::find_by_slug;
 use messgr::tenant_config::configure::{set_tenant_config, show_tenant_config};
 use messgr::tenant_config::model::{TenantConfigInput, verification_mode};
@@ -822,6 +822,25 @@ async fn run(
     config: Config,
     control_pool: sqlx::PgPool,
 ) -> Result<(), String> {
+    // Decision 15 (T-060): refuse to operate on another region's tenants.
+    // Exempt: `migrate` (runs before the `tenant` table exists), `dev-pki`
+    // (touches no tenant), and `offboard-destroy` — the way out if a
+    // wrong-region row ever lands here, which the check would otherwise lock.
+    if !matches!(
+        cli.command,
+        Command::Migrate | Command::DevPki { .. } | Command::OffboardDestroy { .. }
+    ) {
+        messgr::tenant::repo::assert_region(&control_pool, &config.region)
+            .await
+            .map_err(|err| match err {
+                sqlx::Error::Configuration(mismatch) => mismatch.to_string(),
+                err => format!(
+                    "region check failed (has `messgr-control migrate` been run against \
+                     the control database?): {err}"
+                ),
+            })?;
+    }
+
     match cli.command {
         Command::Migrate => {
             sqlx::migrate!("./migrations/control")
@@ -838,6 +857,18 @@ async fn run(
             database_name,
             actor,
         } => {
+            refuse_foreign_region(
+                &control_pool,
+                &actor,
+                &slug,
+                &region,
+                &config.region,
+            )
+            .await
+            .map_err(|err| match err {
+                sqlx::Error::Configuration(refusal) => refusal.to_string(),
+                err => format!("failed to record the provision refusal: {err}"),
+            })?;
             // Connected only here, not unconditionally in `main` — `Migrate`
             // has no Vault dependency and must not gain one (§13: never
             // couple a subcommand to a service it doesn't use). Connecting

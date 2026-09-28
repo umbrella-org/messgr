@@ -30,6 +30,30 @@ holds the tenant registry, producer-certificate mappings, and platform audit tra
 the control database, and provisions the tenant's own HashiCorp Vault Transit mount, key, ACL
 policy, and AppRole for per-customer data-encryption keys.
 
+=== Regions
+
+Each region is an independent deployment: its own control database, Vault cluster, Postgres,
+and binaries. Every tenant belongs to exactly one region, and nothing in one region reads from or
+writes to another. Every binary requires `MESSGR_REGION`, which names the region it serves (for
+example `eu`). The region is enforced at two points:
+
+* *On boot.* Every binary checks that each tenant in its control database carries its own
+  `MESSGR_REGION`. If one doesn't, the process refuses to start with a `region mismatch` panic
+  that names both regions. This catches a binary accidentally pointed at another region's
+  control database, which would otherwise serve that region's tenants without any error.
+  `messgr-control` runs the same check before each subcommand and reports a mismatch as an
+  error, except for `migrate`, `dev-pki`, and `offboard-destroy`. `offboard-destroy` stays
+  available so that a tenant row labelled for the wrong region can still be removed.
+* *On provision.* `messgr-control provision --region` must equal `MESSGR_REGION`. A tenant row
+  labelled for another region is refused before it is written, and the refusal is recorded in
+  the platform audit log as `tenant.provision_rejected`.
+
+For local work, `just db-up-region-b` starts a second, independent Postgres (port `5433`) and
+dev-mode Vault (port `8201`) from `compose.region-b.yml`, then runs `just vault-dev-init
+http://localhost:8201` so that Vault has AppRole auth before `provision` needs it. Point
+`CONTROL_DATABASE_URL`, `VAULT_ADDR` and `MESSGR_REGION` at it to run a second region beside the
+default one. `just db-down-region-b` stops it.
+
 == Producers
 
 A *producer* is an upstream system — fraud alerts, statements, onboarding, and so on — allowed

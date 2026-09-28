@@ -64,6 +64,10 @@ async fn main() {
     )
     .await
     .expect("failed to connect to the control database");
+    // Decision 15 (T-060): refuse to serve another region's tenants.
+    messgr::tenant::repo::assert_region(&control_pool, &config.region)
+        .await
+        .expect("region check against the control database failed");
 
     // Admin-token Vault client, same rationale as messgr-ingest's own
     // (T-011 decision 5) -- but only ever used for the KV secret read

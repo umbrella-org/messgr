@@ -92,6 +92,10 @@ async fn main() {
     )
     .await
     .expect("failed to connect to the control database");
+    // Decision 15 (T-060): refuse to serve another region's tenants.
+    messgr::tenant::repo::assert_region(&control_pool, &config.region)
+        .await
+        .expect("region check against the control database failed");
 
     // Shared admin-token client, mirroring messgr-ingest (T-011 decision 5)
     // -- this is a multi-tenant process, unlike messgr-dispatcher's

@@ -55,6 +55,41 @@ impl From<crate::keystore::KeyStoreError> for ProvisionError {
     }
 }
 
+/// Write-time half of decision 15 (T-060): refuses to provision a tenant for
+/// a region other than this deployment's `MESSGR_REGION`, so a row labelled
+/// for another region never enters this control database. Audited like
+/// `provision_tenant`'s own rejection (review finding T-001/F6).
+pub async fn refuse_foreign_region(
+    control_pool: &PgPool,
+    actor: &str,
+    slug: &str,
+    region: &str,
+    deployment_region: &str,
+) -> Result<(), sqlx::Error> {
+    if region == deployment_region {
+        return Ok(());
+    }
+    crate::platform_audit::record(
+        control_pool,
+        actor,
+        "tenant.provision_rejected",
+        None,
+        serde_json::json!({
+            "slug": slug,
+            "attempted_region": region,
+            "deployment_region": deployment_region,
+        }),
+    )
+    .await?;
+    Err(sqlx::Error::Configuration(
+        format!(
+            "--region {region:?} does not match this deployment's MESSGR_REGION \
+             {deployment_region:?}; refusing to provision tenant {slug:?}"
+        )
+        .into(),
+    ))
+}
+
 /// Provisions a tenant end to end (DESIGN.md §11.4, minus the pieces that
 /// don't exist yet — see the ticket's decision 2): ensures the `tenant` row
 /// exists, creates the tenant's database if it doesn't already exist, runs
