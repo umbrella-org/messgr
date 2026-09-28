@@ -13,10 +13,11 @@ Last updated: 2026-09-28
 
 ## IN DEVELOPMENT
 
-### messgr (0/1)
+### messgr (1/1)
 
 | id | title | depends-on |
 |---|---|---|
+| T-060 | Second region: stand up and prove region-boundary isolation | [] |
 
 ## IN REVIEW
 
@@ -38,7 +39,6 @@ Last updated: 2026-09-28
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
-| T-060 | Second region: stand up and prove region-boundary isolation | high | high | M | [] |  |
 
 ## TO DO (impact order, per child)
 
