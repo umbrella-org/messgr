@@ -259,3 +259,4 @@ cost: estimated M, actual M
 - 2026-09-28 — REWORK → IN REVIEW: findings fixed
 - 2026-09-28 — IN REVIEW → DONE: review round 2: F1 closed, 0 new findings; F2, F3 noted
 - 2026-09-28 — post-done /code-review of PR 73: F4–F7 fixed on the PR branch (e4c25a7) before merge; F8, F9 filed as T-061; F10–F13 noted
+- 2026-09-28 — merged to main (PR #73, `980c49b`)

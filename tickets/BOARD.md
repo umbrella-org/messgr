@@ -110,7 +110,7 @@ Last updated: 2026-09-28
 | T-057 | Platform console: tenant lifecycle, health, platform_audit | yes — merged to main (PR #68, `14b2271`) |
 | T-058 | Platform kill switches: platform-tier override on tenant kill switches | yes — merged to main (PR #72, `34752e1`) |
 | T-059 | Tenant offboarding: terminate-and-destroy mode | yes — MERGED: PR #67 (`feat/T-059-tenant-offboarding-terminate-and-destroy-mode`, `f22d718`) |
-| T-060 | Second region: stand up and prove region-boundary isolation | no — publish-gated |
+| T-060 | Second region: stand up and prove region-boundary isolation | yes — merged to main (PR #73, `980c49b`) |
 
 ## DROPPED
 
