@@ -90,7 +90,7 @@ CREATE INDEX ON outbox (campaign_id, next_attempt_at) WHERE campaign_id IS NOT N
 
 `priority` is a stored integer rather than a `class_rank(class)` function call, so the index can actually serve the `ORDER BY`. An expression the planner has to evaluate per row cannot, which would turn every claim into a sort over the whole ready set.
 
-Claim query — **one loop per channel**, run concurrently inside the single per-tenant dispatcher (§9). Channels are separated because each has its own provider, rate limit, and circuit breaker; a wedged SMS provider must not stall email:
+Claim query — **one loop per channel**, run concurrently inside the single per-tenant dispatcher (§9). Channels are separated because each has its own provider and handoff cap (§5, §2.5; the circuit breaker once named here was never built, §9); a wedged SMS provider must not stall email:
 
 ```sql
 UPDATE outbox SET leased_until = now() + interval '2 minutes'
@@ -441,10 +441,10 @@ CREATE TABLE quiet_hours_policy (
 
 CREATE TABLE provider_config (
     channel         text NOT NULL,
-    priority        smallint NOT NULL,  -- ordered list; failover order (§12.1)
-    provider        text NOT NULL,      -- twilio | smtp | meta_wa | ...
+    priority        smallint NOT NULL,  -- ordered list (§12.1); SMS has one row, the tenant's porth (§2.5)
+    provider        text NOT NULL,      -- porth | smtp | meta_wa | ...
     credential_path text NOT NULL,      -- Vault path, never the credential itself
-    rate_limit_per_sec int NOT NULL,
+    rate_limit_per_sec int NOT NULL,    -- the handoff cap (§5, §2.5), not pacing to the operator
     PRIMARY KEY (channel, priority)
 );
 ```
@@ -475,6 +475,13 @@ match the "no `tenant_id` inside a tenant-database table" convention `tenant_con
 `(channel, priority)`. T-012 ships the table, a channel-agnostic `Sender` trait, and a generic
 HTTP adapter proven against a mock server — it does not commit to a real vendor, so "provider
 selection" (Still Open #4) remains open.
+
+**For SMS, provider selection is settled: porth (§2.5).** The SMS row names the tenant's porth,
+and three gaps follow. The base URL comes from one environment variable per binary
+(`DISPATCHER_SMS_BASE_URL`, `SMS_SENDER_BASE_URL`, `OTP_BASE_URL`), which cannot give each tenant
+its own porth. There is no sender ID, which porth requires. And `credential_path` has nothing to
+hold, because porth's REST API is unauthenticated. The ticket that moves SMS onto porth settles
+the columns.
 
 **Tenants bring their own provider accounts.** The platform never resells messaging, which removes an entire category of problems: rate limits and spend are naturally per-tenant, there is no shared provider budget to arbitrate, and a tenant exhausting its Twilio credit is visibly its own problem. Credentials are referenced by Vault path, never stored in Postgres. Producer quotas (§5.1) become a governance tool for the tenant's internal teams rather than a billing mechanism for the platform.
 

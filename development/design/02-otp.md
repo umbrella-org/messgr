@@ -10,13 +10,15 @@ The obvious design — one pipeline, priority column, OTP marked P0 — puts cus
 
 Instead:
 
-- Auth services call `sms-sender`, a dedicated single-purpose HTTP service that talks to the SMS provider **synchronously**.
+- Auth services call `sms-sender`, a dedicated single-purpose HTTP service that talks to the SMS provider **synchronously**. The provider is the tenant's porth (§2.5). `sms-sender` submits with high priority, a short validity and "do not keep the text", so the OTP leaves porth's queue ahead of bulk traffic, is never sent after it has lapsed, and is not kept by porth either.
 - The audit record is written to `comms_request` **asynchronously and best-effort**. If Postgres is unavailable, the send still succeeds and the record is buffered to local disk and backfilled.
 - Quiet hours are not evaluated on this path at all — OTP is exempt by policy.
 
 This preserves the single pane of glass (every OTP still appears in messgr's ledger and UI) while removing messgr from the availability path of authentication.
 
 **Cost of this choice:** OTP rate limiting and provider failover are duplicated in `sms-sender` rather than centralized. That is the correct trade — a small amount of duplicated logic in exchange for decoupling tier-0 auth from a tier-1 batch system.
+
+**Correction (2026-09-29, §2.5): provider failover is porth's, not duplicated in `sms-sender`.** T-052 and T-056 built an in-request walk over `provider_config`'s SMS rows. It can only react to a provider refusing the request. porth accepts and queues, so an operator outage never shows up as a refusal, and the walk cannot fail over from it. With one porth per tenant, the SMS list has one row. Failover between operators is porth's (its §4.2, and its future-work bind pool). What `sms-sender` still owns is being off messgr's queue. Its independence from porth's queue now rests on porth's priority (POR-025).
 
 ### 3.1 The cloud variant
 

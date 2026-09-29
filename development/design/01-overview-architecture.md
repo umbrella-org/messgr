@@ -57,23 +57,23 @@ The core structural decision in this design is to **keep these separate**. Confl
                                            │  (one per tenant)    │   one claim loop per channel;
                                            │                      │   hot standby via advisory lock
                                            │                      │
-                                           │  gate chain:         │──▶ provider (SMS/email/WhatsApp)
+                                           │  gate chain:         │──▶ porth (SMS, §2.5) / provider (email, WhatsApp)
                                            │   expiry             │
-                                           │   kill switch        │◀── DLR webhook ──┐
+                                           │   kill switch        │◀── receipts ─────┐
                                            │   producer quota     │                  │
                                            │   verification       │                  │
                                            │   consent            │                  │
                                            │   suppression        │                  │
                                            │   quiet hours        │                  │
-                                           │   rate limit         │                  │
+                                           │   handoff cap        │                  │
                                            └──────────┬───────────┘                  │
                                                       │                              │
                                       ┌───────────────┼──────────────┐        ┌──────┴───────┐
                                       ▼               ▼              ▼        │ webhook-api  │
-                                comms_event    producer_usage   (provider)    │ (DMZ)        │
+                                comms_event    producer_usage   (provider)    │ DMZ+internal │
                                 (append-only)  (flushed ~5s)                  └──────────────┘
 
-  OTP / auth fast path  ──▶ sms-sender library ──▶ provider     (synchronous, bypasses queue,
+  OTP / auth fast path  ──▶ sms-sender ──▶ porth, high priority  (synchronous, bypasses queue,
                                     └── async, best-effort ──▶ comms_request      all gates, and
                                                                (log only)          every kill switch)
 
@@ -248,16 +248,19 @@ now that two processes can be live at once.
 
 **5. Gate chain.** Every claimed row is evaluated against the full chain **at this moment**, not
 against the state that existed at ingest: expiry, kill switch, producer quota, verification,
-consent, suppression, quiet hours, then the provider-side rate limit (§5). Auth-class
+consent, suppression, quiet hours, then the handoff cap (§5, §2.5). Auth-class
 messages never reach this step at all (§3). A block either ends the message in a terminal
 `final_status` (`expired`, `suppressed_consent`, `suppressed_list`, `unverified_address`), defers
-it to a later `next_attempt_at` (quota, rate limit, quiet hours — with jitter, §6.1),
+it to a later `next_attempt_at` (quota, handoff cap, quiet hours — with jitter, §6.1),
 or holds it under an active kill switch (§5.2). Immediately before the provider call the
 dispatcher re-reads `outbox.cancelled_at`, because a `DELETE /comms/{id}` may have landed while
 the lease was held (§6.2).
 
 **6. Dispatch.** A message that clears every gate goes to the provider through the channel's
-`Sender` adapter, inside that provider's in-process circuit breaker and token bucket (§9). The
+`Sender` adapter. For SMS the provider is the tenant's porth, called over its REST API (§2.5).
+**Correction:** this step said the call ran "inside that provider's in-process circuit breaker
+and token bucket (§9)". Neither was ever built. For SMS, pacing to the operator is porth's, and
+the handoff cap (§5) is what limits the dispatcher (§2.5, §9). The
 outcome — `sent` or a provider-level failure — is appended to `comms_event`, `producer_usage` is
 incremented in-process (flushed every few seconds, §5.1), and on a terminal outcome the outbox
 row is deleted and `comms_request.final_status` is set in the one permitted ledger mutation
@@ -268,7 +271,8 @@ with backoff and jitter; the row stays in the outbox.
 routed by opaque per-tenant token rather than tenant slug, verified against the provider's
 signature, and appended to `comms_event` — deduplicated on the natural key, tolerant of
 out-of-order and pre-commit arrival, orphaned to a side table if the `provider_ref` is not yet
-known (§10). This does not touch `comms_request.final_status`; that column reflects the
+known (§10). An SMS receipt is porth's status callback instead, received on an internal
+listener rather than from the internet (§10). This does not touch `comms_request.final_status`; that column reflects the
 *dispatch* outcome, not delivery — a `sent` message can still later bounce, and the event stream
 carries that, not the ledger's summary column.
 
@@ -278,11 +282,66 @@ dependency on the event feed being up (§4.1, §11.2). Message detail joins in `
 full history. None of this touches the primary, so a compliance search cannot compete with
 ingestion for write capacity.
 
-**The OTP path replaces steps 1–7 entirely.** `sms-sender` (or `otp-api` in cloud) calls the
-provider synchronously and returns; the ledger write happens afterward, asynchronously and
+**The OTP path replaces steps 1–7 entirely.** `sms-sender` (or `otp-api` in cloud) submits to
+the tenant's porth synchronously, with high priority (§2.5), and returns; the ledger write happens afterward, asynchronously and
 best-effort, with no gate chain, no outbox row, and no dependency on Postgres or Vault being
 reachable at all (§3, §3.1). It rejoins the read path at step 8 — the same UI and API show it —
 but nothing upstream of that row's existence is shared with the queue.
+
+### 2.5 SMS goes through porth
+
+**Correction (2026-09-29): SMS never had a provider decision, and the design filled the gap
+with machinery that belongs in the gateway.** Still Open #4 left SMS provider selection open.
+Meanwhile several sections designed gateway features into messgr: circuit breakers and token
+buckets per provider (§9, §2.4), failover across an ordered provider list (§12.1, build step 16)
+and hot-reloadable provider config (§12.1). Only the ordered `provider_config` list (T-012) and
+the OTP paths' in-request walk over it (T-052, T-056) were built. The SMS gateway is **porth**
+(`porth-umbrella/development/porth/design.md`), an async SMS gateway that talks SMPP to the
+operators. messgr relies on it for everything between messgr and an operator. Confirmed with the
+user:
+
+- messgr uses porth's **REST API**, not its Kannel-compatible one.
+- **One porth per tenant**, to start. Tenants bring their own operator accounts (decision 18),
+  and porth is single-tenant: its REST API has no authentication, and it routes by destination
+  prefix, not by client. So a tenant's porth holds that tenant's SMSC binds, and it runs in the
+  tenant's region (§2.2).
+- **messgr builds no porth functionality, present or future.** Operator routing, failover
+  between operators, rebinding to an SMSC, pacing to the operator's contracted rate, retries at
+  the SMSC, and segmentation and encoding are all porth's. A gap found there becomes a porth
+  ticket, not messgr code.
+
+Besides the destination, the tenant's sender ID and the text, each submit carries these (porth
+design 1.30 §4.1):
+
+- **High priority for auth.** An OTP leaves porth's queue ahead of queued bulk traffic (porth
+  POR-025), so hard invariant 1 still holds across the porth hop. OTP stays off messgr's own
+  queue (§3). porth's queue is the one component a tenant's OTP and bulk SMS share, and
+  priority is what keeps them apart.
+- **A validity period.** For OTP it is short. For a queued message it is the time left before
+  `expires_at` (§6.2). porth marks the message `expired` instead of sending it late (POR-027).
+- **"Do not keep the text" for auth** (POR-027, §7.4).
+- **An idempotency key, the `comms_request.id`.** A retry after a timeout then does not send
+  twice (POR-028).
+- **A status callback URL carrying the tenant's opaque webhook token** (POR-026, §10).
+
+What stays messgr's:
+
+- **The handoff cap** (§5, replacing the "rate limit" gate). The dispatcher hands messages to
+  porth no faster than `provider_config.rate_limit_per_sec`, set at or just below porth's
+  `throughput`. This is not pacing to the operator. It keeps the backlog in messgr's outbox,
+  where kill switches (§5.2), cancellation (§6.2) and `expires_at` still act. porth's queue has
+  none of the three, so a message already handed over is out of their reach.
+- **Retrying when porth itself is unreachable or returns a 5xx**, with the existing per-message
+  backoff (T-021). porth accepts and queues, so messgr sees porth being down but never an
+  operator being down.
+
+A `sent` in messgr therefore means porth accepted the message. `delivered`, `failed` and
+`expired` arrive later through porth's callback (§10).
+
+**What this depends on in porth, none of it built yet:** POR-003 (limits how long porth keeps
+message text), POR-012 (a production porth can bind), POR-024 (a `throughput` cap that is safe to
+rely on) and POR-025 to POR-028. porth's `tickets/NOTES.md` lists them. pickle cannot express a
+`depends-on:` across umbrellas, so messgr tickets name them in prose.
 
 ---
 
