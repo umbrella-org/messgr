@@ -51,6 +51,13 @@ Scope:
   view in this binary — not just the admin panel — gets it from the one shared layout, matching
   how htmx was originally loaded site-wide rather than per-view.
 
+**Corrected 2026-09-29: T-049 is done and merged.** It vendored `assets/datastar.js`, registered
+`GET /assets/datastar.js` (`src/query_api/mod.rs`), and loads it from `templates/admin/base.html`
+and `templates/platform_console/base.html`. This ticket therefore vendors nothing. It removes
+htmx (`assets/htmx.min.js`, its route, the `<script>` tag in `templates/query_api/base.html`),
+adds the existing Datastar `<script>` tag there, and corrects §11 (`10-query-api-ui.md` still
+says "htmx"). The paragraph below is the original coupling note, kept for the record.
+
 **Soft coupling to T-049 (order-independent, no hard `depends-on:`):** T-049's own plan vendors
 `assets/datastar.js` and adds `templates/admin/base.html` (a *second*, admin-only base template,
 per that ticket's decision 10 — admin views extend `admin/base.html`, not

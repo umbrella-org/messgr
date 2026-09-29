@@ -51,9 +51,12 @@ submissions** — not authoritative (the send-time gate still is, per hard invar
 run at ingest to avoid enqueueing hundreds of thousands of rows that will be discarded by
 consent at dispatch anyway.
 
-Soft coupling: shares `provider_config`/DEK-cache machinery with T-051/T-052; the DEK
-pre-provisioning mechanism this ticket picks should stay consistent with §7.6's existing
-pre-provisioning batch job (T-008) rather than inventing a parallel one.
+Soft coupling: the DEK pre-provisioning mechanism this ticket picks should stay consistent
+with §7.6's existing pre-provisioning batch job (T-008) rather than inventing a parallel one.
+**Corrected 2026-09-29:** this line also named shared `provider_config` machinery with T-051 and
+T-052. T-051 is dropped and T-052 is merged. For SMS, a campaign now drains through T-062's
+handoff cap into the tenant's porth (DESIGN.md §2.5), so a campaign's burst is bounded by that
+cap and porth's `throughput`, not by anything this ticket adds.
 
 ## Implementation Plan
 

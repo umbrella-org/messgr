@@ -57,3 +57,4 @@ flagging for your call at refinement, same as the T-048/T-049 pattern.
 ## History
 
 - 2026-09-19 — created (TO DO). source: audit: build-order step 16, remaining gap identified when auditing unticketed steps against the board
+- 2026-09-29 — TO DO → DROPPED: premise superseded: SMS goes through porth (decision 34, §2.5); failover between SMS operators is porth's, messgr cannot see an operator outage, and the circuit breaker the ticket assumed was never built

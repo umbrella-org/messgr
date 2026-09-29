@@ -9,7 +9,7 @@ hand — edit the tickets. Hand-written planning notes live in [`NOTES.md`](NOTE
 **WIP limits (per child-project):**
 - `messgr`: `3-in-development/` ≤ 1 · `4-in-review/` ≤ 1
 
-Last updated: 2026-09-28
+Last updated: 2026-09-29
 
 ## IN DEVELOPMENT
 
@@ -45,7 +45,8 @@ Last updated: 2026-09-28
 
 | id | title | impact | complexity | cost | depends-on | family |
 |---|---|---|---|---|---|---|
-| T-051 | SMS provider failover | high | medium | M | [] |  |
+| T-062 | Send SMS through each tenant's porth over its REST API | critical | high | L | [] |  |
+| T-063 | Take porth's status callbacks as SMS delivery receipts | high | medium | M | [] |  |
 | T-053 | Bulk campaign path: DEK-unwrap-at-scale and ingest admission rate limiting | high | high | L | [] |  |
 | T-050 | Erasure tooling: crypto-shred and physical-redaction commands, erasure audit log | high | high | XL | [] |  |
 | T-061 | Region boundary hardening: control-DB and Vault region identity | medium | medium | M | [] |  |
@@ -119,4 +120,5 @@ Last updated: 2026-09-28
 | id | title | reason |
 |---|---|---|
 | T-027 | messgr-query — serve command and htmx traffic-overview screen | unauthenticated new web binary is wrong shape for the actual need; a stats subcommand on existing messgr-control (per-t… |
+| T-051 | SMS provider failover | premise superseded: SMS goes through porth (decision 34, §2.5); failover between SMS operators is porth's, messgr canno… |
 | T-054 | Cloud enablement: messgr-otp, platform console, platform kill switches, offboarding modes, second region | split at refinement into T-056 (messgr-otp), T-057 (platform console), T-058 (platform kill switches), T-059 (offboardi… |

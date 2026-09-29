@@ -38,7 +38,9 @@ found two gaps that check cannot close:
    that each binary checks at boot, alongside the control-DB check.
 
 Soft coupling: T-060 (`assert_region`, `refuse_foreign_region`). Open question for refinement:
-where the Vault region marker lives, and whether `messgr-otp`'s Vault use needs the same check.
+where the Vault region marker lives, and whether `messgr-otp`'s Vault use needs the same check. Also (2026-09-29): each tenant's porth must
+run in that tenant's region (DESIGN.md §2.5, §13). Decide whether the porth URL gets the same
+check, or whether the network placement §13 requires already covers it.
 
 ## Implementation Plan
 

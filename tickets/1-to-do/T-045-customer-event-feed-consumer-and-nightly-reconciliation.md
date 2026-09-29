@@ -27,6 +27,11 @@ as a safety net against missed events, comparing checksums rather than replaying
 Consumes customer created/updated and address added/changed/verified/removed events, applying
 them through the same merge machinery provisional-shell reconciliation already uses
 (`customer_alias`, per `03-data-model.md` §4.7) rather than a second path.
+**Corrected 2026-09-29: that merge machinery does not exist yet.** Code reads `customer_alias`
+(`src/customer/repo.rs` follows the chain, and T-048 unions it into the timeline), but only tests
+write it (`tests/customer.rs`, `tests/query_api.rs`). The merge that folds a provisional shell
+into a real customer is this ticket's to build, and the cost grade should be re-checked at
+refinement.
 
 This is purely a freshness improvement to a cache: `11-failure-modes.md` is explicit that the
 ledger, timeline, and OTP are unaffected by the feed being down or stopped — only identity

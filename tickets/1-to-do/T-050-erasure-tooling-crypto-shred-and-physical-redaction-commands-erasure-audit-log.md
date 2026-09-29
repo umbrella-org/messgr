@@ -50,6 +50,12 @@ feature" — this ticket is that feature. Scope, per `06-pii-retention.md` §7:
   builds it or leaves it as a documented-but-unbuilt escape hatch; §7.2's own language suggests
   the latter ("do not offer it as a routine choice").
 
+**Added 2026-09-29, porth (DESIGN.md §2.5, §7.2, §7.3):** the tenant's porth keeps every SMS's
+number and text in plaintext in its own database until porth's eviction (porth POR-003) removes
+it. No erasure mode here can reach that copy. `backups_clear_at` must be the later of messgr's
+backup window and porth's retention window plus porth's own backups, and the compliance report
+has to say so. Refinement needs porth's window as an input, alongside Still Open #1.
+
 Soft coupling: relies on T-024's exemption list staying accurate — any new customer-linkable
 table added after this ships must still pass T-024's CI check, which this ticket does not
 change.
