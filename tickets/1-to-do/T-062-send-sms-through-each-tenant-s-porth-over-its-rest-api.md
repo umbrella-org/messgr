@@ -38,7 +38,8 @@ Gaps found while filing, each in DESIGN.md §2.5 and §4.10:
   nullable one with the old variable as fallback keeps the migration backward-compatible).
 - **Sender ID.** porth requires a `from` (or a configured default). messgr has none today.
 - **`credential_path`** is `NOT NULL` but porth's REST API has no credential to point at.
-- **Submit fields** (porth design 1.30 §4.1): high priority for auth; a validity period, short
+- **Submit fields** (porth design 1.33 §4.1, "The REST contract with messgr", which pins their
+  names and values): high priority for auth; a validity period, short
   for OTP and the time left before `expires_at` for a queued message (§6.2); "do not keep the
   text" for auth (§7.4); `comms_request.id` as the idempotency key; and a callback URL carrying
   the tenant's opaque webhook token (§10, T-063).
@@ -54,17 +55,29 @@ Out of scope: anything porth does (routing, failover between operators, pacing t
 SMSC retries, encoding). A gap there is a porth ticket (§2.5). Also out of scope: SMS receipts
 (T-063), and email and WhatsApp, which stay on `HttpSender`.
 
-**porth prerequisites, not expressible as `depends-on:` across umbrellas.** POR-012 (a production
-porth can bind), POR-024 (a `throughput` cap safe to set the handoff cap under), POR-025
-(priority), POR-027 (validity and not keeping the text) and POR-028 (idempotency key) must be
-merged in porth first. Refinement checks their state. POR-003 bounds porth's plaintext copy
-(§7.2), which matters before production traffic but not for building this.
+**Built against a fake, not after porth** (decision 35, DESIGN.md §15.2, 2026-09-29). This ticket
+does not wait for porth. It builds, tests and merges against a wiremock fake of the contract in
+porth design 1.33 §4.1: the submit each case must produce, porth's answers (queued, repeated
+idempotency key, `400`, `503`, unreachable). `503` and a failed connection are retryable, `400`
+is final. The contract is porth's and may change; if it does, this ticket's adapter and fake
+adjust, even after merge.
+
+**porth tickets are a per-tenant go-live gate, not build prerequisites** (not expressible as
+`depends-on:` across umbrellas). A tenant's SMS `provider_config` row points at its porth only
+once that porth has POR-012 (binds in production), POR-024 (a `throughput` cap to set the handoff
+cap under), POR-025 (priority), POR-027 (validity and not keeping the text; a hard gate, since
+without it an OTP is kept in clear, §7.4) and POR-028 (idempotency key), and passes a check
+against the real porth: submit, repeat, callback (§15.2 step 4). POR-003 bounds porth's
+plaintext copy (§7.2) before production traffic. Refinement decides where the go-live check
+lives (a runbook step or a `messgr-control` command).
 
 Docs: `docs/user-manual/control-plane-cli.adoc`'s `provider-config` section describes
 `HttpSender`, "failover order" and an unread `rate_limit_per_sec`, and all three change here.
 
 Soft couplings: T-063 (the callback this ticket's URL points at), T-053 (bulk sends go through the
-handoff cap), T-061 (a region check could cover the porth URL).
+handoff cap), T-061 (a region check could cover the porth URL), DESIGN.md §15 (a proposed adapter
+contract; if it is accepted before this is refined, this ticket may land its `Outbound` trait,
+`base_url` and `sender_id` columns and conformance test first).
 
 ## Implementation Plan
 
@@ -77,3 +90,4 @@ handoff cap), T-061 (a region check could cover the porth URL).
 ## History
 
 - 2026-09-29 — created (TO DO). source: review: T-051 dropped because SMS goes through porth (decision 34, DESIGN.md §2.5); this is the messgr side of that decision
+- 2026-09-29 — description amended: built against porth design 1.33 §4.1's pinned contract and a fake; porth tickets moved from build prerequisites to a per-tenant go-live gate (decision 35, §15.2). source: chat: user decision P1

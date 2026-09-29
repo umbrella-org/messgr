@@ -124,36 +124,19 @@ POR-026) and T-063 (receipts) needs porth's callback body (POR-026).
 
 **Plan: build messgr against a pinned contract and a fake, and gate going live, not building.**
 
-1. **Pin the wire contract in porth's design first.** porth design 1.30 §4.1 names the five
-   fields' meaning but leaves their names to each porth ticket's refinement. A fake built before
-   the names are fixed guesses them, and a guess is a contract drift waiting for integration day.
-   So the contract is written once, in porth design §4.1, by porth, before either side builds.
-   Proposed shape, using the field names porth's §5 message model already has:
+1. **The wire contract is pinned in porth's design** — porth design 1.33 §4.1, "The REST contract
+   with messgr" (decision 35). It fixes the five submit fields' names and values (`priority`,
+   `valid_until`, `idempotency_key`, `keep_text`, `callback_url`), the answer to a repeated
+   idempotency key, the callback body (which echoes `idempotency_key`, so a receipt finds its
+   `comms_request` directly), and which errors are retryable. It is kept there, not copied here,
+   so there is one text to drift from. One of its rules is easy to miss and matters most to
+   messgr: **porth refuses a submit field it does not know with `400`.** Today porth ignores
+   unknown fields, so a messgr pointed at a porth that predates POR-027 would have
+   `keep_text: false` dropped and an OTP kept in clear (§7.4), with nothing failing.
 
-   ```json
-   POST /api/v1/sms/send
-   {
-     "from_number": "BANK",
-     "to_number": "+15551234567",
-     "message": "Your code is 123456",
-     "priority": "high",                        // "high" | "normal", default "normal"
-     "valid_until": "2026-09-29T10:05:00Z",     // RFC 3339; absent = no limit
-     "idempotency_key": "<comms_request.id>",
-     "keep_text": false,                        // default true
-     "callback_url": "https://<internal>/webhook/<token>/porth"
-   }
-   → { "message_id": "...", "status": "queued" }
-     (a repeated idempotency_key returns the first message's id and current status)
-
-   POST <callback_url>
-   { "message_id": "...", "idempotency_key": "<comms_request.id>",
-     "status": "delivered" | "failed" | "expired", "occurred_at": "..." }
-   ```
-
-   One requirement belongs in the contract and is easy to miss: **porth rejects a submit field it
-   does not know with `400`.** Otherwise messgr, pointed at a porth that predates POR-027, has
-   `keep_text: false` silently ignored, and an OTP is kept in porth in clear (§7.4) with nothing
-   failing.
+   **The contract is porth's and may change.** If a porth ticket's refinement or build needs a
+   different shape, porth changes §4.1 and messgr adjusts its adapter and fake, possibly reworking
+   what T-062 and T-063 already built. That is the price of not waiting, and it was accepted.
 
 2. **messgr encodes the contract as a wiremock fake**, shared by T-062's adapter tests and
    T-063's receipt tests: the submit request each case must produce, porth's responses (success,
@@ -289,13 +272,13 @@ What the comparison shows:
 | §10 `messgr-webhook` | One `ReceiptSource` per provider replaces the global verifier and `GenericReceipt`; Meta's `GET` handshake; porth on the internal listener (T-063). |
 | §7.2 erasure exemptions | Each third-party copy is an erasure bound outside the schema, like porth's: Meta's (up to 30 days per its docs), SendGrid's (to check), and any later channel's (§15.8). |
 | `development/review-addendum.md` | The adapter review rule (§15.1, enforcement), added with the first real adapter. |
-| porth design §4.1 | The pinned wire contract, including rejecting unknown fields (§15.2). |
+| porth design §4.1 | The pinned wire contract, including rejecting unknown fields (§15.2). Done in porth design 1.33. |
 
 ### 15.7 Decisions to take
 
 | # | Decision | Recommendation so far |
 |---|---|---|
-| P1 | Pin porth's REST contract (§15.2) in porth design §4.1 now, and move the porth tickets from T-062/T-063's build prerequisites to a per-tenant go-live gate? | **Yes.** It unblocks both tickets and makes drift a porth design change rather than an integration-day surprise. |
+| P1 | Pin porth's REST contract in porth design §4.1, and make the porth tickets a per-tenant go-live gate instead of T-062/T-063's build prerequisites? | **Taken 2026-09-29: yes** (decision 35), on the condition that the contract stays porth's to change and messgr adjusts. |
 | E1 | Email click and open tracking on or off? | **Off.** Click tracking rewrites links in bank emails onto the vendor's domain, which trains customers to trust what phishing looks like; the open pixel is personal data and unreliable; receipts need only delivered and bounced. |
 | E2 | Plain-text email only (decision 31), or HTML? | **Plain text first.** HTML is additive later (a second `text/html` part) but brings sanitising, branding templates and a rendering review; add it when a producer needs branded mail. |
 | E3 | Marketing email needs an unsubscribe mechanism (the large mailbox providers require a one-click `List-Unsubscribe` header from bulk senders). Does messgr add it, and who receives the unsubscribe? | Open. Tied to X1. |
@@ -336,8 +319,8 @@ facts are where those surface before anything is built.
 
 ### 15.9 When this becomes tickets
 
-- **Now, after P1:** amend T-062 and T-063 to build against the pinned contract and the fake
-  (§15.2), and move the porth tickets to a go-live gate in each.
+- **Done 2026-09-29 (P1):** T-062 and T-063 amended to build against the pinned contract and the
+  fake (§15.2), with the porth tickets as a go-live gate in each.
 - **After V1 and X1:** two tickets, **email adapter + SendGrid receipt source** and **WhatsApp
   adapter + Meta receipt source**. The `Outbound` trait change, the conformance test and the
   review rule go in whichever of T-062 or these lands first; `base_url` and `sender_id` most
