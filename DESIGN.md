@@ -1,6 +1,6 @@
 # messgr — Design
 
-**Version 11** · 2026-09-21 · T-049 review: §11.3 corrected — the kill-switch console's description implied the auth-affecting control was a separated, differently-styled element on the same screen; T-049 resolved still-open #9 for step 14 the other way (user-confirmed), building no auth-switch representation into the panel at all, so the prose now matches what shipped
+**Version 12** · 2026-09-29 · SMS goes through porth (§2.5, decision 34): porth's REST API, one porth per tenant, and no porth functionality in messgr. Circuit breakers, operator pacing and SMS failover are cut, build step 16 is dropped, and the rate-limit gate becomes a handoff cap. §2.4, §3, §4.10, §5, §6.2, §7.2–§7.4, §9, §10, §12, §12.1, §13, §14 corrected. Previous: Version 11 · 2026-09-21 · T-049 review: §11.3 corrected — the kill-switch console's description implied the auth-affecting control was a separated, differently-styled element on the same screen; T-049 resolved still-open #9 for step 14 the other way (user-confirmed), building no auth-switch representation into the panel at all, so the prose now matches what shipped
 
 Centralized communications orchestration and audit ledger for customer messaging across SMS, email, and WhatsApp.
 
@@ -21,7 +21,7 @@ navigation aid.
 
 | Section | File |
 |---|---|
-| §1 What this system is, §2 Architecture (incl. 2.1–2.4) | [`01-overview-architecture.md`](development/design/01-overview-architecture.md) |
+| §1 What this system is, §2 Architecture (incl. 2.1–2.5) | [`01-overview-architecture.md`](development/design/01-overview-architecture.md) |
 | §3 The OTP question | [`02-otp.md`](development/design/02-otp.md) |
 | §4 Data model (4.1–4.11) | [`03-data-model.md`](development/design/03-data-model.md) |
 | §5 The gate chain | [`04-gate-chain.md`](development/design/04-gate-chain.md) |

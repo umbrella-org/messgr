@@ -15,7 +15,9 @@ Every message evaluates these gates **at send time**, not at ingestion time. A c
 | Consent | `consent.opted_in` for (`address_id`, class). Marketing requires explicit opt-in; transactional does not. | Terminal: `suppressed_consent` |
 | Suppression | `destination_hmac` present in suppression list (hard bounce, complaint, regulatory). | Terminal: `suppressed_list` |
 | Quiet hours | See §6. Auth class exempt. | Reschedule |
-| Rate limit | Per-provider token bucket, in-process. | Defer, retry next tick |
+| Handoff cap | Per-channel, in-process: the dispatcher hands messages to the provider no faster than `provider_config.rate_limit_per_sec` (§2.5). | Defer, retry next tick |
+
+**Correction (2026-09-29): the last gate was a per-provider token bucket that paced sends to the provider's contracted rate.** It was never built (`rate_limit_per_sec` stayed unread), and for SMS that pacing is porth's (§2.5). The gate is kept under a different purpose. It keeps the backlog in messgr's outbox, where kill switches, cancellation and `expires_at` still act, instead of in the provider's queue, where none of them reach. Set it at or just below porth's `throughput`.
 
 Consent enforcement was the single most consequential omission in the first draft of this design: sending marketing to an opted-out customer is a regulatory penalty, not a bug. It is now a hard gate with its own terminal state, so suppressed sends are visible and auditable rather than silently dropped.
 

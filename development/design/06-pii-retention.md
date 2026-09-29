@@ -68,6 +68,8 @@ The `comms_event` statement was absent from an earlier version of this design, w
 
 These eight tables — `suppression`, `orphan_event`, `customer_dek`, `customer_alias`, `outbox`, `customer`, `webhook_receipt_staging`, and `access_audit` — are the complete named-exemption list the mechanical CI check in §14 must carry alongside the covered-table statements above.
 
+**Outside messgr's schema: porth keeps every SMS in plaintext, and no erasure mode reaches it.** porth's `messages` table (§2.5, porth design §5) holds each SMS's destination number and text, unencrypted, until porth's own eviction removes it (porth POR-003, whose retention window is not yet chosen). It is in another database, so the CI check in §14 cannot see it and no statement above can touch it. This is the same third-party-copy problem a hosted provider's own logs would pose. It is bounded by porth's retention window, which §7.3 adds to the erasure-completion date. messgr does not delete from porth's database. Erasing there on request would be a porth feature.
+
 `customer_id` itself is retained as an opaque UUID — it carries no personal information once the projection is redacted, and keeping it preserves the timeline's structural integrity and the ledger's foreign keys.
 
 Deliberately a **redaction, not a row DELETE**. The row skeleton survives so that message counts, campaign reach figures, and delivery statistics remain accurate and reconcilable. Deleting rows outright would silently change historical aggregates and destroy the referential target of `comms_event`. Full row purge is available as a third, explicitly-authorized mode, but it is the nuclear option and it does corrupt historical counts — do not offer it as a routine choice.
@@ -85,7 +87,7 @@ An earlier draft of this design claimed crypto-shredding "reaches every backup, 
 - *Physical redaction* does not reach WAL archives or base backups already written; they hold the pre-redaction tuple.
 - *Crypto-shredding* does not either. Restoring a pre-erasure Postgres backup restores the wrapped DEK, and Vault still holds the KEK that unwraps it. The erasure is reversible by anyone who can restore a backup.
 
-So for both modes: **true erasure completes when the last backup containing the data ages out.** With a 90-day backup retention window, an erasure requested today is genuinely complete in 90 days. `erasure_request.backups_clear_at` records that date, and the compliance report states it explicitly rather than claiming instantaneous deletion.
+So for both modes: **true erasure completes when the last backup containing the data ages out.** It also waits for porth to evict its plaintext copy of every SMS (§7.2, §2.5), and for porth's own backups of that copy to age out. `backups_clear_at` is the later of the two dates. With a 90-day backup retention window, an erasure requested today is genuinely complete in 90 days. `erasure_request.backups_clear_at` records that date, and the compliance report states it explicitly rather than claiming instantaneous deletion.
 
 This is a property of every point-in-time-recoverable database, not a flaw introduced here. Crypto-shredding's real advantage over physical redaction is **cost and blast radius**, not backup reach: one row versus a throttled rewrite of up to 84 partitions plus a `VACUUM` pass.
 
@@ -98,6 +100,8 @@ Consequence, and it belongs in the contract rather than in a config table: **bac
 ### 7.4 Auth payloads
 
 **Auth class stores no payload at all.** `payload_ciphertext` is NULL for OTP. The code is a live credential and must never be retained; the metadata record alone is sufficient for audit. No erasure mode needs to touch it.
+
+**porth must not keep it either (§2.5).** `sms-sender` and `otp-api` submit OTP with "do not keep the text", and porth blanks the stored text once the message is sent, failed or expired (porth POR-027). Until POR-027 ships, porth keeps every OTP's text in plaintext until its eviction window passes (POR-003). A launch on porth before then breaks this rule.
 
 ### 7.5 Retention mechanics
 

@@ -11,7 +11,9 @@ Centralizing communications creates a single point of failure. The mitigations m
 | messgr fully down | OTP unaffected (§3). Transactional and marketing queue at the producer side; producers must treat `POST /comms` failures as retryable and buffer. |
 | Postgres primary down | Ingestion fails (retryable). Dispatchers stall — which incidentally means nothing is being sent, so the urgency of a kill switch drops. UI degrades to read-only against the replica. Recovery is standard Postgres failover. |
 | Primary degraded but sending continues, and a kill switch is needed | **The awkward case.** The admin panel writes switches to the primary, so a partially-failed primary is exactly when the control is hardest to reach. Mitigations: the kill-switch write path is a single tiny transaction on its own small connection pool, so it survives conditions that starve bulk traffic; and the runbook includes the direct `psql` statement to engage a switch, tested and kept alongside the on-call notes. Do not let the only path to stopping the system be a web form. |
-| One provider down | Circuit breaker opens; that channel's queued messages back off and retry, draining when the provider recovers. Other channels unaffected. **Except OTP — see §12.1.** |
+| One provider down | That channel's queued messages back off and retry, draining when the provider recovers. Other channels unaffected. **Except OTP — see §12.1.** (Corrected: this row said "circuit breaker opens", and none was built, §9. For SMS the provider is porth, below.) |
+| One SMS operator down | porth's concern (§2.5). Messages for that operator wait in porth for its SMSC and are not rerouted (porth §4.2). Each expires at its validity instead of going out late, OTP included, and porth reports `expired` (§10). messgr sees nothing until then. |
+| A tenant's porth down | Dispatcher: the submit fails and is retried with per-message backoff while the outbox holds, as for any down provider. **OTP: `sms-sender`/`otp-api` return failure, and that tenant's customers cannot log in.** One porth per tenant keeps the blast radius to that tenant, and messgr has no mitigation of its own (§12.1). |
 | Dispatcher crash | Leader election (T-039, §9): the crashed process's session ends, Postgres releases the advisory lock, and the standby acquires it and takes over within seconds, sweeping the tenant's stale leases (§4.2's correction) immediately after acquiring leadership, before claiming again. At-least-once delivery — see below. |
 | Marketing backlog | Transactional preempts via claim-order priority, not a share-of-budget cap — that mechanism was specified and cut (§8) because it duplicated `ORDER BY priority` for a tunable nobody would tune. Auth is on a separate path entirely. |
 | One tenant's dispatcher wedges | Contained to that tenant — one process, one database, one advisory lock (§9). Standby takes over. No other tenant observes anything. |
@@ -41,6 +43,15 @@ Minimum mitigations for launch, none of which require building failover now:
 - Alerting on OTP send failure rate with a much tighter threshold than the other channels.
 
 Recommend revisiting genuine SMS failover before the OTP path carries production auth traffic (build step 17). It is the one place where "single provider" translates directly into "customers locked out of their bank".
+
+**Correction (2026-09-29, §2.5): SMS availability moved to porth, and this risk is not solved there yet.** "Genuine SMS failover" was to be messgr's (build step 16, T-051). It belongs to the gateway, and messgr cannot build it: porth accepts and queues, so messgr never sees an operator go down. Mapped onto the mitigations above:
+
+- The ordered list is moot for SMS, which has one row, the tenant's porth.
+- A cutover is now a porth config change and restart, since porth defers hot reload. That is slower than the 5-minute cutover this section wanted.
+- The manual cutover runbook is now a porth runbook. It is still required, and it still has to be exercised before go-live.
+- Alerting on OTP send failure stays messgr's, and now also covers porth being unreachable.
+
+Failover between operators is porth's to build. porth POR-020 routes by prefix but does not reroute when an SMSC is down, and a pool of binds with primary/backup selection is in porth's future work. Build step 16 is dropped from messgr. This correction also adds a second tier-0 dependency: the tenant's porth itself (§12's table).
 
 ---
 

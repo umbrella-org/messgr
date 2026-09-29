@@ -22,6 +22,7 @@ Supporting infrastructure, **per region**:
 | Postgres | primary + streaming replica | one database per tenant plus `control` (§2.1); replica serves all reads |
 | Vault | 3-node Raft cluster | one Transit mount per tenant (§7.6), KV for provider credentials, PKI for internal mTLS. Shamir unseal, no auto-unseal |
 | PgBouncer | transaction mode | mandatory for request-path services. Dispatchers bypass it entirely and connect direct (§2.3) |
+| porth | one per tenant, in the tenant's region | the SMS gateway (§2.5), holding that tenant's operator binds. Tier-0 for the tenant's OTP (§12). Its REST API is unauthenticated and without TLS (porth §2), so it must sit on a network only that tenant's messgr binaries reach |
 
 Run under systemd or Docker Compose. Kubernetes only if the operator already runs it for other workloads — do not introduce it for this system alone. Configuration via environment variables and a TOML file; **all secrets come from Vault** — none in config files, none in environment variables beyond the Vault address and AppRole RoleID.
 

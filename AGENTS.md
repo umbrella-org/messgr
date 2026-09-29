@@ -26,7 +26,8 @@ feature is built directly from a chat message or a raw idea; see "Brine" below.
 | Any schema change | §4 (data model) — 11 subsections |
 | Anything touching sending | §5 (gate chain), §6 (timing), §9 (dispatcher) |
 | Anything touching PII | §7 — read all of it before proposing a change |
-| Current state of play | "Decisions taken" (28 rows) and "Still open" (15 items), at the end |
+| Current state of play | "Decisions taken" (34 rows) and "Still open" (15 items), at the end |
+| Anything touching SMS | §2.5 — SMS goes through porth, a separate gateway; never build its features here |
 
 Every decision in the table cites the section that justifies it. Follow the citation before changing anything.
 
