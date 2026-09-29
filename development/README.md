@@ -24,6 +24,7 @@ document:
 | [`12-deployment.md`](design/12-deployment.md) | §13 Deployment |
 | [`13-build-order.md`](design/13-build-order.md) | §14 Build order |
 | [`14-decisions-and-open-questions.md`](design/14-decisions-and-open-questions.md) | Decisions taken, Still open |
+| [`15-provider-adapters.md`](design/15-provider-adapters.md) | §15 Provider adapters (a proposal) |
 
 Content and `§N` numbering are unchanged from before the split — only the file each section lives
 in changed. Existing `§N` citations across the repo (AGENTS.md's hard invariants, tickets,

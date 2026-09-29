@@ -1,6 +1,6 @@
 # messgr — Design
 
-**Version 12** · 2026-09-29 · SMS goes through porth (§2.5, decision 34): porth's REST API, one porth per tenant, and no porth functionality in messgr. Circuit breakers, operator pacing and SMS failover are cut, build step 16 is dropped, and the rate-limit gate becomes a handoff cap. §2.4, §3, §4.10, §5, §6.2, §7.2–§7.4, §9, §10, §12, §12.1, §13, §14 corrected. Previous: Version 11 · 2026-09-21 · T-049 review: §11.3 corrected — the kill-switch console's description implied the auth-affecting control was a separated, differently-styled element on the same screen; T-049 resolved still-open #9 for step 14 the other way (user-confirmed), building no auth-switch representation into the panel at all, so the prose now matches what shipped
+**Version 13** · 2026-09-29 · §15 Provider adapters added as a proposal: one adapter contract for every channel, a plan to build the SMS side against a pinned porth contract and a fake, outlines for SendGrid and Meta WhatsApp, and the decisions they need. Decision 31 and Still Open #4 point to it. Previous: Version 12 · 2026-09-29 · SMS goes through porth (§2.5, decision 34): porth's REST API, one porth per tenant, and no porth functionality in messgr. Circuit breakers, operator pacing and SMS failover are cut, build step 16 is dropped, and the rate-limit gate becomes a handoff cap. §2.4, §3, §4.10, §5, §6.2, §7.2–§7.4, §9, §10, §12, §12.1, §13, §14 corrected.
 
 Centralized communications orchestration and audit ledger for customer messaging across SMS, email, and WhatsApp.
 
@@ -35,3 +35,4 @@ navigation aid.
 | §13 Deployment | [`12-deployment.md`](development/design/12-deployment.md) |
 | §14 Build order | [`13-build-order.md`](development/design/13-build-order.md) |
 | Decisions taken, Still open | [`14-decisions-and-open-questions.md`](development/design/14-decisions-and-open-questions.md) |
+| §15 Provider adapters (proposal) | [`15-provider-adapters.md`](development/design/15-provider-adapters.md) |

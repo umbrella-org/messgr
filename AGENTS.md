@@ -28,6 +28,7 @@ feature is built directly from a chat message or a raw idea; see "Brine" below.
 | Anything touching PII | §7 — read all of it before proposing a change |
 | Current state of play | "Decisions taken" (34 rows) and "Still open" (15 items), at the end |
 | Anything touching SMS | §2.5 — SMS goes through porth, a separate gateway; never build its features here |
+| Any provider adapter or new channel | §15 — the adapter contract every channel meets (a proposal) |
 
 Every decision in the table cites the section that justifies it. Follow the citation before changing anything.
 
